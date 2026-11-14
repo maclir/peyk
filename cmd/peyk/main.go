@@ -24,6 +24,9 @@ const usage = `usage: peyk <command>
   ping           tell a running agent that something changed (for hooks)
   owner <email>  admit this Google account to peyk after its first sign-in
   import-tasks   add tasks from a JSON array on stdin: [{"project","text","created_at"}]
+  pair <label>   trust a new passkey for signing commands
+  unpair <label> stop trusting a passkey
+  keys           list trusted passkeys
 `
 
 func main() {
@@ -53,6 +56,18 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "ping":
 		agent.Ping(socketPath())
 		return nil
+	case "pair":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: peyk pair <label>")
+		}
+		return pair(ctx, args[1], os.Stdin, out)
+	case "unpair":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: peyk unpair <label>")
+		}
+		return keyring().Remove(args[1])
+	case "keys":
+		return listKeys(out)
 	case "import-tasks":
 		return importTasks(ctx, os.Stdin, out)
 	case "owner":

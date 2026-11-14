@@ -11,6 +11,12 @@ The phone app is the Cloud Run service. Sign in with Google once, then admit tha
 
     make owner EMAIL=you@example.com
 
+To send tasks, replies, stops and pushes from the phone, pair its passkey once:
+
+    make pair LABEL=pixel      # open the printed link on the phone, compare fingerprints
+    make keys                  # list paired passkeys
+    make unpair LABEL=pixel
+
 ## How it works
 
 `docs/architecture.md` describes the laptop agent, the phone app and the Firestore rules between them. `docs/gcp.md` covers the cloud setup.

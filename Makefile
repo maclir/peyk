@@ -57,7 +57,7 @@ export TEST_PORT
 
 .PHONY: help run build vendor status icons clean tidy verify test test-unit test-js test-integration test-rules \
 	test-e2e test-e2e-ui test-server docker-build gcp-bootstrap deploy deploy-rules \
-	smoke new gcp-guard adc-guard domain serve owner
+	smoke new gcp-guard adc-guard domain serve owner pair unpair keys
 
 help:
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "%-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -97,6 +97,17 @@ serve: ## Publish session state for the phone until Ctrl-C (run in the relayServ
 	@mkdir -p bin
 	@go build -trimpath -o bin/peyk ./cmd/peyk
 	@bin/peyk agent
+
+pair: ## Trust this device's passkey for signing commands: make pair LABEL=pixel
+	@test -n "$(LABEL)" || { echo "LABEL is required"; exit 1; }
+	@go run ./cmd/peyk pair $(LABEL)
+
+unpair: ## Stop trusting a passkey: make unpair LABEL=pixel
+	@test -n "$(LABEL)" || { echo "LABEL is required"; exit 1; }
+	@go run ./cmd/peyk unpair $(LABEL)
+
+keys: ## List trusted passkeys.
+	@go run ./cmd/peyk keys
 
 owner: gcp-guard ## Admit a Google account after its first sign-in: make owner EMAIL=you@example.com
 	@test -n "$(EMAIL)" || { echo "EMAIL is required"; exit 1; }

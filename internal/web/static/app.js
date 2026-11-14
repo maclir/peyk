@@ -1,5 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
 import { STATES, ago, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
+import * as passkey from "./passkey.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
 // with no signal at all.
@@ -43,7 +44,7 @@ async function start(cfg) {
   const a = auth.getAuth(fb);
   const db = fs.getFirestore(fb);
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "" };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -121,6 +122,10 @@ async function start(cfg) {
   function render() {
     if (!state.user) return;
     renderLaptop();
+    // Snapshots re-render the whole view; keep what is being typed.
+    const drafts = new Map([...app.querySelectorAll("textarea")].map((t) => [t.id, t.value]));
+    const focused = document.activeElement && document.activeElement.tagName === "TEXTAREA" ? document.activeElement.id : null;
+
     const id = location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
     const s = id && state.sessions.get(id);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
@@ -128,19 +133,78 @@ async function start(cfg) {
       h("a", { href: "#", class: view === "board" ? "on" : "" }, "Sessions"),
       h("a", { href: "#inbox", class: view === "inbox" ? "on" : "" }, `Inbox${queuedCount() ? ` · ${queuedCount()}` : ""}`),
     );
-    const focused = document.activeElement && document.activeElement.id === "task-text";
-    const draft = document.getElementById("task-text")?.value ?? "";
-    if (s) app.replaceChildren(tabs, detail(s));
-    else if (view === "inbox") app.replaceChildren(tabs, inbox(draft));
-    else app.replaceChildren(tabs, board());
-    if (focused) document.getElementById("task-text")?.focus();
+    const status = h("p", { class: "status", id: "status", role: "status" }, state.status);
+    if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
+    else if (s) app.replaceChildren(tabs, status, detail(s));
+    else if (view === "inbox") app.replaceChildren(tabs, status, inbox());
+    else app.replaceChildren(tabs, status, board());
+
+    for (const t of app.querySelectorAll("textarea")) if (drafts.has(t.id)) t.value = drafts.get(t.id);
+    if (focused) document.getElementById(focused)?.focus();
+  }
+
+  function setStatus(text) {
+    state.status = text;
+    const el = document.getElementById("status");
+    if (el) el.textContent = text;
+  }
+
+  // sendCommand signs the payload with the paired passkey (push needs none),
+  // stores it, and reports what the laptop made of it.
+  async function sendCommand(type, fields, label) {
+    if (!laptopOnline(state.laptop, Date.now())) {
+      setStatus(`${label}: the laptop is offline, so nothing was sent.`);
+      return false;
+    }
+    const ref = fs.doc(fs.collection(db, "commands"));
+    const payload = JSON.stringify({ id: ref.id, type, ...fields, expires: Date.now() + 60_000 });
+    const data = { type, payload, status: "pending", created_at: fs.serverTimestamp() };
+    try {
+      if (type !== "push") data.assertion = await passkey.sign(payload);
+      await fs.setDoc(ref, data);
+    } catch (err) {
+      setStatus(err.name === "NotAllowedError"
+        ? `${label}: not sent. The passkey prompt was cancelled, or this device has no paired passkey (run make pair on the laptop).`
+        : `${label}: not sent. ${err.message}`);
+      return false;
+    }
+    setStatus(`${label}: waiting for the laptop…`);
+    const unsub = fs.onSnapshot(ref, (snap) => {
+      const c = snap.data();
+      if (!c || c.status === "pending") return;
+      unsub();
+      setStatus(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
+    }, (err) => setStatus(`${label}: cannot follow the result: ${err.message}`));
+    return true;
+  }
+
+  function pairView(code) {
+    const out = h("p", { class: "hint" });
+    const button = h("button", { class: "primary", type: "button" }, "Create passkey");
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const key = await passkey.createPasskey(state.user);
+        await fs.setDoc(fs.doc(db, "pairings", code), { ...key, created_at: fs.serverTimestamp() });
+        out.replaceChildren("The laptop should now show this fingerprint. Confirm there only if it matches:",
+          h("strong", { class: "fp" }, await passkey.fingerprint(key.public_key)));
+      } catch (err) {
+        button.disabled = false;
+        out.textContent = `Pairing failed: ${err.message}`;
+      }
+    });
+    return h("article", { class: "detail" },
+      h("a", { class: "back", href: "#" }, "← Sessions"),
+      h("h2", {}, "Pair this device"),
+      h("p", {}, "Commands to the laptop are signed with a passkey on this device. Create one, then confirm its fingerprint on the laptop."),
+      button, out);
   }
 
   function queuedCount() {
     return state.tasks.filter((t) => t.status === "queued").length;
   }
 
-  function inbox(draft) {
+  function inbox() {
     const projects = sortProjects(state.projects);
     if (!state.picked || !projects.some((p) => p.name === state.picked)) state.picked = projects[0]?.name ?? null;
     const counts = new Map();
@@ -160,7 +224,6 @@ async function start(cfg) {
       ),
     );
     const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? `Task for ${state.picked}…` : "No projects published yet", "aria-label": "New task" });
-    text.value = draft;
     const add = async (e) => {
       e.preventDefault();
       const value = text.value.trim();
@@ -183,6 +246,7 @@ async function start(cfg) {
           h("div", { class: "ttext" }, t.text),
           why ? h("div", { class: "meta" }, why) : null,
         ),
+        why ? null : h("button", { type: "button", class: "primary", onclick: () => sendCommand("dispatch", { project: t.project, task: t.id, text: t.text }, `Send to ${t.project}`) }, "Send"),
         h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => fs.deleteDoc(fs.doc(db, "tasks", t.id)).catch((err) => alertLine(`Could not delete: ${err.message}`)) }, "×"),
       );
     return h("div", { class: "inbox" },
@@ -247,6 +311,24 @@ async function start(cfg) {
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       h("h3", {}, "Last reply", s.message ? h("span", { class: "when" }, ` · ${ago(s.message.at, now)}`) : null),
       msg,
+      actions(s),
+    );
+  }
+
+  function actions(s) {
+    const text = h("textarea", { id: `reply-${s.id}`, rows: "3", placeholder: "Reply to the agent…", "aria-label": "Reply" });
+    const reply = async () => {
+      const v = text.value.trim();
+      if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`))) text.value = "";
+    };
+    const g = s.git;
+    return h("div", { class: "actions" },
+      text,
+      h("div", { class: "btnrow" },
+        h("button", { type: "button", class: "primary", onclick: reply }, "Send reply"),
+        g && g.unpushed > 0 ? h("button", { type: "button", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`) }, `Push ${g.unpushed}`) : null,
+        s.aoe_status !== "stopped" ? h("button", { type: "button", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`) }, "Stop") : null,
+      ),
     );
   }
 }

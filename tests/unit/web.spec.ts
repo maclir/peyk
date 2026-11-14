@@ -97,3 +97,18 @@ describe('inbox', () => {
     expect(waiting.map((t: any) => `${t.text}:${t.why}`)).toEqual(['h:working', 'g:project no longer exists']);
   });
 });
+
+describe('passkey helpers', () => {
+  it('fingerprints a key the way the laptop does', async () => {
+    // @ts-expect-error plain browser module
+    const { fingerprint } = await import('../../internal/web/static/passkey.js');
+    // SHA-256("abc") starts ba7816bf8f01; the laptop's Fingerprint gives "ba78 16bf 8f01".
+    expect(await fingerprint(btoa('abc'))).toBe('ba78 16bf 8f01');
+  });
+
+  it('encodes base64url without padding', async () => {
+    // @ts-expect-error plain browser module
+    const { b64url } = await import('../../internal/web/static/passkey.js');
+    expect(b64url(new Uint8Array([251, 255, 0]).buffer)).toBe('-_8A');
+  });
+});

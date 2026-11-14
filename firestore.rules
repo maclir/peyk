@@ -41,6 +41,34 @@ service cloud.firestore {
       allow delete: if isOwner() && resource.data.status == 'queued';
     }
 
+    // The laptop checks every command's passkey signature against keys it
+    // holds locally; these rules only keep the documents well-formed and
+    // write-once, so a signed payload cannot be replayed into a reused id.
+    match /commands/{id} {
+      allow read: if isOwner();
+      allow create: if isOwner()
+        && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'status', 'created_at'])
+        && request.resource.data.type in ['dispatch', 'reply', 'stop', 'push']
+        && boundedString(request.resource.data.payload, 30000)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.created_at == request.time
+        && (!('assertion' in request.resource.data)
+          || (request.resource.data.assertion is map
+            && request.resource.data.assertion.keys().hasOnly(['credential_id', 'authenticator_data', 'client_data_json', 'signature'])));
+    }
+
+    // A new passkey's public half, under the one-time code `peyk pair`
+    // printed. The laptop shows its fingerprint and asks before trusting it.
+    match /pairings/{code} {
+      allow create: if isOwner()
+        && code.size() >= 20 && code.size() <= 64
+        && request.resource.data.keys().hasOnly(['credential_id', 'public_key', 'alg', 'created_at'])
+        && boundedString(request.resource.data.credential_id, 1024)
+        && boundedString(request.resource.data.public_key, 4096)
+        && request.resource.data.alg is int
+        && request.resource.data.created_at == request.time;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

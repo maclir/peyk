@@ -118,7 +118,7 @@ func TestRunCoalescesPingsAndSaysGoodbye(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pings := make(chan struct{}, 1)
 	done := make(chan error)
-	go func() { done <- a.Run(ctx, pings) }()
+	go func() { done <- a.Run(ctx, pings, nil) }()
 
 	waitFor(t, func() bool { return mem.Laptop().Online })
 	if c.count() != 1 {
@@ -148,7 +148,7 @@ func TestRunStopsOnAFailedRefreshAndGoesOffline(t *testing.T) {
 	a := newAgent(c, mem)
 	pings := make(chan struct{}, 1)
 	done := make(chan error)
-	go func() { done <- a.Run(context.Background(), pings) }()
+	go func() { done <- a.Run(context.Background(), pings, nil) }()
 	waitFor(t, func() bool { return mem.Laptop().Online })
 
 	c.fail(errors.New("aoe list: exit status 1"))
@@ -169,7 +169,7 @@ func TestRunStopsOnAFailedRefreshAndGoesOffline(t *testing.T) {
 func TestRunFailsAtStartWithoutGoingOnline(t *testing.T) {
 	mem := store.NewMemory()
 	c := &fakeCollector{err: errors.New("broken")}
-	if err := newAgent(c, mem).Run(context.Background(), nil); err == nil {
+	if err := newAgent(c, mem).Run(context.Background(), nil, nil); err == nil {
 		t.Fatal("want error")
 	}
 	if mem.Laptop().Online {

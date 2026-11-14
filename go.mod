@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.25.0
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/mdp/qrterminal/v3 v3.2.1
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.287.1
 )
@@ -32,6 +33,7 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
@@ -39,4 +41,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )

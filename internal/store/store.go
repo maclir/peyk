@@ -7,18 +7,38 @@
 //	projects/{name}            session.Project      agent writes
 //	laptop/status              Laptop               agent writes
 //	tasks/{id}                 Task                 phone creates, agent updates
+//	commands/{id}              command.Command      phone creates, agent updates
+//	pairings/{code}            Pairing              phone creates, agent deletes
 package store
 
 import (
 	"context"
 	"time"
+
+	"github.com/maclir/peyk/internal/command"
 )
 
 const (
 	Sessions = "sessions"
 	Projects = "projects"
 	Tasks    = "tasks"
+	Commands = "commands"
+	Pairings = "pairings"
 )
+
+// Pairing is the public half of a passkey the phone just created.
+type Pairing struct {
+	CredentialID string    `firestore:"credential_id"`
+	PublicKey    string    `firestore:"public_key"`
+	Alg          int       `firestore:"alg"`
+	CreatedAt    time.Time `firestore:"created_at"`
+}
+
+// Incoming is a pending command as it arrives.
+type Incoming struct {
+	ID      string
+	Command command.Command
+}
 
 // Laptop says whether the agent is running. SeenAt lets the phone tell a
 // stopped agent from one on a laptop that went to sleep without saying so.
@@ -44,8 +64,18 @@ const (
 
 type Store interface {
 	Put(ctx context.Context, collection, id string, v any) error
+	Update(ctx context.Context, collection, id string, fields map[string]any) error
 	Delete(ctx context.Context, collection, id string) error
 	IDs(ctx context.Context, collection string) ([]string, error)
 	SetLaptop(context.Context, Laptop) error
 	Close() error
+}
+
+// Listener delivers what the phone leaves for the laptop.
+type Listener interface {
+	// Commands sends every pending command, including ones already waiting,
+	// until ctx ends or listening fails.
+	Commands(ctx context.Context, out chan<- Incoming) error
+	// Pairing waits for the phone to write the pairing with this code.
+	Pairing(ctx context.Context, code string) (Pairing, error)
 }

@@ -105,3 +105,57 @@ describe('tasks', () => {
     await assertFails(setDoc(doc(owner(), 'projects/new'), { name: 'new' }));
   });
 });
+
+describe('commands', () => {
+  const cmd = (over: Record<string, unknown> = {}) => ({
+    type: 'reply', payload: '{"id":"c1"}', status: 'pending', created_at: serverTimestamp(),
+    assertion: { credential_id: 'a', authenticator_data: 'b', client_data_json: 'c', signature: 'd' },
+    ...over,
+  });
+
+  it('the owner creates pending commands and reads them', async () => {
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c1'), cmd()));
+    const { assertion, ...push } = cmd({ type: 'push' });
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c2'), push));
+    await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));
+  });
+
+  it('commands are write-once', async () => {
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c1'), cmd()));
+    await assertFails(setDoc(doc(owner(), 'commands/c1'), cmd()));
+    await assertFails(updateDoc(doc(owner(), 'commands/c1'), { status: 'done' }));
+    await assertFails(deleteDoc(doc(owner(), 'commands/c1')));
+  });
+
+  it('rejects malformed commands', async () => {
+    await assertFails(setDoc(doc(owner(), 'commands/x1'), cmd({ type: 'shell' })));
+    await assertFails(setDoc(doc(owner(), 'commands/x2'), cmd({ status: 'done' })));
+    await assertFails(setDoc(doc(owner(), 'commands/x3'), cmd({ extra: 1 })));
+    await assertFails(setDoc(doc(owner(), 'commands/x4'), cmd({ payload: '' })));
+    await assertFails(setDoc(doc(owner(), 'commands/x5'), cmd({ assertion: { other: 1 } })));
+  });
+
+  it('nobody else creates or reads commands', async () => {
+    await assertFails(setDoc(doc(stranger(), 'commands/c1'), cmd()));
+    await assertFails(setDoc(doc(anonymous(), 'commands/c1'), cmd()));
+  });
+});
+
+describe('pairings', () => {
+  const code = 'abcdefghijklmnopqrstuvwx';
+  const pairing = (over: Record<string, unknown> = {}) => ({
+    credential_id: 'cred', public_key: 'pk', alg: -7, created_at: serverTimestamp(), ...over,
+  });
+
+  it('the owner writes a pairing under a long code but cannot read it back', async () => {
+    await assertSucceeds(setDoc(doc(owner(), `pairings/${code}`), pairing()));
+    await assertFails(getDoc(doc(owner(), `pairings/${code}`)));
+    await assertFails(setDoc(doc(owner(), `pairings/${code}`), pairing()));
+  });
+
+  it('rejects short codes, extra fields, and strangers', async () => {
+    await assertFails(setDoc(doc(owner(), 'pairings/short'), pairing()));
+    await assertFails(setDoc(doc(owner(), `pairings/${code}x`), pairing({ label: 'x' })));
+    await assertFails(setDoc(doc(stranger(), `pairings/${code}y`), pairing()));
+  });
+});

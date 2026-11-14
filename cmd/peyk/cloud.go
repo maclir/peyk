@@ -55,6 +55,10 @@ func openStore(ctx context.Context) (*store.Firestore, string, error) {
 }
 
 func runAgent(ctx context.Context) error {
+	o, err := origin()
+	if err != nil {
+		return err
+	}
 	fs, p, err := openStore(ctx)
 	if err != nil {
 		return err
@@ -73,25 +77,40 @@ func runAgent(ctx context.Context) error {
 	defer cancel()
 	pings := make(chan struct{}, 1)
 	go agent.Serve(ctx, ln, pings)
-	watchErr := make(chan error, 1)
-	go func() {
-		err := watcher.Forward(ctx, pings)
-		watchErr <- err
-		if err != nil {
-			cancel()
-		}
-	}()
+	// Either background listener failing ends the agent; it says which.
+	bgErr := make(chan error, 2)
+	background := func(f func() error) {
+		go func() {
+			err := f()
+			bgErr <- err
+			if err != nil {
+				cancel()
+			}
+		}()
+	}
+	background(func() error { return watcher.Forward(ctx, pings) })
+	cmds := make(chan store.Incoming)
+	background(func() error { return fs.Commands(ctx, cmds) })
 
 	logger := log.New(os.Stderr, "peyk: ", log.LstdFlags)
 	logger.Printf("publishing to %s; Ctrl-C to go offline", p)
+	c := collector()
 	a := &agent.Agent{
-		Collect: collector(), Store: fs, Watch: watcher, Now: time.Now, Log: logger,
+		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
+		Commands: &agent.Commands{
+			Act:    actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal")},
+			Keys:   keyring().Load,
+			Origin: o.String(),
+			RPID:   o.Hostname(),
+		},
 	}
-	err = a.Run(ctx, pings)
+	err = a.Run(ctx, pings, cmds)
 	cancel()
-	if werr := <-watchErr; err == nil {
-		err = werr
+	for i := 0; i < 2; i++ {
+		if bg := <-bgErr; err == nil {
+			err = bg
+		}
 	}
 	logger.Print("offline")
 	return err

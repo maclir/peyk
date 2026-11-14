@@ -37,7 +37,13 @@ type Agent struct {
 	Presence time.Duration
 	Log      *log.Logger
 
+	// Commands, when set, lets the phone make the laptop act.
+	Commands *Commands
+
 	published map[string]map[string]string
+	// The last published state, which commands act on.
+	sessions map[string]session.Snapshot
+	projects map[string]session.Project
 }
 
 // Refresh collects every session and project and writes only the documents
@@ -61,12 +67,16 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		}
 	}
 	sessions := map[string]any{}
+	a.sessions = map[string]session.Snapshot{}
 	for _, s := range snaps {
 		sessions[s.ID] = s
+		a.sessions[s.ID] = s
 	}
 	projects := map[string]any{}
+	a.projects = map[string]session.Project{}
 	for _, p := range session.Projects(snaps, repos) {
 		projects[ProjectID(p.Name)] = p
+		a.projects[p.Name] = p
 	}
 	if err := a.sync(ctx, store.Sessions, sessions); err != nil {
 		return err
@@ -130,7 +140,7 @@ func contentKey(v any) string {
 
 // Run publishes until ctx ends or something fails. Either way it marks the
 // laptop offline before returning, so the phone never shows stale state as live.
-func (a *Agent) Run(ctx context.Context, pings <-chan struct{}) (err error) {
+func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan store.Incoming) (err error) {
 	defer func() {
 		// ctx may be cancelled; the goodbye needs a context of its own.
 		bye, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -159,6 +169,13 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}) (err error) {
 		case <-debounce:
 			debounce = nil
 			if err := a.Refresh(ctx); err != nil {
+				return err
+			}
+		case in := <-cmds:
+			if a.Commands == nil {
+				continue
+			}
+			if err := a.execute(ctx, in); err != nil {
 				return err
 			}
 		case <-presence.C:

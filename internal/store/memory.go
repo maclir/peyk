@@ -8,13 +8,74 @@ import (
 
 // Memory is the store for tests and local runs.
 type Memory struct {
-	mu     sync.Mutex
-	docs   map[string]map[string]any
-	laptop Laptop
-	writes int
+	mu       sync.Mutex
+	docs     map[string]map[string]any
+	updates  map[string]map[string]map[string]any
+	laptop   Laptop
+	writes   int
+	commands chan Incoming
+	pairings chan Pairing
 }
 
-func NewMemory() *Memory { return &Memory{docs: map[string]map[string]any{}} }
+func NewMemory() *Memory {
+	return &Memory{
+		docs: map[string]map[string]any{}, updates: map[string]map[string]map[string]any{},
+		commands: make(chan Incoming, 16), pairings: make(chan Pairing, 1),
+	}
+}
+
+func (m *Memory) Update(_ context.Context, collection, id string, fields map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.updates[collection] == nil {
+		m.updates[collection] = map[string]map[string]any{}
+	}
+	if m.updates[collection][id] == nil {
+		m.updates[collection][id] = map[string]any{}
+	}
+	for k, v := range fields {
+		m.updates[collection][id][k] = v
+	}
+	m.writes++
+	return nil
+}
+
+// Updated returns the fields Update set on a document.
+func (m *Memory) Updated(collection, id string) map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updates[collection][id]
+}
+
+// Send queues a command as if the phone had written it.
+func (m *Memory) Send(in Incoming) { m.commands <- in }
+
+// Pair answers a waiting Pairing call as if the phone had written it.
+func (m *Memory) Pair(p Pairing) { m.pairings <- p }
+
+func (m *Memory) Commands(ctx context.Context, out chan<- Incoming) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case in := <-m.commands:
+			select {
+			case out <- in:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}
+}
+
+func (m *Memory) Pairing(ctx context.Context, _ string) (Pairing, error) {
+	select {
+	case p := <-m.pairings:
+		return p, nil
+	case <-ctx.Done():
+		return Pairing{}, ctx.Err()
+	}
+}
 
 func (m *Memory) Put(_ context.Context, collection, id string, v any) error {
 	m.mu.Lock()
