@@ -33,6 +33,7 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 0.72rem var(--mono); color: var(--muted); }
 .chip { font: 600 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 .chip.run { background: var(--run-soft); color: var(--run); }
 .chip.idle { background: var(--line); color: var(--muted); }
@@ -43,6 +44,9 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .detail dt { color: var(--muted); }
 .detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .detail h3 { font-size: 0.95rem; margin: 16px 0 8px; }
+.pending { list-style: none; padding: 0; margin: 0 0 16px; font: 0.8rem var(--mono); }
+.pending li { overflow-wrap: anywhere; padding: 2px 0; }
+.pending .when { margin-left: 6px; }
 .when { color: var(--muted); font-weight: 400; }
 .reply { border-left: 3px solid var(--line); padding-left: 12px; overflow-wrap: anywhere; }
 .reply pre { overflow-x: auto; background: var(--paper); padding: 10px; border-radius: 8px; font-size: 0.82rem; }

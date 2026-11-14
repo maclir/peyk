@@ -77,6 +77,9 @@ func TestRepoStateCountsUnpushedAndDirty(t *testing.T) {
 	if g.Unpushed != 2 || g.Dirty != 1 {
 		t.Fatalf("want 2 unpushed and 1 dirty, got %+v", g)
 	}
+	if len(g.Pending) != 2 || g.Pending[0].Subject != "Third" || g.Pending[1].Subject != "Second" || g.Pending[0].Hash != g.Last.Hash {
+		t.Fatalf("pending commits, newest first: %+v", g.Pending)
+	}
 	if g.Last == nil || g.Last.Subject != "Third" || len(g.Last.Hash) < 7 || g.Last.At.IsZero() {
 		t.Fatalf("last commit: %+v", g.Last)
 	}
@@ -87,7 +90,7 @@ func TestRepoStateCountsUnpushedAndDirty(t *testing.T) {
 	if err := Push(ctx, Exec, dir); err != nil {
 		t.Fatal(err)
 	}
-	if g = RepoState(ctx, Exec, dir); g.Unpushed != 0 {
+	if g = RepoState(ctx, Exec, dir); g.Unpushed != 0 || g.Pending != nil {
 		t.Fatalf("after Push: %+v", g)
 	}
 }
@@ -96,7 +99,7 @@ func TestRepoStateWithoutUpstreamCountsCommitsNoRemoteHas(t *testing.T) {
 	dir := gitRepo(t)
 	commit(t, dir, "a.txt", "Only")
 	g := RepoState(context.Background(), Exec, dir)
-	if g.Upstream != "" || g.Unpushed != 1 {
+	if g.Upstream != "" || g.Unpushed != 1 || len(g.Pending) != 1 || g.Pending[0].Subject != "Only" {
 		t.Fatalf("want 1 unpushed and no upstream, got %+v", g)
 	}
 }

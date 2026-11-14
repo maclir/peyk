@@ -52,12 +52,14 @@ func TestProjectsFromSessionsAndRepositories(t *testing.T) {
 		{ID: "k", Title: "knip", Path: "/c/knip", State: Unpushed, Git: &Git{Unpushed: 2, Last: &Commit{At: at}}},
 		{ID: "m", Title: "maclir.net", Path: "/c/maclir", State: Idle, Message: &Message{At: at.Add(time.Hour)}},
 		{ID: "w", Title: "hamta", Path: "/c/hamta", State: Working},
+		{ID: "d", Title: "dorna", Path: "/c/dorna", State: Dirty, Git: &Git{Dirty: 1}},
 	}
 	got := Projects(snaps, []string{"/c/knip", "/c/maclir", "/c/sakku"})
 	want := []Project{
-		{Name: "knip", Path: "/c/knip", SessionID: "k", Busy: "2 unpushed commits", Active: at},
+		{Name: "knip", Path: "/c/knip", SessionID: "k", Free: true, Active: at},
 		{Name: "maclir.net", Path: "/c/maclir", SessionID: "m", Free: true, Active: at.Add(time.Hour)},
 		{Name: "hamta", Path: "/c/hamta", SessionID: "w", Busy: "working"},
+		{Name: "dorna", Path: "/c/dorna", SessionID: "d", Busy: "uncommitted changes"},
 		{Name: "sakku", Path: "/c/sakku", Free: true},
 	}
 	if len(got) != len(want) {

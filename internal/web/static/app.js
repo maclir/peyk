@@ -419,6 +419,7 @@ async function start(cfg) {
       h("a", { class: "back", href: "#" }, "← Sessions"),
       h("h2", {}, s.title),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      g && g.pending && g.pending.length ? pending(g, now) : null,
       h("h3", {}, "Last reply", s.message ? h("span", { class: "when" }, ` · ${ago(s.message.at, now)}`) : null),
       msg,
       actions(s),
@@ -441,6 +442,17 @@ async function start(cfg) {
       ),
     );
   }
+}
+
+function pending(g, now) {
+  const more = g.unpushed - g.pending.length;
+  return [
+    h("h3", {}, `Unpushed commits · ${g.unpushed}`),
+    h("ul", { class: "pending" },
+      g.pending.map((c) => h("li", {}, h("code", {}, c.hash), ` ${c.subject}`, h("span", { class: "when" }, ago(c.at, now)))),
+      more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
+    ),
+  ];
 }
 
 function chip(st) {

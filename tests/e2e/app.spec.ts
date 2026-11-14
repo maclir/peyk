@@ -73,7 +73,10 @@ async function seed(page: Page) {
   await put(page, 'laptop/status', { online: true, seen_at: now });
   await put(page, 'sessions/k', {
     id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'unpushed', updated_at: now,
-    git: { branch: 'main', upstream: 'origin/main', unpushed: 2, dirty: 0, last: { hash: '3f2a1c4', subject: 'Report unused exports', at: minutesAgo(12) } },
+    git: {
+      branch: 'main', upstream: 'origin/main', unpushed: 2, dirty: 0, last: { hash: '3f2a1c4', subject: 'Report unused exports', at: minutesAgo(12) },
+      pending: [{ hash: '3f2a1c4', subject: 'Report unused exports', at: minutesAgo(12) }, { hash: '9b0e7d2', subject: 'Scan barrel files', at: minutesAgo(40) }],
+    },
     message: { text: '## Done\n\nCommitted **3f2a1c4**.\n\n- `make test` passes', at: minutesAgo(12) },
   });
   await put(page, 'sessions/h', {
@@ -122,6 +125,8 @@ test.describe('signed in', () => {
     await expect(knip.getByText('2 unpushed')).toBeVisible();
 
     await knip.click();
+    await expect(page.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
+    await expect(page.locator('.pending li')).toHaveText([/3f2a1c4 Report unused exports/, /9b0e7d2 Scan barrel files/]);
     await expect(page.getByRole('heading', { name: 'Done' })).toBeVisible();
     await expect(page.locator('.reply strong')).toHaveText('3f2a1c4');
     await expect(page.locator('.reply code')).toHaveText('make test');

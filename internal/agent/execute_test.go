@@ -89,6 +89,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 		session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle},
 		session.Snapshot{ID: "h", Title: "hamta", Path: "/c/hamta", State: session.Working},
 		session.Snapshot{ID: "z", Title: "zynk", Path: "/c/zynk", State: session.Unpushed, Git: &session.Git{Unpushed: 1}},
+		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
 	)
 	mem := store.NewMemory()
 	acts := &fakeActions{}
@@ -111,7 +112,8 @@ func TestExecuteCommands(t *testing.T) {
 		{"dispatch to a free session", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json"}, "send k: Add --json", ""},
 		{"dispatch to a repository without a session", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login"}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
 		{"dispatch to a busy session", command.Payload{Type: command.Dispatch, Project: "hamta", Task: "t1", Text: "x"}, "", "hamta is not free: working"},
-		{"dispatch to a session with unpushed work", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x"}, "", "1 unpushed commit"},
+		{"dispatch to a session with only unpushed commits", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x"}, "send z: x", ""},
+		{"dispatch to a session with uncommitted changes", command.Payload{Type: command.Dispatch, Project: "dorna", Task: "t1", Text: "x"}, "", "dorna is not free: uncommitted changes"},
 		{"dispatch to an unknown project", command.Payload{Type: command.Dispatch, Project: "nope", Task: "t1", Text: "x"}, "", "no project named nope"},
 		{"reply to a working session", command.Payload{Type: command.Reply, Session: "h", Text: "Only the current filter"}, "send h: Only the current filter", ""},
 		{"stop", command.Payload{Type: command.Stop, Session: "h"}, "stop h", ""},

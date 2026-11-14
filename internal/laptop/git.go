@@ -24,26 +24,45 @@ func RepoState(ctx context.Context, run Runner, dir string) *session.Git {
 	if status, err := git("status", "--porcelain"); err == nil && status != "" {
 		g.Dirty = len(strings.Split(status, "\n"))
 	}
-	if last, err := git("log", "-1", "--format=%h%x00%s%x00%cI"); err == nil && last != "" {
-		parts := strings.SplitN(last, "\x00", 3)
-		if len(parts) == 3 {
-			at, _ := time.Parse(time.RFC3339, parts[2])
-			g.Last = &session.Commit{Hash: parts[0], Subject: parts[1], At: at}
+	if last, err := git("log", "-1", "--format="+commitFormat); err == nil {
+		if c, ok := parseCommit(last); ok {
+			g.Last = &c
 		}
 	}
+	// A branch with commits and nowhere to push them is unpushed work, not a
+	// clean state: count what a first push would send.
+	unpushed := []string{"HEAD", "--not", "--remotes"}
 	if upstream, err := git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
 		g.Upstream = upstream
-		if n, err := git("rev-list", "--count", "@{u}..HEAD"); err == nil {
-			g.Unpushed, _ = strconv.Atoi(n)
-		}
-	} else if g.Last != nil {
-		// A branch with commits and nowhere to push them is unpushed work, not
-		// a clean state: count what a first push would send.
-		if n, err := git("rev-list", "--count", "HEAD", "--not", "--remotes"); err == nil {
-			g.Unpushed, _ = strconv.Atoi(n)
+		unpushed = []string{"@{u}..HEAD"}
+	} else if g.Last == nil {
+		return g
+	}
+	if n, err := git(append([]string{"rev-list", "--count"}, unpushed...)...); err == nil {
+		g.Unpushed, _ = strconv.Atoi(n)
+	}
+	if g.Unpushed > 0 {
+		args := append([]string{"log", "-n", strconv.Itoa(session.MaxPending), "--format=" + commitFormat}, unpushed...)
+		if out, err := git(args...); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if c, ok := parseCommit(line); ok {
+					g.Pending = append(g.Pending, c)
+				}
+			}
 		}
 	}
 	return g
+}
+
+const commitFormat = "%h%x00%s%x00%cI"
+
+func parseCommit(line string) (session.Commit, bool) {
+	parts := strings.SplitN(line, "\x00", 3)
+	if len(parts) != 3 {
+		return session.Commit{}, false
+	}
+	at, _ := time.Parse(time.RFC3339, parts[2])
+	return session.Commit{Hash: parts[0], Subject: parts[1], At: at}, true
 }
 
 // Push pushes the checked-out branch to its upstream, or to origin under the

@@ -4,7 +4,7 @@ export const STATES = {
   needs_input: { label: "needs input", tone: "bad", group: "Needs you" },
   error: { label: "error", tone: "bad", group: "Needs you" },
   dirty: { label: "uncommitted", tone: "bad", group: "Needs you" },
-  unpushed: { label: "unpushed", tone: "warn", group: "Ready to push" },
+  unpushed: { label: "unpushed", tone: "ok", group: "Ready to push" },
   working: { label: "working", tone: "run", group: "Working" },
   idle: { label: "idle", tone: "idle", group: "Idle" },
   stopped: { label: "stopped", tone: "idle", group: "Stopped" },

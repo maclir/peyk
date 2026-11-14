@@ -4,7 +4,6 @@ package session
 
 import (
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -42,11 +41,17 @@ type Commit struct {
 type Git struct {
 	Branch string `firestore:"branch" json:"branch"`
 	// Upstream is empty when the branch tracks no remote branch.
-	Upstream string  `firestore:"upstream" json:"upstream"`
-	Unpushed int     `firestore:"unpushed" json:"unpushed"`
-	Dirty    int     `firestore:"dirty" json:"dirty"`
-	Last     *Commit `firestore:"last" json:"last,omitempty"`
+	Upstream string `firestore:"upstream" json:"upstream"`
+	Unpushed int    `firestore:"unpushed" json:"unpushed"`
+	// Pending lists the newest unpushed commits, at most MaxPending of them.
+	Pending []Commit `firestore:"pending" json:"pending,omitempty"`
+	Dirty   int      `firestore:"dirty" json:"dirty"`
+	Last    *Commit  `firestore:"last" json:"last,omitempty"`
 }
+
+// MaxPending bounds the unpushed commits a snapshot carries, so a branch far
+// ahead of its remote cannot grow the session document without limit.
+const MaxPending = 20
 
 // Message is the agent's latest reply, kept as the Markdown it wrote.
 type Message struct {
@@ -98,8 +103,9 @@ type Project struct {
 	Name      string `firestore:"name" json:"name"`
 	Path      string `firestore:"path" json:"path"`
 	SessionID string `firestore:"session_id" json:"session_id"`
-	// Free is false while the project's session is busy or has work you have
-	// not dealt with; a task sent then would land on top of it.
+	// Free is false while the project's session is busy or has uncommitted
+	// work; a task sent then would land on top of it. Unpushed commits do not
+	// block a task, because pushing is batched with later work.
 	Free bool `firestore:"free" json:"free"`
 	// Busy says why a project is not free, in words the phone shows.
 	Busy string `firestore:"busy" json:"busy"`
@@ -124,8 +130,6 @@ func Projects(snaps []Snapshot, repoDirs []string) []Project {
 			p.Free, p.Busy = false, "working"
 		case Dirty:
 			p.Free, p.Busy = false, "uncommitted changes"
-		case Unpushed:
-			p.Free, p.Busy = false, plural(s.Git.Unpushed, "unpushed commit")
 		}
 		out = append(out, p)
 	}
@@ -147,13 +151,6 @@ func active(s Snapshot) time.Time {
 		t = s.Message.At
 	}
 	return t
-}
-
-func plural(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-	return strconv.Itoa(n) + " " + noun + "s"
 }
 
 // Finished says whether a session has finished work sent to it at sentAt: it
