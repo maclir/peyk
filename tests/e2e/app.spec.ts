@@ -368,13 +368,17 @@ test.describe('signed in', () => {
     await expect(page.locator('.detail h2 .chip.idle')).toHaveText('idle');
     const flags = page.locator('.detail h2 .flag');
     await expect(flags).toHaveText(['clean']);
+    await expect(page.locator('.reply.sent.none')).toHaveText('Nothing sent yet.');
     await page.getByRole('button', { name: 'Clear', exact: true }).click();
     await expect(page.getByText('Clear knip: waiting for the laptop…')).toBeVisible();
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'clear')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'clear', session: 'k' });
 
-    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true, git });
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true, git,
+      prompt: { text: '/clear', at: new Date() } });
     await expect(flags).toHaveText(['cleared', 'clean']);
+    await expect(page.locator('.reply.sent:not(.none)')).toHaveText('/clear');
+    await expect(page.locator('.reply.pending')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0);
     await page.goto('/');
     await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag')).toHaveText(['cleared', 'clean']);

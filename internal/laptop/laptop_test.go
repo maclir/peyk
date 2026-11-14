@@ -219,6 +219,27 @@ func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
 	}
 }
 
+func clearEntry(ts string) string {
+	return `{"type":"user","isSidechain":false,"timestamp":"` + ts + `","message":{"role":"user","content":"<command-name>/clear</command-name>\n            <command-message>clear</command-message>"}}`
+}
+
+func TestLastExchangeReportsTheClearThatStartedTheConversation(t *testing.T) {
+	claude := t.TempDir()
+	work := "/w"
+	writeTranscript(t, claude, work, "fresh", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
+	writeTranscript(t, claude, work, "after", time.Now(),
+		clearEntry("2026-11-14T09:00:00Z"),
+		human("2026-11-14T09:01:00Z", `"Next task"`),
+	)
+	r, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "fresh"})
+	if r != nil || p == nil || p.Text != "/clear" || !p.At.Equal(time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("reply = %+v, prompt = %+v", r, p)
+	}
+	if _, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "after"}); p == nil || p.Text != "Next task" {
+		t.Fatalf("a prompt sent after the clear wins: %+v", p)
+	}
+}
+
 func TestLastExchangeWithoutTranscripts(t *testing.T) {
 	if r, p := LastExchange(session.Transcript{Dir: "/nowhere", ID: "x"}); r != nil || p != nil {
 		t.Fatalf("want nil, got %+v %+v", r, p)
@@ -365,10 +386,11 @@ func TestSnapshotIsClearedOnlyWithAnEmptyOwnTranscript(t *testing.T) {
 	work := "/w"
 	writeTranscript(t, claude, work, "empty", time.Now(), `{"type":"system"}`)
 	writeTranscript(t, claude, work, "used", time.Now(), human("2026-11-14T09:00:00Z", `"hi"`))
+	writeTranscript(t, claude, work, "byclear", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
 	for _, tt := range []struct {
 		id      string
 		cleared bool
-	}{{"empty", true}, {"used", false}, {"", false}} {
+	}{{"empty", true}, {"used", false}, {"byclear", true}, {"", false}} {
 		s := session.Snapshot{Transcript: session.Transcript{Dir: TranscriptDir(claude, work), ID: tt.id}}
 		s.SetExchange(LastExchange(s.Transcript))
 		if s.Cleared != tt.cleared {

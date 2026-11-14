@@ -156,9 +156,23 @@ func tail(path string) [][]byte {
 	return lines
 }
 
+// clearMarker is how Claude Code records /clear at the start of the
+// conversation it opens. The entry carries no human origin.
+var clearMarker = []byte(`<command-name>/clear</command-name>`)
+
+// lastInFile reports the /clear that started the transcript as its prompt
+// when a person has sent nothing since.
 func lastInFile(path string) (reply, prompt *session.Message) {
 	lines := tail(path)
+	var cleared *session.Message
 	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil); i-- {
+		if cleared == nil && bytes.Contains(lines[i], clearMarker) {
+			var e entry
+			if json.Unmarshal(lines[i], &e) == nil && e.Type == "user" && !e.IsSidechain {
+				cleared = &session.Message{Text: session.ClearCommand, At: e.Timestamp}
+			}
+			continue
+		}
 		isReply := reply == nil && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
 		isPrompt := prompt == nil && bytes.Contains(lines[i], []byte(`"kind":"human"`))
 		if !isReply && !isPrompt {
@@ -178,6 +192,9 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		case isPrompt && e.Type == "user" && e.Origin.Kind == "human":
 			prompt = &session.Message{Text: text, At: e.Timestamp}
 		}
+	}
+	if prompt == nil {
+		prompt = cleared
 	}
 	return reply, prompt
 }

@@ -136,6 +136,7 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .who.mine { align-self: flex-end; }
 .reply { max-width: 92%; padding: 2px 14px; border-radius: 16px 16px 16px 4px; background: var(--card); border: 1px solid var(--line); overflow-wrap: anywhere; font-size: 0.92rem; }
 .reply.sent { align-self: flex-end; max-width: 85%; border-radius: 16px 16px 4px 16px; background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.reply.sent.none { background: var(--card); border-color: var(--line); color: var(--muted); }
 .reply.sent a, .reply.sent code { color: inherit; }
 .reply.sent code { background: rgba(255, 255, 255, 0.18); }
 .reply pre { overflow-x: auto; background: var(--paper); padding: 10px; border-radius: 8px; font-size: 0.82rem; }

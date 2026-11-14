@@ -175,6 +175,7 @@ describe('pending reply', () => {
     expect(awaitingReply({ prompt: { at: early } })).toBe(true);
     expect(awaitingReply({ prompt: { at: late }, message: { at: early } })).toBe(true);
     expect(awaitingReply({ prompt: { at: early }, message: { at: late } })).toBe(false);
+    expect(awaitingReply({ prompt: { text: '/clear', at: late }, cleared: true })).toBe(false);
     expect(pendingLabel({ state: 'working' })).toBe('Working…');
     expect(pendingLabel({ state: 'idle' })).toBe('Not replied yet');
   });

@@ -740,7 +740,7 @@ async function start(cfg) {
       rows.push(["push", pushLabel(g)]);
       rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
     }
-    const sent = h("div", { class: "reply sent" });
+    const sent = h("div", { class: s.prompt ? "reply sent" : "reply sent none" });
     sent.innerHTML = s.prompt ? renderMarkdown(s.prompt.text) : "<p>Nothing sent yet.</p>";
     const pending = awaitingReply(s);
     const msg = h("div", { class: pending ? "reply pending" : "reply" });

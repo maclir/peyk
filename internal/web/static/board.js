@@ -163,7 +163,7 @@ export function answerText(question, picks) {
 // awaitingReply is true when the agent has not replied since the last prompt,
 // so its latest reply answers an earlier one.
 export function awaitingReply(s) {
-  if (!s.prompt) return false;
+  if (!s.prompt || s.cleared) return false;
   return !s.message || toDate(s.message.at) < toDate(s.prompt.at);
 }
 

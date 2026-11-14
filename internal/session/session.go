@@ -124,12 +124,16 @@ type Option struct {
 // MaxPrototypes bounds the pages a snapshot lists, newest kept.
 const MaxPrototypes = 10
 
+// ClearCommand is the prompt recorded for a conversation started by /clear.
+const ClearCommand = "/clear"
+
 // SetExchange records the latest reply and prompt read from the transcript.
 // A conversation is known to be empty only when its own transcript, rather
-// than a guess at the directory's newest one, has neither.
+// than a guess at the directory's newest one, has no reply and no prompt
+// other than the /clear that started it.
 func (s *Snapshot) SetExchange(reply, prompt *Message) {
 	s.Message, s.Prompt = reply, prompt
-	s.Cleared = s.Transcript.ID != "" && reply == nil && prompt == nil
+	s.Cleared = s.Transcript.ID != "" && reply == nil && (prompt == nil || prompt.Text == ClearCommand)
 }
 
 // Transcript locates a Claude Code transcript: the directory for the
