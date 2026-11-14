@@ -90,13 +90,16 @@ vendor: node_modules ## Copy Firebase's browser modules into the embedded static
 status: ## Print every live aoe session: state, last commit, push state, last reply.
 	go run ./cmd/peyk status
 
-# serve is what the relayServer aoe session runs. It builds first so the
+# serve is what the peykServer aoe session runs. It builds first so the
 # process that stays up is the small binary, not the Go toolchain.
+# caffeinate holds the Mac awake (idle sleep; system sleep on AC) only while
+# the agent runs, so the phone keeps receiving state.
+CAFFEINATE := $(if $(shell command -v caffeinate),caffeinate -is)
 serve: ## Publish session state for the phone until Ctrl-C (run in the relayServer aoe session).
 	@test -n "$(GOOGLE_CLOUD_PROJECT)" || { echo "GOOGLE_CLOUD_PROJECT is required; set it in .env"; exit 1; }
 	@mkdir -p bin
 	@go build -trimpath -o bin/peyk ./cmd/peyk
-	@bin/peyk agent
+	@$(CAFFEINATE) bin/peyk agent
 
 pair: ## Trust this device's passkey for signing commands: make pair LABEL=pixel
 	@test -n "$(LABEL)" || { echo "LABEL is required"; exit 1; }
