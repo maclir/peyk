@@ -239,6 +239,7 @@ test.describe('signed in', () => {
 
   test('the inbox adds, edits and deletes tasks', async () => {
     await page.goto('/#inbox');
+    await expect(page.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'Project: hamta' }).click();
     const sheet = page.getByRole('dialog', { name: 'Choose a project' });
     await expect(sheet.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
@@ -263,6 +264,7 @@ test.describe('signed in', () => {
     const edited = page.locator('.task', { hasText: 'Add --json and --csv output' });
     await expect(edited.locator('.proj')).toContainText('hamta');
     await expect(edited.getByText('needs input')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
 
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /More actions/ }).click();
@@ -307,6 +309,9 @@ test.describe('signed in', () => {
     await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
     await page.goto('/#inbox');
     const texts = page.locator('.tasks .ttext');
+    await page.getByRole('button', { name: /^Ready/ }).click();
+    await expect(texts).toHaveText(['First thing', 'Second thing']);
+    await page.getByRole('button', { name: /^All/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing', 'Waits on hamta']);
 
     await page.getByRole('button', { name: /^Waiting/ }).click();

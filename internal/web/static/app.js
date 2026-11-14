@@ -54,7 +54,7 @@ async function start(cfg) {
   }
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
-    filter: "all", only: null, arranging: false, menu: null, picking: false, pickQuery: "",
+    filter: "ready", only: null, arranging: false, menu: null, picking: false, pickQuery: "",
     // Picks for open questions by question id, kept across redraws.
     answers: new Map() };
   let unsubscribe = [];
@@ -346,7 +346,7 @@ async function start(cfg) {
       filters, strip,
       h("p", { class: "alert", id: "alert", role: "status" }),
       h("div", { class: "tasks" }, items),
-      finished.length && state.filter === "all" && !state.arranging ? [
+      finished.length && state.filter !== "waiting" && !state.arranging ? [
         h("h2", { class: "group" }, "Done"),
         ...finished.map((t) =>
           h("div", { class: "task done" },
@@ -530,7 +530,14 @@ async function start(cfg) {
 
   // An image is named by its hash, so one already stored is the same image
   // and is not written again; writing it again would be refused.
+  // The inbox opens on ready tasks; one queued for a busy project would
+  // vanish from that view as it is saved, so the view widens to show it.
+  function reveal(project) {
+    if (state.filter === "ready" && !projectNamed(project)?.free) state.filter = "all";
+  }
+
   async function addTask(project, text, images) {
+    reveal(project);
     const batch = fs.writeBatch(db);
     const ids = [];
     for (const img of images) {
@@ -616,6 +623,7 @@ async function start(cfg) {
         await track(`edit:${t.id}`, () => fs.updateDoc(fs.doc(db, "tasks", t.id), { text: value, project: select.value }));
         state.editing = null;
         state.editProject = undefined;
+        reveal(select.value);
         render();
       } catch (err) {
         alertLine(`Could not save: ${err.code === "permission-denied" ? "the task was already sent" : err.message}`);
