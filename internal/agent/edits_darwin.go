@@ -11,8 +11,9 @@ import (
 	"github.com/fsnotify/fsevents"
 )
 
-// EditWatcher pings when files change in a working tree, which catches edits
-// made in a terminal or editor that no hook reports. It uses one FSEvents
+// EditWatcher pings when files change under the directories it is given:
+// working trees, for edits made in a terminal or editor that no hook reports,
+// and transcript directories, for replies written mid-turn. It uses one FSEvents
 // stream for all trees, so watching a large repository costs no file handles.
 // Changes under .git are left to GitWatcher, and the collector's own git
 // reads touch nothing else, so a refresh does not wake it.

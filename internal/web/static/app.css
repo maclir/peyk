@@ -49,6 +49,8 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .pending .when { margin-left: 6px; }
 .when { color: var(--muted); font-weight: 400; }
 .reply { border-left: 3px solid var(--line); padding-left: 12px; overflow-wrap: anywhere; }
+.reply.sent { border-left-color: var(--accent); }
+.meta.sent { color: var(--ink); }
 .reply pre { overflow-x: auto; background: var(--paper); padding: 10px; border-radius: 8px; font-size: 0.82rem; }
 .reply pre code { background: none; padding: 0; }
 .reply h3, .reply h4, .reply h5, .reply h6 { margin: 14px 0 6px; }

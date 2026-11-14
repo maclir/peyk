@@ -22,6 +22,14 @@ type fakeCollector struct {
 	snaps []session.Snapshot
 	err   error
 	calls int
+	// replies holds what each transcript, by id, now says.
+	replies map[string]*session.Message
+}
+
+func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.replies[t.ID], nil
 }
 
 func (f *fakeCollector) All(context.Context) ([]session.Snapshot, error) {
@@ -310,5 +318,46 @@ func TestRefreshWatchesEditsOnlyInSessionsNotWorking(t *testing.T) {
 	}
 	if strings.Join(w.dirs, ",") != "/b,/c" {
 		t.Fatalf("watched %v", w.dirs)
+	}
+}
+
+func TestRepliesRepublishOnlyWorkingSessionsWithoutAFullRefresh(t *testing.T) {
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	c.set(
+		session.Snapshot{ID: "w", Title: "working", State: session.Working, Transcript: session.Transcript{Dir: "/t/w", ID: "tw"}},
+		session.Snapshot{ID: "i", Title: "idle", State: session.Idle, Transcript: session.Transcript{Dir: "/t/i", ID: "ti"}},
+	)
+	w := &recordingWatcher{}
+	a := newAgent(c, mem)
+	a.Transcripts = w
+	replies := make(chan struct{}, 1)
+	a.Replies = replies
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- a.Run(ctx, nil, nil) }()
+	waitFor(t, func() bool { return mem.Laptop().Online })
+	if strings.Join(w.dirs, ",") != "/t/w" {
+		t.Fatalf("watched %v, want only the working session's transcripts", w.dirs)
+	}
+
+	c.mu.Lock()
+	c.replies = map[string]*session.Message{"tw": {Text: "halfway"}, "ti": {Text: "stale"}}
+	c.mu.Unlock()
+	replies <- struct{}{}
+	waitFor(t, func() bool {
+		v, _ := mem.Get(store.Sessions, "w")
+		s, ok := v.(session.Snapshot)
+		return ok && s.Message != nil && s.Message.Text == "halfway"
+	})
+	if v, _ := mem.Get(store.Sessions, "i"); v.(session.Snapshot).Message != nil {
+		t.Fatalf("an idle session was reread: %+v", v.(session.Snapshot).Message)
+	}
+	if c.count() != 1 {
+		t.Fatalf("a reply caused %d full refreshes", c.count()-1)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

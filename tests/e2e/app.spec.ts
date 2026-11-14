@@ -78,6 +78,7 @@ async function seed(page: Page) {
       pending: [{ hash: '3f2a1c4', subject: 'Report unused exports', at: minutesAgo(12) }, { hash: '9b0e7d2', subject: 'Scan barrel files', at: minutesAgo(40) }],
     },
     message: { text: '## Done\n\nCommitted **3f2a1c4**.\n\n- `make test` passes', at: minutesAgo(12) },
+    prompt: { text: 'Detect unused exports', at: minutesAgo(20) },
   });
   await put(page, 'sessions/h', {
     id: 'h', title: 'hamta', path: '/c/hamta', aoe_status: 'waiting', state: 'needs_input', updated_at: now,
@@ -128,6 +129,7 @@ test.describe('signed in', () => {
     await expect(page.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
     await expect(page.locator('.pending li')).toHaveText([/3f2a1c4 Report unused exports/, /9b0e7d2 Scan barrel files/]);
     await expect(page.getByRole('heading', { name: 'Done' })).toBeVisible();
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
     await expect(page.locator('.reply strong')).toHaveText('3f2a1c4');
     await expect(page.locator('.reply code')).toHaveText('make test');
   });
@@ -142,6 +144,39 @@ test.describe('signed in', () => {
     expect(cmd.fields.assertion).toBeUndefined();
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
     await expect(page.getByText('Push knip: done.')).toBeVisible();
+  });
+
+  // A phone that freezes the app leaves its Firestore connection dead without
+  // an offline event, and the SDK's next retry can be a minute away. Held
+  // requests stand in for that dead connection.
+  test('coming back to the app reconnects at once', async () => {
+    await page.goto('/#s-k');
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+    let frozen = true;
+    await page.context().route(/:8181/, (route) => (frozen ? undefined : route.continue()));
+    await page.context().setOffline(true);
+    await page.context().setOffline(false);
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'running', state: 'working', updated_at: new Date(),
+      prompt: { text: 'Now add --json', at: new Date() }, message: { text: 'Halfway there', at: new Date() } });
+    await page.waitForTimeout(3000);
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+
+    frozen = false;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.locator('.reply.sent')).toHaveText('Now add --json', { timeout: 3000 });
+    await expect(page.locator('.reply').last()).toHaveText('Halfway there');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('a send that does not go out says so on its task', async () => {
+    await put(page, 'laptop/status', { online: false, seen_at: new Date() });
+    await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
+    await page.goto('/#inbox');
+    const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
+    await task.getByRole('button', { name: 'Send' }).click();
+    await expect(task.getByRole('status')).toHaveText('Send to knip: the laptop is offline, so nothing was sent.');
+    await page.request.delete(`${FIRESTORE}/tasks/proto`, { headers: admin });
+    await put(page, 'laptop/status', { online: true, seen_at: new Date() });
   });
 
   test('the inbox adds, edits and deletes tasks', async () => {

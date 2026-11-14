@@ -49,7 +49,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map() };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -86,10 +86,33 @@ async function start(cfg) {
     notice(`Cannot read sessions: ${err.code === "permission-denied" ? "this account is not the owner." : err.message}`);
   }
 
+  // A phone freezes a backgrounded app and its Firestore connection dies
+  // without an offline event. The SDK notices only on a later retry, up to 90
+  // seconds away, and serves cached data until then, so coming back opens a
+  // new connection at once. Restarts are chained so two cannot interleave and
+  // leave the network off. A restore from the back/forward cache may come
+  // without a visibilitychange.
+  let restarting = Promise.resolve();
+  function reconnect() {
+    restarting = restarting
+      .then(async () => {
+        try {
+          await fs.disableNetwork(db);
+        } finally {
+          await fs.enableNetwork(db);
+        }
+      })
+      .catch(() => {});
+    return restarting;
+  }
   document.addEventListener("visibilitychange", () => {
     if (!state.user) return;
-    if (document.hidden) stop();
-    else listen();
+    if (document.hidden) return stop();
+    reconnect();
+    listen();
+  });
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted && state.user) reconnect();
   });
   window.addEventListener("hashchange", render);
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
@@ -156,10 +179,10 @@ async function start(cfg) {
   }
 
   // sendCommand signs the payload with the paired passkey (push needs none),
-  // stores it, and reports what the laptop made of it.
-  async function sendCommand(type, fields, label) {
+  // stores it, and reports what the laptop made of it through report.
+  async function sendCommand(type, fields, label, report = setStatus) {
     if (!laptopOnline(state.laptop, Date.now())) {
-      setStatus(`${label}: the laptop is offline, so nothing was sent.`);
+      report(`${label}: the laptop is offline, so nothing was sent.`);
       return false;
     }
     const ref = fs.doc(fs.collection(db, "commands"));
@@ -169,18 +192,18 @@ async function start(cfg) {
       if (type !== "push") data.assertion = await passkey.sign(payload);
       await fs.setDoc(ref, data);
     } catch (err) {
-      setStatus(err.name === "NotAllowedError"
+      report(err.name === "NotAllowedError"
         ? `${label}: not sent. The passkey prompt was cancelled, or this device has no paired passkey (run make pair on the laptop).`
         : `${label}: not sent. ${err.message}`);
       return false;
     }
-    setStatus(`${label}: waiting for the laptop…`);
+    report(`${label}: waiting for the laptop…`);
     const unsub = fs.onSnapshot(ref, (snap) => {
       const c = snap.data();
       if (!c || c.status === "pending") return;
       unsub();
-      setStatus(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
-    }, (err) => setStatus(`${label}: cannot follow the result: ${err.message}`));
+      report(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
+    }, (err) => report(`${label}: cannot follow the result: ${err.message}`));
     return true;
   }
 
@@ -245,6 +268,15 @@ async function start(cfg) {
 
     const { ready, waiting } = inboxGroups(state.tasks, state.projects);
     const now = Date.now();
+    // A send's outcome stays on its task, which may have moved between groups
+    // since, rather than in a status line scrolled out of view.
+    const send = (t) => {
+      const report = (text) => {
+        state.sends.set(t.id, text);
+        render();
+      };
+      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text }, `Send to ${t.project}`, report);
+    };
     const item = (t, why) => {
       if (state.editing === t.id) return editor(t, projects);
       return h("div", { class: "task" },
@@ -252,8 +284,9 @@ async function start(cfg) {
           h("div", { class: "proj" }, `${t.project} · ${ago(t.created_at, now)}`),
           h("div", { class: "ttext" }, t.text),
           why ? h("div", { class: "meta" }, why) : null,
+          state.sends.has(t.id) ? h("div", { class: "meta sent", role: "status" }, state.sends.get(t.id)) : null,
         ),
-        why ? null : h("button", { type: "button", class: "primary", onclick: () => sendCommand("dispatch", { project: t.project, task: t.id, text: t.text }, `Send to ${t.project}`) }, "Send"),
+        why ? null : h("button", { type: "button", class: "primary", onclick: () => send(t) }, "Send"),
         h("button", { type: "button", class: "icon", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; render(); } }, "✎"),
         h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
       );
@@ -413,6 +446,8 @@ async function start(cfg) {
       rows.push(["push", pushLabel(g)]);
       rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
     }
+    const sent = h("div", { class: "reply sent" });
+    sent.innerHTML = s.prompt ? renderMarkdown(s.prompt.text) : "<p>Nothing sent yet.</p>";
     const msg = h("div", { class: "reply" });
     msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
@@ -420,6 +455,8 @@ async function start(cfg) {
       h("h2", {}, s.title),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       g && g.pending && g.pending.length ? pending(g, now) : null,
+      h("h3", {}, "Last sent", s.prompt ? h("span", { class: "when" }, ` · ${ago(s.prompt.at, now)}`) : null),
+      sent,
       h("h3", {}, "Last reply", s.message ? h("span", { class: "when" }, ` · ${ago(s.message.at, now)}`) : null),
       msg,
       actions(s),

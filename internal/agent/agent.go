@@ -17,6 +17,8 @@ import (
 type Collector interface {
 	All(context.Context) ([]session.Snapshot, error)
 	Repos() ([]string, error)
+	// Exchange rereads a session's latest reply and prompt.
+	Exchange(session.Transcript) (reply, prompt *session.Message)
 }
 
 // Watcher follows the working directories of the published sessions.
@@ -38,6 +40,12 @@ type Agent struct {
 	// not working. A working agent edits constantly and its Stop hook reports
 	// the result, so watching it would only refresh for nothing.
 	Edits Watcher
+	// Transcripts, when set, is pointed at the transcript directories of
+	// working sessions, and pings Replies when one is written. No hook fires
+	// when a working agent writes a reply in the middle of its turn, and a
+	// full refresh per tool call would rerun every git command for it.
+	Transcripts Watcher
+	Replies     <-chan struct{}
 	// Debounce coalesces the burst of pings one agent turn produces.
 	Debounce time.Duration
 	// Presence only rewrites seen_at. A laptop that sleeps cannot say so, and
@@ -89,6 +97,17 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
+	if a.Transcripts != nil {
+		var dirs []string
+		for _, s := range snaps {
+			if s.State == session.Working && s.Transcript.Dir != "" {
+				dirs = append(dirs, s.Transcript.Dir)
+			}
+		}
+		if err := a.Transcripts.Set(ctx, dirs); err != nil {
+			return err
+		}
+	}
 	prev := a.sessions
 	sessions := map[string]any{}
 	a.sessions = map[string]session.Snapshot{}
@@ -118,6 +137,23 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		return a.Notify.Notify(ctx, notes)
 	}
 	return nil
+}
+
+// RefreshReplies rereads the transcripts of working sessions and publishes
+// the ones whose reply or prompt changed. Their state is left to Refresh.
+func (a *Agent) RefreshReplies(ctx context.Context) error {
+	if a.sessions == nil {
+		return nil
+	}
+	docs := make(map[string]any, len(a.sessions))
+	for id, s := range a.sessions {
+		if s.State == session.Working {
+			s.Message, s.Prompt = a.Collect.Exchange(s.Transcript)
+			a.sessions[id] = s
+		}
+		docs[id] = s
+	}
+	return a.sync(ctx, store.Sessions, docs)
 }
 
 // finishTasks marks dispatched tasks done once their session has finished
@@ -224,7 +260,7 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	}
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
-	var debounce <-chan time.Time
+	var debounce, replies <-chan time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,6 +272,15 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		case <-debounce:
 			debounce = nil
 			if err := a.Refresh(ctx); err != nil {
+				return err
+			}
+		case <-a.Replies:
+			if replies == nil {
+				replies = time.After(a.Debounce)
+			}
+		case <-replies:
+			replies = nil
+			if err := a.RefreshReplies(ctx); err != nil {
 				return err
 			}
 		case in := <-cmds:

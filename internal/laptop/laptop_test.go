@@ -154,7 +154,16 @@ func quote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
-func TestLastMessageUsesTheSessionsOwnTranscript(t *testing.T) {
+func human(ts, content string) string {
+	return `{"type":"user","isSidechain":false,"timestamp":"` + ts + `","origin":{"kind":"human"},"message":{"role":"user","content":` + content + `}}`
+}
+
+func reply(claude, work, id string) *session.Message {
+	r, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: id})
+	return r
+}
+
+func TestLastExchangeUsesTheSessionsOwnTranscript(t *testing.T) {
 	claude := t.TempDir()
 	work := "/Users/me/code/knip"
 	now := time.Now()
@@ -171,13 +180,13 @@ func TestLastMessageUsesTheSessionsOwnTranscript(t *testing.T) {
 	// Started by /clear: newest file, no reply yet.
 	writeTranscript(t, claude, work, "cleared", now, `{"type":"system"}`)
 
-	if m := LastMessage(claude, work, "old"); m == nil || m.Text != "Old reply" {
+	if m := reply(claude, work, "old"); m == nil || m.Text != "Old reply" {
 		t.Fatalf("a session's own transcript wins even when another is newer: %+v", m)
 	}
-	if m := LastMessage(claude, work, "cleared"); m != nil {
+	if m := reply(claude, work, "cleared"); m != nil {
 		t.Fatalf("a session just cleared has no reply yet: %+v", m)
 	}
-	m := LastMessage(claude, work, "")
+	m := reply(claude, work, "")
 	if m == nil {
 		t.Fatal("no message")
 	}
@@ -189,13 +198,34 @@ func TestLastMessageUsesTheSessionsOwnTranscript(t *testing.T) {
 	}
 }
 
-func TestLastMessageWithoutTranscripts(t *testing.T) {
-	if m := LastMessage(t.TempDir(), "/nowhere", "x"); m != nil {
-		t.Fatalf("want nil, got %+v", m)
+func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
+	claude := t.TempDir()
+	work := "/w"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		human("2026-11-14T09:00:00Z", `"Add a --json flag"`),
+		assistant("2026-11-14T09:00:05Z", "On it."),
+		human("2026-11-14T09:01:00Z", `[{"type":"image"},{"type":"text","text":"Also --csv"}]`),
+		`{"type":"user","timestamp":"2026-11-14T09:01:01Z","message":{"content":[{"type":"tool_result","content":"ok"}]}}`,
+		`{"type":"user","isMeta":true,"timestamp":"2026-11-14T09:01:02Z","message":{"content":"<local-command-caveat>x</local-command-caveat>"}}`,
+		`{"type":"user","timestamp":"2026-11-14T09:01:03Z","message":{"content":"<command-name>/clear</command-name>"}}`,
+		assistant("2026-11-14T09:02:00Z", "Both added."),
+	)
+	r, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"})
+	if r == nil || r.Text != "Both added." {
+		t.Fatalf("reply = %+v", r)
+	}
+	if p == nil || p.Text != "Also --csv" || !p.At.Equal(time.Date(2026, 11, 14, 9, 1, 0, 0, time.UTC)) {
+		t.Fatalf("prompt = %+v", p)
 	}
 }
 
-func TestLastMessageReadsOnlyTheTailOfLargeTranscripts(t *testing.T) {
+func TestLastExchangeWithoutTranscripts(t *testing.T) {
+	if r, p := LastExchange(session.Transcript{Dir: "/nowhere", ID: "x"}); r != nil || p != nil {
+		t.Fatalf("want nil, got %+v %+v", r, p)
+	}
+}
+
+func TestLastExchangeReadsOnlyTheTailOfLargeTranscripts(t *testing.T) {
 	claude := t.TempDir()
 	work := "/w"
 	filler := `{"type":"user","text":"` + strings.Repeat("x", 1<<20) + `"}`
@@ -205,7 +235,7 @@ func TestLastMessageReadsOnlyTheTailOfLargeTranscripts(t *testing.T) {
 	}
 	lines = append(lines, assistant("2026-11-14T10:00:00Z", "at the end"))
 	writeTranscript(t, claude, work, "big", time.Now(), lines...)
-	if m := LastMessage(claude, work, ""); m == nil || m.Text != "at the end" {
+	if m := reply(claude, work, ""); m == nil || m.Text != "at the end" {
 		t.Fatalf("got %+v", m)
 	}
 }

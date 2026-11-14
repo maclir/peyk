@@ -104,9 +104,13 @@ func runAgent(ctx context.Context) error {
 	}
 	edits := agent.NewEditWatcher(pings)
 	defer edits.Close()
+	replies := make(chan struct{}, 1)
+	transcripts := agent.NewEditWatcher(replies)
+	defer transcripts.Close()
 	c := collector()
 	a := &agent.Agent{
-		Edits:   edits,
+		Edits:       edits,
+		Transcripts: transcripts, Replies: replies,
 		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
 		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,

@@ -30,26 +30,37 @@ func TranscriptDir(claudeDir, workdir string) string {
 // for a session whose own transcript aoe has not recorded.
 const recentTranscripts = 3
 
-// LastMessage returns the agent's latest text reply. A session's own
-// transcript is authoritative: two sessions can share a directory, and a
-// transcript just started by /clear rightly has no reply yet. Only without a
-// recorded transcript does it fall back to the directory's newest ones.
-func LastMessage(claudeDir, workdir, agentSessionID string) *session.Message {
-	dir := TranscriptDir(claudeDir, workdir)
-	if agentSessionID != "" {
-		return lastInFile(filepath.Join(dir, agentSessionID+".jsonl"))
+// LastExchange returns the agent's latest text reply and the last prompt a
+// person sent it. A session's own transcript is authoritative: two sessions
+// can share a directory, and a transcript just started by /clear rightly has
+// neither yet. Only without a recorded transcript does it fall back to the
+// directory's newest ones, taking the one with the latest activity.
+func LastExchange(t session.Transcript) (reply, prompt *session.Message) {
+	if t.ID != "" {
+		return lastInFile(filepath.Join(t.Dir, t.ID+".jsonl"))
 	}
-	candidates := newestFirst(dir)
+	candidates := newestFirst(t.Dir)
 	if len(candidates) > recentTranscripts {
 		candidates = candidates[:recentTranscripts]
 	}
-	var best *session.Message
+	var latest time.Time
 	for _, path := range candidates {
-		if m := lastInFile(path); m != nil && (best == nil || m.At.After(best.At)) {
-			best = m
+		r, p := lastInFile(path)
+		if at := newest(r, p); at.After(latest) {
+			latest, reply, prompt = at, r, p
 		}
 	}
-	return best
+	return reply, prompt
+}
+
+func newest(ms ...*session.Message) time.Time {
+	var t time.Time
+	for _, m := range ms {
+		if m != nil && m.At.After(t) {
+			t = m.At
+		}
+	}
+	return t
 }
 
 func newestFirst(dir string) []string {
@@ -84,23 +95,50 @@ type entry struct {
 	Type        string    `json:"type"`
 	IsSidechain bool      `json:"isSidechain"`
 	Timestamp   time.Time `json:"timestamp"`
-	Message     struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
+	// Origin marks a prompt a person sent, as opposed to one Claude Code
+	// added, such as a slash command's output or a tool result.
+	Origin struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message struct {
+		// A string for a typed prompt, a list of parts otherwise.
+		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
 
-func lastInFile(path string) *session.Message {
+type part struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// text joins the entry's non-empty text, or returns "" when it has none.
+func (e entry) text() string {
+	var s string
+	if json.Unmarshal(e.Message.Content, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var parts []part
+	if json.Unmarshal(e.Message.Content, &parts) != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" && strings.TrimSpace(p.Text) != "" {
+			texts = append(texts, strings.TrimSpace(p.Text))
+		}
+	}
+	return strings.Join(texts, "\n\n")
+}
+
+func lastInFile(path string) (reply, prompt *session.Message) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	start := info.Size() - tailBytes
 	if start < 0 {
@@ -108,29 +146,32 @@ func lastInFile(path string) *session.Message {
 	}
 	data, err := io.ReadAll(io.NewSectionReader(f, start, info.Size()-start))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	lines := bytes.Split(data, []byte("\n"))
 	if start > 0 && len(lines) > 0 {
 		lines = lines[1:] // the first line was cut by the offset
 	}
-	for i := len(lines) - 1; i >= 0; i-- {
-		if !bytes.Contains(lines[i], []byte(`"type":"assistant"`)) {
+	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil); i-- {
+		isReply := reply == nil && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
+		isPrompt := prompt == nil && bytes.Contains(lines[i], []byte(`"kind":"human"`))
+		if !isReply && !isPrompt {
 			continue
 		}
 		var e entry
-		if json.Unmarshal(lines[i], &e) != nil || e.Type != "assistant" || e.IsSidechain {
+		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
 			continue
 		}
-		var parts []string
-		for _, c := range e.Message.Content {
-			if c.Type == "text" && strings.TrimSpace(c.Text) != "" {
-				parts = append(parts, strings.TrimSpace(c.Text))
-			}
+		text := e.text()
+		if text == "" {
+			continue
 		}
-		if len(parts) > 0 {
-			return &session.Message{Text: strings.Join(parts, "\n\n"), At: e.Timestamp}
+		switch {
+		case isReply && e.Type == "assistant":
+			reply = &session.Message{Text: text, At: e.Timestamp}
+		case isPrompt && e.Type == "user" && e.Origin.Kind == "human":
+			prompt = &session.Message{Text: text, At: e.Timestamp}
 		}
 	}
-	return nil
+	return reply, prompt
 }

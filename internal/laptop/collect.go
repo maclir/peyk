@@ -25,16 +25,25 @@ type Collector struct {
 // Snapshot describes one aoe session.
 func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot {
 	git := RepoState(ctx, c.Run, s.Path)
+	t := session.Transcript{Dir: TranscriptDir(c.ClaudeDir, s.Path), ID: s.AgentSessionID}
+	reply, prompt := LastExchange(t)
 	return session.Snapshot{
-		ID:        s.ID,
-		Title:     s.Title,
-		Path:      s.Path,
-		AoeStatus: s.Status,
-		State:     session.Derive(s.Status, git),
-		Git:       git,
-		Message:   LastMessage(c.ClaudeDir, s.Path, s.AgentSessionID),
-		UpdatedAt: c.Now(),
+		ID:         s.ID,
+		Title:      s.Title,
+		Path:       s.Path,
+		AoeStatus:  s.Status,
+		State:      session.Derive(s.Status, git),
+		Git:        git,
+		Message:    reply,
+		Prompt:     prompt,
+		Transcript: t,
+		UpdatedAt:  c.Now(),
 	}
+}
+
+// Exchange rereads a session's latest reply and prompt from its transcript.
+func (Collector) Exchange(t session.Transcript) (reply, prompt *session.Message) {
+	return LastExchange(t)
 }
 
 // All describes every live Claude Code session, the ones needing attention first.

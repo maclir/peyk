@@ -61,14 +61,26 @@ type Message struct {
 
 // Snapshot is one session as published to the phone.
 type Snapshot struct {
-	ID        string    `firestore:"id" json:"id"`
-	Title     string    `firestore:"title" json:"title"`
-	Path      string    `firestore:"path" json:"path"`
-	AoeStatus string    `firestore:"aoe_status" json:"aoe_status"`
-	State     State     `firestore:"state" json:"state"`
-	Git       *Git      `firestore:"git" json:"git,omitempty"`
-	Message   *Message  `firestore:"message" json:"message,omitempty"`
+	ID        string   `firestore:"id" json:"id"`
+	Title     string   `firestore:"title" json:"title"`
+	Path      string   `firestore:"path" json:"path"`
+	AoeStatus string   `firestore:"aoe_status" json:"aoe_status"`
+	State     State    `firestore:"state" json:"state"`
+	Git       *Git     `firestore:"git" json:"git,omitempty"`
+	Message   *Message `firestore:"message" json:"message,omitempty"`
+	// Prompt is the last thing a person sent the agent.
+	Prompt    *Message  `firestore:"prompt" json:"prompt,omitempty"`
 	UpdatedAt time.Time `firestore:"updated_at" json:"updated_at"`
+	// Transcript is where the session's conversation is read from. It is
+	// the laptop's business and is not published.
+	Transcript Transcript `firestore:"-" json:"-"`
+}
+
+// Transcript locates a Claude Code transcript: the directory for the
+// session's working directory and, once known, the transcript's own id.
+type Transcript struct {
+	Dir string
+	ID  string
 }
 
 // Derive turns aoe's status and the repository state into one board state.
