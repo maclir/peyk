@@ -54,7 +54,7 @@ async function start(cfg) {
   }
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
-    filter: "ready", only: null, arranging: false, menu: null, picking: false, pickQuery: "",
+    filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickQuery: "",
     // Picks for open questions by question id, kept across redraws.
     answers: new Map() };
   let unsubscribe = [];
@@ -126,7 +126,9 @@ async function start(cfg) {
   window.addEventListener("pageshow", (e) => {
     if (e.persisted && state.user) reconnect();
   });
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
+  dockAboveKeyboard();
+  tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
 
   auth.onAuthStateChanged(a, async (user) => {
@@ -194,6 +196,37 @@ async function start(cfg) {
     navigator.serviceWorker.ready
       .then((reg) => reg.getNotifications({ tag: id }))
       .then((notes) => notes.forEach((n) => n.close()), () => {});
+  }
+
+  // iOS does not shrink the layout viewport for the keyboard, so a composer
+  // stuck to its bottom sits behind the keyboard; --dock lifts it to the
+  // visible bottom instead.
+  function dockAboveKeyboard() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement.style;
+    const update = () => {
+      const keyboard = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      if (keyboard > 0) root.setProperty("--dock", `${keyboard + 8}px`);
+      else root.removeProperty("--dock");
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+  }
+
+  // Scrolling down reads further into the list, so the composer gets out of
+  // the way; scrolling up or reaching the end brings it back.
+  function tuckComposerOnScroll() {
+    let last = window.scrollY;
+    window.addEventListener("scroll", () => {
+      const y = Math.max(0, window.scrollY);
+      const root = document.documentElement;
+      const typing = document.activeElement?.closest?.(".composer");
+      const atEnd = window.innerHeight + y >= root.scrollHeight - 24;
+      if (typing || atEnd || y < last - 4) root.classList.remove("tuck");
+      else if (y > last + 4) root.classList.add("tuck");
+      last = y;
+    }, { passive: true });
   }
 
   function setStatus(text, busy = false) {
@@ -357,8 +390,10 @@ async function start(cfg) {
       h("p", { class: "alert", id: "alert", role: "status" }),
       h("div", { class: "tasks" }, items),
       finished.length && state.filter !== "waiting" && !state.arranging ? [
-        h("h2", { class: "group" }, "Done"),
-        ...finished.map((t) =>
+        h("h2", { class: "group" },
+          h("button", { type: "button", class: "fold", "aria-expanded": String(state.showDone), onclick: () => { state.showDone = !state.showDone; render(); } },
+            "Done", h("span", { class: "n" }, String(finished.length)), icon("chevron"))),
+        ...(state.showDone ? finished : []).map((t) =>
           h("div", { class: "task done" },
             h("div", { class: "thead" }, face(projectNamed(t.project), t.project, "sm"),
               h("span", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),

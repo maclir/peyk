@@ -288,6 +288,8 @@ test.describe('signed in', () => {
     await expect(edited.getByText('needs input')).toBeVisible();
     await expect(page.getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
 
+    await expect(page.locator('.task.done')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Done 1' }).click();
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /More actions/ }).click();
     await edited.getByRole('button', { name: /Delete task/ }).click();
