@@ -93,6 +93,19 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return errors.New("reply needs text")
 		}
 		return act.Send(ctx, s.ID, p.Text)
+	case command.Clear:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		switch s.State {
+		case session.Working, session.NeedsInput:
+			return fmt.Errorf("%s is %s; /clear would land in its turn", s.Title, s.State.Label())
+		}
+		if s.Cleared {
+			return nil
+		}
+		return act.Clear(ctx, s.ID)
 	case command.Stop:
 		s, err := a.session(p.Session)
 		if err != nil {

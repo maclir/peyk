@@ -132,6 +132,7 @@ describe('commands', () => {
     await assertSucceeds(setDoc(doc(owner(), 'commands/c1'), cmd()));
     const { assertion, ...push } = cmd({ type: 'push' });
     await assertSucceeds(setDoc(doc(owner(), 'commands/c2'), push));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c3'), cmd({ type: 'clear' })));
     await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));
   });
 

@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, currentTask, doneTasks, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, currentTask, doneTasks, flags, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
 import * as passkey from "./passkey.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
@@ -431,14 +431,13 @@ async function start(cfg) {
       const last = s.git && s.git.last;
       out.push(
         h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
-          h("div", { class: "top" }, h("span", { class: "name" }, s.title), chip(st)),
+          h("div", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), chip(st)),
           currentTask(state.tasks, s.id) ? h("p", { class: "curtask" }, `Task: ${oneLine(currentTask(state.tasks, s.id).text)}`) : null,
           s.message ? h("p", { class: "msg" }, oneLine(s.message.text)) : null,
           h("div", { class: "meta" },
             last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
             h("span", {}, pushLabel(s.git)),
             s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
-            s.cleared ? h("span", {}, "cleared") : null,
           ),
         ),
       );
@@ -465,7 +464,7 @@ async function start(cfg) {
     msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
       h("a", { class: "back", href: "#" }, "← Workers"),
-      h("h2", {}, s.title),
+      h("h2", {}, s.title, flagRow(s)),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       g && g.pending && g.pending.length ? pending(g, now) : null,
       h("h3", {}, "Last sent", s.prompt ? h("span", { class: "when" }, ` · ${ago(s.prompt.at, now)}`) : null),
@@ -483,11 +482,13 @@ async function start(cfg) {
       if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`))) text.value = "";
     };
     const g = s.git;
+    const busy = s.state === "working" || s.state === "needs_input";
     return h("div", { class: "actions" },
       text,
       h("div", { class: "btnrow" },
         h("button", { type: "button", class: "primary", onclick: reply }, "Send reply"),
         g && g.unpushed > 0 ? h("button", { type: "button", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`) }, `Push ${g.unpushed}`) : null,
+        s.cleared || busy ? null : h("button", { type: "button", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`) }, "Clear"),
         s.aoe_status !== "stopped" ? h("button", { type: "button", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`) }, "Stop") : null,
       ),
     );
@@ -503,6 +504,11 @@ function pending(g, now) {
       more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
     ),
   ];
+}
+
+function flagRow(s) {
+  const f = flags(s);
+  return f.length ? h("span", { class: "flags" }, f.map((x) => h("span", { class: `flag ${x}` }, x))) : null;
 }
 
 function chip(st) {

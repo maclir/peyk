@@ -55,6 +55,15 @@ export function pushLabel(git) {
   return "no remote";
 }
 
+// Flags say what a worker is ready for: cleared when its conversation is
+// empty, clean when its repository has nothing uncommitted or unpushed.
+export function flags(s) {
+  const out = [];
+  if (s.cleared) out.push("cleared");
+  if (s.git && !s.git.dirty && !s.git.unpushed) out.push("clean");
+  return out;
+}
+
 // The picker shows recently active projects first; never-active ones follow
 // by name.
 export function sortProjects(projects) {

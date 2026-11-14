@@ -73,6 +73,7 @@ async function passkeyOn(page: Page) {
   await page.evaluate(() => {
     const bytes = () => new Uint8Array([1, 2, 3]).buffer;
     Object.defineProperty(navigator.credentials, 'get', {
+      configurable: true,
       value: async () => ({ rawId: bytes(), response: { authenticatorData: bytes(), clientDataJSON: bytes(), signature: bytes() } }),
     });
   });
@@ -230,6 +231,26 @@ test.describe('signed in', () => {
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /Delete task/ }).click();
     await expect(edited).toHaveCount(0);
+  });
+
+  test('a worker is cleared on its own and shows when it is cleared and clean', async () => {
+    const git = { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0 };
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false, git });
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    const flags = page.locator('.detail h2 .flag');
+    await expect(flags).toHaveText(['clean']);
+    await page.getByRole('button', { name: 'Clear', exact: true }).click();
+    await expect(page.getByText('Clear knip: waiting for the laptop…')).toBeVisible();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'clear')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'clear', session: 'k' });
+
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true, git });
+    await expect(flags).toHaveText(['cleared', 'clean']);
+    await expect(page.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0);
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag')).toHaveText(['cleared', 'clean']);
+    await expect(page.locator('.card', { hasText: 'hamta' }).locator('.flag')).toHaveCount(0);
   });
 });
 

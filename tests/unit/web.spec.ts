@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -55,6 +55,13 @@ describe('board', () => {
     expect(pushLabel({ upstream: 'origin/main', unpushed: 2 })).toBe('2 unpushed');
     expect(pushLabel({ upstream: '', unpushed: 1 })).toBe('1 unpushed · no remote branch');
     expect(pushLabel(null)).toBe('no repository');
+  });
+
+  it('flags cleared and clean workers', () => {
+    expect(flags({ cleared: true, git: { dirty: 0, unpushed: 0 } })).toEqual(['cleared', 'clean']);
+    expect(flags({ cleared: false, git: { dirty: 1, unpushed: 0 } })).toEqual([]);
+    expect(flags({ cleared: false, git: { dirty: 0, unpushed: 2 } })).toEqual([]);
+    expect(flags({ cleared: true })).toEqual(['cleared']);
   });
 
   it('formats ages', () => {

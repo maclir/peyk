@@ -30,6 +30,14 @@ func (s State) Rank() int {
 	return 99
 }
 
+// Label is the state in the words the phone shows.
+func (s State) Label() string {
+	if s == NeedsInput {
+		return "needs input"
+	}
+	return string(s)
+}
+
 // Commit is the most recent commit on the session's checked-out branch.
 type Commit struct {
 	Hash    string    `firestore:"hash" json:"hash"`

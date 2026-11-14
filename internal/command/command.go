@@ -25,6 +25,7 @@ const (
 	Dispatch = "dispatch"
 	Reply    = "reply"
 	Stop     = "stop"
+	Clear    = "clear"
 	Push     = "push"
 )
 
