@@ -34,6 +34,10 @@ type Agent struct {
 	Now     func() time.Time
 	// Watch, when set, is pointed at the sessions' directories after every refresh.
 	Watch Watcher
+	// Edits, when set, is pointed at the working trees of sessions that are
+	// not working. A working agent edits constantly and its Stop hook reports
+	// the result, so watching it would only refresh for nothing.
+	Edits Watcher
 	// Debounce coalesces the burst of pings one agent turn produces.
 	Debounce time.Duration
 	// Presence only rewrites seen_at. A laptop that sleeps cannot say so, and
@@ -71,6 +75,17 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			dirs[i] = s.Path
 		}
 		if err := a.Watch.Set(ctx, dirs); err != nil {
+			return err
+		}
+	}
+	if a.Edits != nil {
+		var idle []string
+		for _, s := range snaps {
+			if s.State != session.Working && s.Git != nil {
+				idle = append(idle, s.Path)
+			}
+		}
+		if err := a.Edits.Set(ctx, idle); err != nil {
 			return err
 		}
 	}

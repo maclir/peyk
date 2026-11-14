@@ -293,3 +293,22 @@ func TestRefreshNotifiesOnTransitionsButNotAtStart(t *testing.T) {
 		t.Fatalf("notes = %v", n.titles)
 	}
 }
+
+func TestRefreshWatchesEditsOnlyInSessionsNotWorking(t *testing.T) {
+	c := &fakeCollector{}
+	c.set(
+		session.Snapshot{ID: "a", Path: "/a", State: session.Working, Git: &session.Git{}},
+		session.Snapshot{ID: "b", Path: "/b", State: session.Idle, Git: &session.Git{}},
+		session.Snapshot{ID: "c", Path: "/c", State: session.NeedsInput, Git: &session.Git{}},
+		session.Snapshot{ID: "d", Path: "/d", State: session.Idle},
+	)
+	w := &recordingWatcher{}
+	a := newAgent(c, store.NewMemory())
+	a.Edits = w
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(w.dirs, ",") != "/b,/c" {
+		t.Fatalf("watched %v", w.dirs)
+	}
+}

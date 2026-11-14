@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.25.0
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/fsnotify/fsevents v0.2.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	golang.org/x/oauth2 v0.36.0

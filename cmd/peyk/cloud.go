@@ -102,8 +102,11 @@ func runAgent(ctx context.Context) error {
 	if err := fs.Put(ctx, "laptop", "push", map[string]string{"vapid_public_key": keys.Public}); err != nil {
 		return err
 	}
+	edits := agent.NewEditWatcher(pings)
+	defer edits.Close()
 	c := collector()
 	a := &agent.Agent{
+		Edits:   edits,
 		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
 		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
