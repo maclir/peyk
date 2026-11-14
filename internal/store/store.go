@@ -11,6 +11,7 @@
 //	pairings/{code}            Pairing              phone creates, agent deletes
 //	subscriptions/{id}         notify.Subscription  phone creates, agent deletes when gone
 //	laptop/push                {vapid_public_key}   agent writes
+//	laptop/usage               session.Usage        agent writes
 //	attachments/{sha256}       Attachment           phone creates and deletes
 package store
 

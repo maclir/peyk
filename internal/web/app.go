@@ -186,7 +186,7 @@ const pageHTML = `<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
 <body data-firebase="{{.}}">
-<header class="bar"><h1><img src="/static/icon.svg" alt="" width="24" height="24">peyk</h1><span id="laptop" class="laptop">connecting…</span></header>
+<header class="bar"><h1><img src="/static/icon.svg" alt="" width="24" height="24">peyk</h1><div class="meta"><span id="laptop" class="laptop">connecting…</span><a id="usage" class="usage" href="https://claude.ai/settings/usage" target="_blank" rel="noopener" hidden></a></div></header>
 <main id="app"><p class="notice" id="notice">Loading…</p></main>
 <script type="module" src="/static/app.js"></script></body></html>`
 

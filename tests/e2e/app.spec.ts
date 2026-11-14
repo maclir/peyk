@@ -92,6 +92,10 @@ async function seed(page: Page) {
   const now = new Date();
   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
   await put(page, 'laptop/status', { online: true, seen_at: now });
+  await put(page, 'laptop/usage', {
+    five_hour: { used: 23.4, resets_at: new Date(now.getTime() + 2 * 3600_000) },
+    seven_day: { used: 95, resets_at: new Date(now.getTime() + 50 * 3600_000) },
+  });
   await put(page, 'sessions/k', {
     id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'unpushed', updated_at: now,
     git: {
@@ -135,6 +139,9 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Sign out' }).click();
     await signIn(page);
     await expect(page.getByText('laptop online')).toBeVisible();
+    const usage = page.getByRole('link', { name: 'Claude 5h 77% · 7d 5% left' });
+    await expect(usage).toHaveAttribute('href', 'https://claude.ai/settings/usage');
+    await expect(usage).toHaveClass(/low/);
   });
 
   test('the board groups sessions and shows what each is doing', async () => {

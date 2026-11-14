@@ -80,6 +80,14 @@ type Agent struct {
 	CIWait time.Duration
 	ciRuns map[string]*ciRun
 
+	// Usage, when set, reads the subscription's rate limits as Claude Code's
+	// status line last saved them, and the agent rereads it on UsageChanged.
+	// It is published apart from a refresh: it changes with every reply, and
+	// a refresh reruns every session's git commands.
+	Usage        func() (*session.Usage, error)
+	UsageChanged <-chan struct{}
+	usageKey     string
+
 	published map[string]map[string]string
 	// The last published state, which commands act on.
 	sessions map[string]session.Snapshot
@@ -322,6 +330,26 @@ func (a *Agent) finishTasks(ctx context.Context) error {
 	return nil
 }
 
+// PublishUsage writes laptop/usage when the saved usage changed.
+func (a *Agent) PublishUsage(ctx context.Context) error {
+	if a.Usage == nil {
+		return nil
+	}
+	u, err := a.Usage()
+	if err != nil || u == nil {
+		return err
+	}
+	key := contentKey(u)
+	if key == a.usageKey {
+		return nil
+	}
+	if err := a.Store.Put(ctx, "laptop", "usage", u); err != nil {
+		return err
+	}
+	a.usageKey = key
+	return nil
+}
+
 // ProjectID is a project's document id: its name, which Firestore accepts
 // once slashes are gone.
 func ProjectID(name string) string { return strings.ReplaceAll(name, "/", "_") }
@@ -393,6 +421,9 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
 		return err
 	}
+	if err := a.PublishUsage(ctx); err != nil {
+		return err
+	}
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
 	var debounce, replies, ci <-chan time.Time
@@ -419,6 +450,10 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		case <-replies:
 			replies = nil
 			if err := a.RefreshReplies(ctx); err != nil {
+				return err
+			}
+		case <-a.UsageChanged:
+			if err := a.PublishUsage(ctx); err != nil {
 				return err
 			}
 		case <-ci:

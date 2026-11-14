@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions, usageLeft } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -223,5 +223,25 @@ describe('answerText', () => {
   it('is empty until every question is answered', () => {
     expect(answerText(question, [{ chosen: ['Blue'] }])).toBe('');
     expect(answerText(question, [{ chosen: ['Blue'] }, { chosen: [], other: '  ' }])).toBe('');
+  });
+});
+
+describe('usageLeft', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const at = (h: number) => new Date(now + h * 3600_000);
+
+  it('is nothing until the laptop has reported usage', () => {
+    expect(usageLeft(null, now)).toBeNull();
+  });
+
+  it('turns used into left for each window', () => {
+    const left = usageLeft({ five_hour: { used: 23.4, resets_at: at(2) }, seven_day: { used: 100.2, resets_at: at(50) } }, now);
+    expect(left.map((w: any) => [w.label, w.left])).toEqual([['5h', 77], ['7d', 0]]);
+    expect(left[0].resetsAt).toEqual(at(2));
+  });
+
+  it('counts a reset or unreported window as whole', () => {
+    const left = usageLeft({ five_hour: { used: 90, resets_at: at(-1) } }, now);
+    expect(left.map((w: any) => [w.label, w.left, w.resetsAt])).toEqual([['5h', 100, null], ['7d', 100, null]]);
   });
 });

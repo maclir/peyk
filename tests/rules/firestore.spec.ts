@@ -19,6 +19,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'sessions/knip'), { title: 'knip', state: 'idle' });
     await setDoc(doc(db, 'laptop/status'), { online: true });
     await setDoc(doc(db, 'laptop/push'), { vapid_public_key: 'k' });
+    await setDoc(doc(db, 'laptop/usage'), { five_hour: { used: 20 } });
     await setDoc(doc(db, 'laptop/secret'), { x: 1 });
     await setDoc(doc(db, 'other/thing'), { secret: true });
     await setDoc(doc(db, 'projects/knip'), { name: 'knip', free: true });
@@ -36,16 +37,18 @@ const stranger = () => env.authenticatedContext('someone', { email: 'someone@exa
 const anonymous = () => env.unauthenticatedContext().firestore();
 
 describe('owner', () => {
-  it('reads sessions and laptop status', async () => {
+  it('reads sessions, laptop status and Claude usage', async () => {
     await assertSucceeds(getDocs(collection(owner(), 'sessions')));
     await assertSucceeds(getDoc(doc(owner(), 'sessions/knip')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/status')));
+    await assertSucceeds(getDoc(doc(owner(), 'laptop/usage')));
   });
 
   it('cannot write anything, because only the laptop and server write', async () => {
     await assertFails(setDoc(doc(owner(), 'sessions/knip'), { title: 'forged' }));
     await assertFails(deleteDoc(doc(owner(), 'sessions/knip')));
     await assertFails(setDoc(doc(owner(), 'laptop/status'), { online: false }));
+    await assertFails(setDoc(doc(owner(), 'laptop/usage'), { five_hour: { used: 0 } }));
   });
 
   it('cannot list the laptop collection or read other collections', async () => {
@@ -58,6 +61,7 @@ describe('anyone else', () => {
   it('a signed-in account without the owner claim reads nothing', async () => {
     await assertFails(getDocs(collection(stranger(), 'sessions')));
     await assertFails(getDoc(doc(stranger(), 'laptop/status')));
+    await assertFails(getDoc(doc(stranger(), 'laptop/usage')));
   });
 
   it('a claim of false is not the owner', async () => {

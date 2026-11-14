@@ -551,3 +551,37 @@ func TestRunAsksGitHubAgainWhileARunIsUnfinished(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPublishUsageWritesOnlyWhenItChanged(t *testing.T) {
+	mem := store.NewMemory()
+	a := newAgent(&fakeCollector{}, mem)
+	var saved *session.Usage
+	a.Usage = func() (*session.Usage, error) { return saved, nil }
+	ctx := context.Background()
+
+	if err := a.PublishUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mem.Get("laptop", "usage"); ok {
+		t.Fatal("published usage before any was saved")
+	}
+	saved = &session.Usage{FiveHour: &session.Window{Used: 10, ResetsAt: time.Unix(100, 0)}}
+	if err := a.PublishUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	writes := mem.Writes()
+	if err := a.PublishUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mem.Writes() != writes {
+		t.Fatal("republished unchanged usage")
+	}
+	saved = &session.Usage{FiveHour: &session.Window{Used: 12, ResetsAt: time.Unix(100, 0)}}
+	if err := a.PublishUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := mem.Get("laptop", "usage")
+	if got.(*session.Usage).FiveHour.Used != 12 {
+		t.Fatalf("published %+v, want the latest usage", got)
+	}
+}

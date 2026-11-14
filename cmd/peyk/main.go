@@ -22,6 +22,7 @@ const usage = `usage: peyk <command>
   status         print every live aoe session: state, last commit, push state, last reply
   agent          publish session state for the phone until stopped
   ping           tell a running agent that something changed (for hooks)
+  usage          save the Claude rate limits from status line JSON on stdin (for statusLine)
   owner <email>  admit this Google account to peyk after its first sign-in
   import-tasks   add tasks from a JSON array on stdin: [{"project","text","created_at"}]
   pair <label>   trust a new passkey for signing commands
@@ -56,6 +57,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "ping":
 		agent.Ping(socketPath())
 		return nil
+	case "usage":
+		u, err := session.ParseStatusLine(os.Stdin)
+		if err != nil || u == nil {
+			return err
+		}
+		return laptop.SaveUsage(usagePath(), u)
 	case "pair":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: peyk pair <label>")

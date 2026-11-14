@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -11,6 +11,7 @@ if ("serviceWorker" in navigator) {
 
 const app = document.getElementById("app");
 const laptopEl = document.getElementById("laptop");
+const usageEl = document.getElementById("usage");
 const config = document.body.dataset.firebase;
 
 const h = (tag, attrs = {}, ...children) => {
@@ -33,6 +34,7 @@ function notice(text, ...extra) {
 
 if (!config) {
   laptopEl.textContent = "";
+  usageEl.hidden = true;
   notice("This copy of peyk is not connected to Firebase.");
 } else {
   start(JSON.parse(config)).catch((err) => notice(`Could not start: ${err.message}`));
@@ -53,7 +55,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickQuery: "",
     // Picks for open questions by question id, kept across redraws.
     answers: new Map() };
@@ -86,6 +88,10 @@ async function start(cfg) {
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "status"), (snap) => {
         state.laptop = snap.exists() ? snap.data() : null;
+        render();
+      }, failed),
+      fs.onSnapshot(fs.doc(db, "laptop", "usage"), (snap) => {
+        state.usage = snap.exists() ? snap.data() : null;
         render();
       }, failed),
     ];
@@ -135,12 +141,14 @@ async function start(cfg) {
     state.user = null;
     if (!user) {
       laptopEl.textContent = "";
+      usageEl.hidden = true;
       notice("Sign in with the Google account that owns peyk.", h("button", { class: "primary", onclick: signIn }, "Sign in with Google"));
       return;
     }
     const token = await user.getIdTokenResult();
     if (!token.claims.owner) {
       laptopEl.textContent = "";
+      usageEl.hidden = true;
       notice(
         `${user.email} is signed in but is not the owner.`,
         h("p", { class: "hint" }, "On the laptop, run ", h("code", {}, `make owner EMAIL=${user.email}`), ", then sign in again."),
@@ -159,6 +167,13 @@ async function start(cfg) {
     laptopEl.className = `laptop ${online ? "on" : "off"}`;
     const seen = state.laptop && state.laptop.seen_at ? ` · seen ${ago(state.laptop.seen_at, now)}` : "";
     laptopEl.textContent = (online ? "laptop online" : "laptop offline") + seen;
+
+    const left = usageLeft(state.usage, now);
+    usageEl.hidden = !left;
+    if (!left) return;
+    usageEl.classList.toggle("low", left.some((w) => w.left < 10));
+    usageEl.textContent = `Claude ${left.map((w) => `${w.label} ${w.left}%`).join(" · ")} left`;
+    usageEl.title = left.map((w) => w.resetsAt ? `${w.label} resets in ${ago(now, w.resetsAt.getTime())}` : `${w.label} is unused`).join("; ");
   }
 
   function render() {

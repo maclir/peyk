@@ -47,6 +47,18 @@ export function ago(date, now) {
   return `${Math.floor(s / 86400)}d`;
 }
 
+// usageLeft is the percentage left in each Claude rate-limit window. A window
+// past its reset is whole again, and so is one Claude Code no longer reports:
+// it drops a window once that window resets.
+export function usageLeft(usage, now) {
+  if (!usage) return null;
+  return [["5h", usage.five_hour], ["7d", usage.seven_day]].map(([label, w]) => {
+    const resetsAt = w && toDate(w.resets_at);
+    if (!resetsAt || resetsAt.getTime() <= now) return { label, left: 100, resetsAt: null };
+    return { label, left: Math.max(0, Math.min(100, Math.round(100 - w.used))), resetsAt };
+  });
+}
+
 export function pushLabel(git) {
   if (!git) return "no repository";
   if (git.unpushed > 0 && !git.upstream) return `${git.unpushed} unpushed · no remote branch`;
