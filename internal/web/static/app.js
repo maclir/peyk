@@ -127,7 +127,6 @@ async function start(cfg) {
     if (e.persisted && state.user) reconnect();
   });
   window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
-  dockAboveKeyboard();
   tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
 
@@ -196,22 +195,6 @@ async function start(cfg) {
     navigator.serviceWorker.ready
       .then((reg) => reg.getNotifications({ tag: id }))
       .then((notes) => notes.forEach((n) => n.close()), () => {});
-  }
-
-  // iOS does not shrink the layout viewport for the keyboard, so a composer
-  // stuck to its bottom sits behind the keyboard; --dock lifts it to the
-  // visible bottom instead.
-  function dockAboveKeyboard() {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const root = document.documentElement.style;
-    const update = () => {
-      const keyboard = Math.round(window.innerHeight - vv.height - vv.offsetTop);
-      if (keyboard > 0) root.setProperty("--dock", `${keyboard + 8}px`);
-      else root.removeProperty("--dock");
-    };
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
   }
 
   // Scrolling down reads further into the list, so the composer gets out of

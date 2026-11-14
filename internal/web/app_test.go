@@ -85,6 +85,8 @@ func TestPageIsInstallable(t *testing.T) {
 		`name="apple-mobile-web-app-capable" content="yes"`,
 		`name="apple-mobile-web-app-status-bar-style"`,
 		"viewport-fit=cover",
+		// Android otherwise lays the keyboard over the page, hiding the docked composer.
+		"interactive-widget=resizes-content",
 		"safe-area-inset-bottom",
 		// A page whose status bar follows the phone has to follow it too.
 		`content="#f5f6f8" media="(prefers-color-scheme: light)"`,

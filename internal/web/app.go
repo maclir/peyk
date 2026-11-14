@@ -171,7 +171,7 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 // home indicator. In a browser tab they are all zero and nothing moves.
 const pageHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#131516" media="(prefers-color-scheme: dark)">
 <meta name="mobile-web-app-capable" content="yes">
