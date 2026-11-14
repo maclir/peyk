@@ -167,6 +167,23 @@ test.describe('signed in', () => {
     await expect(page.getByText('Push knip: done.')).toBeVisible();
   });
 
+  // Headless Chromium refuses notification permission, so the registration's
+  // notifications are stubbed: one per tag, each recording its own close.
+  test("opening a worker dismisses its notifications and no one else's", async () => {
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' })).toBeVisible();
+    await page.evaluate(() => {
+      const open = new Set(['k', 'h']);
+      (window as any).open_notes = open;
+      ServiceWorkerRegistration.prototype.getNotifications = async (filter?: { tag?: string }) =>
+        [...open].filter((t) => !filter?.tag || t === filter.tag).map((tag) => ({ tag, close: () => open.delete(tag) }) as any);
+    });
+
+    await page.evaluate(() => { location.hash = '#s-k'; });
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+    await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
+  });
+
   // A phone that freezes the app leaves its Firestore connection dead without
   // an offline event, and the SDK's next retry can be a minute away. Held
   // requests stand in for that dead connection.

@@ -184,6 +184,16 @@ async function start(cfg) {
     for (const t of app.querySelectorAll(typed)) if (drafts.has(t.id)) t.value = drafts.get(t.id);
     document.documentElement.classList.toggle("locked", view === "inbox" && state.picking);
     if (focused) document.getElementById(focused)?.focus();
+    if (s && !document.hidden) dismissNotes(s.id);
+  }
+
+  // Notifications are tagged with their worker's id; seeing the worker
+  // answers them.
+  function dismissNotes(id) {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.ready
+      .then((reg) => reg.getNotifications({ tag: id }))
+      .then((notes) => notes.forEach((n) => n.close()), () => {});
   }
 
   function setStatus(text, busy = false) {
