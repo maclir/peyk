@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, answerText, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, answerText, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -714,6 +714,7 @@ async function start(cfg) {
             h("span", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), h("span", { class: "grow" }), chip(st)),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
             s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
+              : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
               : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
             h("span", { class: "meta" },
               last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
@@ -741,8 +742,10 @@ async function start(cfg) {
     }
     const sent = h("div", { class: "reply sent" });
     sent.innerHTML = s.prompt ? renderMarkdown(s.prompt.text) : "<p>Nothing sent yet.</p>";
-    const msg = h("div", { class: "reply" });
-    msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
+    const pending = awaitingReply(s);
+    const msg = h("div", { class: pending ? "reply pending" : "reply" });
+    if (pending) msg.append(h("p", { role: "status" }, s.state === "working" ? spinner() : null, pendingLabel(s)));
+    else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
       h("div", { class: "dhead" },
         h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
@@ -759,7 +762,7 @@ async function start(cfg) {
       h("div", { class: "convo" },
         h("span", { class: "who mine" }, "You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""),
         sent,
-        h("span", { class: "who" }, s.title, s.message ? ` · ${ago(s.message.at, now)}` : ""),
+        h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
         msg,
       ),
       s.question ? questionCard(s) : null,

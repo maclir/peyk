@@ -129,6 +129,8 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .qfoot { display: flex; align-items: center; gap: 10px; }
 .qfoot .hint { flex: 1; min-width: 0; margin: 0; font-size: 0.78rem; color: var(--muted); }
 .msg.ask { color: var(--bad); }
+.msg.pending, .reply.pending { font-style: italic; color: var(--muted); }
+.reply.pending .spin { margin-right: 8px; color: var(--accent); }
 .convo { display: flex; flex-direction: column; gap: 4px; }
 .who { font-size: 0.72rem; color: var(--muted); margin-top: 6px; }
 .who.mine { align-self: flex-end; }

@@ -187,6 +187,11 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply.sent')).toHaveText('Now add --json', { timeout: 3000 });
     await expect(page.locator('.reply').last()).toHaveText('Halfway there');
     await page.context().unrouteAll({ behavior: 'ignoreErrors' });
+
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'running', state: 'working', updated_at: new Date(),
+      prompt: { text: 'And --yaml', at: new Date() }, message: { text: 'Halfway there', at: new Date(Date.now() - 60000) } });
+    await expect(page.locator('.reply.sent')).toHaveText('And --yaml');
+    await expect(page.locator('.reply.pending')).toHaveText('Working…');
   });
 
   test('a send that does not go out says so on its task', async () => {

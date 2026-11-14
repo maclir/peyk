@@ -159,3 +159,15 @@ export function answerText(question, picks) {
   }
   return `My answers to your questions:\n${lines.join("\n")}`;
 }
+
+// awaitingReply is true when the agent has not replied since the last prompt,
+// so its latest reply answers an earlier one.
+export function awaitingReply(s) {
+  if (!s.prompt) return false;
+  return !s.message || toDate(s.message.at) < toDate(s.prompt.at);
+}
+
+// pendingLabel says what the agent is doing with a prompt it has not answered.
+export function pendingLabel(s) {
+  return s.state === "working" ? "Working…" : s.state === "needs_input" ? "Waiting for you…" : "Not replied yet";
+}

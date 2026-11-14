@@ -165,6 +165,21 @@ describe('task lifecycle', () => {
   });
 });
 
+describe('pending reply', () => {
+  it('stands in for a reply older than the last prompt', async () => {
+    // @ts-expect-error plain browser module
+    const { awaitingReply, pendingLabel } = await import('../../internal/web/static/board.js');
+    const early = new Date(2026, 0, 1);
+    const late = new Date(2026, 0, 2);
+    expect(awaitingReply({})).toBe(false);
+    expect(awaitingReply({ prompt: { at: early } })).toBe(true);
+    expect(awaitingReply({ prompt: { at: late }, message: { at: early } })).toBe(true);
+    expect(awaitingReply({ prompt: { at: early }, message: { at: late } })).toBe(false);
+    expect(pendingLabel({ state: 'working' })).toBe('Working…');
+    expect(pendingLabel({ state: 'idle' })).toBe('Not replied yet');
+  });
+});
+
 describe('task images', () => {
   it('names an image by its SHA-256 and keeps one a remaining task shares', async () => {
     // @ts-expect-error plain browser module
