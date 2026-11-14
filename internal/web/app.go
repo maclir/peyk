@@ -32,6 +32,14 @@ type Firebase struct {
 	AuthDomain string `json:"authDomain"`
 	ProjectID  string `json:"projectId"`
 	AppID      string `json:"appId"`
+	// Emulators, for browser tests, points the page at local Auth and
+	// Firestore emulators (host:port each) instead of Google.
+	Emulators *Emulators `json:"emulators,omitempty"`
+}
+
+type Emulators struct {
+	Auth      string `json:"auth"`
+	Firestore string `json:"firestore"`
 }
 
 type App struct {
@@ -53,7 +61,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
 	mux.HandleFunc("GET /{$}", a.home)
-	return securityHeaders(a.firebase.AuthDomain, mux)
+	return securityHeaders(a.firebase, mux)
 }
 
 func (a *App) home(w http.ResponseWriter, _ *http.Request) {
@@ -125,11 +133,19 @@ func serviceWorker(w http.ResponseWriter, r *http.Request) {
 // securityHeaders allows exactly what Firebase sign-in and Firestore need:
 // Google's APIs for data and tokens, apis.google.com for the sign-in helper,
 // and the project's auth domain for the sign-in popup's frame.
-func securityHeaders(authDomain string, next http.Handler) http.Handler {
+func securityHeaders(fb Firebase, next http.Handler) http.Handler {
+	connect, frame := "'self' https://*.googleapis.com", ""
+	if fb.AuthDomain != "" {
+		frame = "https://" + fb.AuthDomain
+	}
+	if e := fb.Emulators; e != nil {
+		connect += " http://" + e.Auth + " http://" + e.Firestore
+		frame = "http://" + e.Auth
+	}
 	csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; " +
-		"script-src 'self' https://apis.google.com; connect-src 'self' https://*.googleapis.com; img-src 'self' data:"
-	if authDomain != "" {
-		csp += "; frame-src https://" + authDomain
+		"script-src 'self' https://apis.google.com; connect-src " + connect + "; img-src 'self' data:"
+	if frame != "" {
+		csp += "; frame-src " + frame
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", csp)

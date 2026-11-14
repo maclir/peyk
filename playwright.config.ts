@@ -17,7 +17,7 @@ export default defineConfig({
   webServer: {
     command: 'make test-server',
     url: `${testURL}/health`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

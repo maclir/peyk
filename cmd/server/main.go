@@ -21,12 +21,17 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	app := web.New(web.Firebase{
+	fb := web.Firebase{
 		APIKey:     os.Getenv("FIREBASE_API_KEY"),
 		AuthDomain: os.Getenv("FIREBASE_AUTH_DOMAIN"),
 		ProjectID:  os.Getenv("GOOGLE_CLOUD_PROJECT"),
 		AppID:      os.Getenv("FIREBASE_APP_ID"),
-	})
+	}
+	// firebase emulators:exec sets these for browser tests; Cloud Run never does.
+	if auth, store := os.Getenv("FIREBASE_AUTH_EMULATOR_HOST"), os.Getenv("FIRESTORE_EMULATOR_HOST"); auth != "" && store != "" {
+		fb.Emulators = &web.Emulators{Auth: auth, Firestore: store}
+	}
+	app := web.New(fb)
 	srv := &http.Server{Addr: ":" + port, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()

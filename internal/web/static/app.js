@@ -43,6 +43,11 @@ async function start(cfg) {
   const fb = initializeApp(cfg);
   const a = auth.getAuth(fb);
   const db = fs.getFirestore(fb);
+  if (cfg.emulators) {
+    auth.connectAuthEmulator(a, `http://${cfg.emulators.auth}`, { disableWarnings: true });
+    const [host, port] = cfg.emulators.firestore.split(":");
+    fs.connectFirestoreEmulator(db, host, Number(port));
+  }
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null };
   let unsubscribe = [];

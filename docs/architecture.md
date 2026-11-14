@@ -60,5 +60,5 @@ data, and a stale answer presented as a current one is worse than an honest
 
 ## Testing pyramid
 
-`make test` runs formatting/module verification, race-enabled Go tests, Firestore rules tests, Firestore adapter integration tests, and Playwright. Both Firestore layers use the local emulator. Playwright starts the real server without Firebase config and retains traces/screenshots on failure, which gives an agent inspectable evidence without production access.
+`make test` runs formatting/module verification, race-enabled Go tests, Firestore rules tests, Firestore adapter integration tests, and Playwright. Both Firestore layers use the local emulator. Playwright runs inside the Auth and Firestore emulators: it signs in through the Auth emulator's Google sign-in page, is refused until the owner claim is set, then exercises the board, a push command, and inbox add, edit and delete against data seeded as the agent would publish it. Passkey prompts cannot be driven in a test browser; their verification is covered by Go tests that sign real assertions and retains traces/screenshots on failure, which gives an agent inspectable evidence without production access.
 

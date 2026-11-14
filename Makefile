@@ -144,18 +144,23 @@ test-integration: node_modules ## Test the real Firestore adapter against the em
 	npx firebase emulators:exec --only firestore --project $(TEST_PROJECT) \
 		'go test -race -tags=integration -count=1 ./internal/store/...'
 
-test-server: ## Start the deterministic, credential-free E2E server.
-	# Ambient cloud variables are cleared, not just the obvious one. A populated
+test-server: ## Start the E2E server; test-e2e runs it inside the emulators.
+	# Every cloud variable is replaced, not just the obvious one. A populated
 	# .env must never change what the suite exercises, or make it billable.
-	GOOGLE_CLOUD_PROJECT= QUOTA_PROJECT= FIREBASE_API_KEY= FIREBASE_AUTH_DOMAIN= FIREBASE_APP_ID= PORT=$(TEST_PORT) go run ./cmd/server
+	# The emulator hosts come from firebase emulators:exec.
+	@test -n "$$FIRESTORE_EMULATOR_HOST" || { echo "run through make test-e2e, which starts the emulators"; exit 1; }
+	GOOGLE_CLOUD_PROJECT=$(TEST_PROJECT) QUOTA_PROJECT= GOOGLE_CLOUD_QUOTA_PROJECT= FIREBASE_API_KEY=fake-api-key \
+		FIREBASE_AUTH_DOMAIN=127.0.0.1 FIREBASE_APP_ID=fake-app PORT=$(TEST_PORT) go run ./cmd/server
 
-test-e2e: node_modules ## Test user journeys with Playwright.
+# The emulators wrap the whole Playwright run, so they stop with it; started
+# by Playwright's web server instead, they outlive it and hold their ports.
+test-e2e: node_modules ## Test user journeys with Playwright against the Auth and Firestore emulators.
 	npx playwright install chromium
-	npm run test:e2e
+	npx firebase emulators:exec --only auth,firestore --project $(TEST_PROJECT) 'npm run test:e2e'
 
 test-e2e-ui: node_modules ## Open Playwright's interactive debugger.
 	npx playwright install chromium
-	npm run test:e2e:ui
+	npx firebase emulators:exec --only auth,firestore --project $(TEST_PROJECT) 'npm run test:e2e:ui'
 
 docker-build: ## Prove the production container builds.
 	docker build -t $(APP_NAME):dev .

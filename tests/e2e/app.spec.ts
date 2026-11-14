@@ -1,17 +1,180 @@
-import { expect, test } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 
-// The test server has no Firebase config, so the shell says so instead of
-// offering a sign-in that cannot work. Signed-in behaviour is covered by the
-// rules tests and the module unit tests.
-test('the shell loads its modules and explains a missing Firebase config', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'peyk' })).toBeVisible();
-  await expect(page.getByText('not connected to Firebase')).toBeVisible();
-  expect(errors).toEqual([]);
+// The test server runs against the Auth and Firestore emulators (make
+// test-server). Data the laptop agent would publish is seeded through the
+// emulator's REST API with the admin token, which bypasses the rules.
+const PROJECT = 'peyk-test';
+const FIRESTORE = `http://127.0.0.1:8181/v1/projects/${PROJECT}/databases/(default)/documents`;
+const AUTH = `http://127.0.0.1:9190`;
+const admin = { Authorization: 'Bearer owner' };
+const EMAIL = 'owner@example.com';
+
+type Value = string | number | boolean | Date | null | Value[] | { [k: string]: Value };
+
+function encode(v: Value): Record<string, unknown> {
+  if (v === null) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encode) } };
+  if (typeof v === 'string') return { stringValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  return { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, encode(x)])) } };
+}
+
+async function put(page: Page, path: string, data: Record<string, Value>) {
+  const res = await page.request.patch(`${FIRESTORE}/${path}`, {
+    headers: admin,
+    data: { fields: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, encode(v)])) },
+  });
+  expect(res.ok(), await res.text()).toBe(true);
+}
+
+async function get(page: Page, path: string) {
+  const res = await page.request.get(`${FIRESTORE}/${path}`, { headers: admin });
+  expect(res.ok(), await res.text()).toBe(true);
+  return (await res.json()).fields;
+}
+
+async function list(page: Page, collection: string) {
+  const res = await page.request.get(`${FIRESTORE}/${collection}`, { headers: admin });
+  return ((await res.json()).documents ?? []) as { name: string; fields: Record<string, any> }[];
+}
+
+async function signIn(page: Page) {
+  const popupPromise = page.waitForEvent('popup');
+  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  const existing = popup.getByText(EMAIL);
+  if (await existing.isVisible().catch(() => false)) {
+    await existing.click();
+  } else {
+    await popup.getByText('Add new account').click();
+    await popup.getByLabel('Email').fill(EMAIL);
+    await popup.getByRole('button', { name: /Sign in with Google\.com/ }).click();
+  }
+  await popup.waitForEvent('close');
+}
+
+async function makeOwner(page: Page) {
+  const lookup = await page.request.post(`${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`, {
+    headers: admin, data: { email: [EMAIL] },
+  });
+  const uid = (await lookup.json()).users[0].localId;
+  const update = await page.request.post(`${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`, {
+    headers: admin, data: { localId: uid, customAttributes: JSON.stringify({ owner: true }) },
+  });
+  expect(update.ok()).toBe(true);
+}
+
+async function seed(page: Page) {
+  const now = new Date();
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
+  await put(page, 'laptop/status', { online: true, seen_at: now });
+  await put(page, 'sessions/k', {
+    id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'unpushed', updated_at: now,
+    git: { branch: 'main', upstream: 'origin/main', unpushed: 2, dirty: 0, last: { hash: '3f2a1c4', subject: 'Report unused exports', at: minutesAgo(12) } },
+    message: { text: '## Done\n\nCommitted **3f2a1c4**.\n\n- `make test` passes', at: minutesAgo(12) },
+  });
+  await put(page, 'sessions/h', {
+    id: 'h', title: 'hamta', path: '/c/hamta', aoe_status: 'waiting', state: 'needs_input', updated_at: now,
+    message: { text: 'Include archived rows?', at: minutesAgo(4) },
+  });
+  await put(page, 'projects/knip', { name: 'knip', path: '/c/knip', session_id: 'k', free: true, busy: '', active: minutesAgo(12) });
+  await put(page, 'projects/hamta', { name: 'hamta', path: '/c/hamta', session_id: 'h', free: false, busy: 'needs input', active: minutesAgo(4) });
+  await put(page, 'tasks/sent', { project: 'hamta', text: 'Add CSV export', status: 'dispatched', session_id: 'h', created_at: minutesAgo(60), dispatched_at: minutesAgo(30) });
+  await put(page, 'tasks/old', { project: 'knip', text: 'Detect unused exports', status: 'done', session_id: 'k', created_at: minutesAgo(90), done_at: minutesAgo(12), commit: '3f2a1c4' });
+}
+
+test.describe('signed in', () => {
+  test.describe.configure({ mode: 'serial' });
+  // One browser stays signed in across these steps, as a phone would.
+  let page: Page;
+
+  test.beforeAll(async ({ browser, request }) => {
+    await request.delete(`http://127.0.0.1:8181/emulator/v1/projects/${PROJECT}/databases/(default)/documents`);
+    await request.delete(`${AUTH}/emulator/v1/projects/${PROJECT}/accounts`);
+    page = await (await browser.newContext()).newPage();
+  });
+
+  test.afterAll(async () => page.context().close());
+
+  test('a new account is not the owner until the laptop says so', async () => {
+    await seed(page);
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.getByText(`${EMAIL} is signed in but is not the owner.`)).toBeVisible();
+    await expect(page.getByText(`make owner EMAIL=${EMAIL}`)).toBeVisible();
+
+    await makeOwner(page);
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signIn(page);
+    await expect(page.getByText('laptop online')).toBeVisible();
+  });
+
+  test('the board groups sessions and shows what each is doing', async () => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
+    const hamta = page.locator('.card', { hasText: 'hamta' });
+    await expect(hamta.getByText('needs input')).toBeVisible();
+    await expect(hamta.getByText('Task: Add CSV export')).toBeVisible();
+    const knip = page.locator('.card', { hasText: 'knip' });
+    await expect(knip.getByText('2 unpushed')).toBeVisible();
+
+    await knip.click();
+    await expect(page.getByRole('heading', { name: 'Done' })).toBeVisible();
+    await expect(page.locator('.reply strong')).toHaveText('3f2a1c4');
+    await expect(page.locator('.reply code')).toHaveText('make test');
+  });
+
+  test('push asks the laptop and shows its answer', async () => {
+    await page.goto('/#s-k');
+    await page.getByRole('button', { name: 'Push 2' }).click();
+    await expect(page.getByText('Push knip: waiting for the laptop…')).toBeVisible();
+    const [cmd] = await list(page, 'commands');
+    expect(cmd.fields.type.stringValue).toBe('push');
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'push', session: 'k' });
+    expect(cmd.fields.assertion).toBeUndefined();
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(page.getByText('Push knip: done.')).toBeVisible();
+  });
+
+  test('the inbox adds, edits and deletes tasks', async () => {
+    await page.goto('/#inbox');
+    await expect(page.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('radio', { name: /knip/ }).click();
+    await page.getByLabel('New task').fill('Add --json output');
+    await page.getByRole('button', { name: 'Add' }).click();
+
+    const task = page.locator('.task', { hasText: 'Add --json output' });
+    await expect(task.locator('.proj')).toContainText('knip');
+    await expect(task.getByRole('button', { name: 'Send' })).toBeVisible();
+
+    await task.getByRole('button', { name: /Edit task/ }).click();
+    const editor = page.locator('form.task.editing');
+    await editor.getByLabel('Task text').fill('Add --json and --csv output');
+    await editor.getByLabel('Project').selectOption('hamta');
+    await editor.getByRole('button', { name: 'Save' }).click();
+    const edited = page.locator('.task', { hasText: 'Add --json and --csv output' });
+    await expect(edited.locator('.proj')).toContainText('hamta');
+    await expect(edited.getByText('needs input')).toBeVisible();
+
+    await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
+    await edited.getByRole('button', { name: /Delete task/ }).click();
+    await expect(edited).toHaveCount(0);
+  });
 });
+
+// Strips Firestore's typed values back to plain ones for a rewrite.
+function plain(fields: Record<string, any>): Record<string, Value> {
+  const out: Record<string, Value> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if ('stringValue' in v) out[k] = v.stringValue;
+    else if ('timestampValue' in v) out[k] = new Date(v.timestampValue);
+    else if ('booleanValue' in v) out[k] = v.booleanValue;
+  }
+  return out;
+}
 
 // An icon on a home screen has no browser chrome behind it, so a launch with no
 // signal must reach the app rather than the browser's error page. Data is never
