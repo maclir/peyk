@@ -57,7 +57,7 @@ export TEST_PORT
 
 .PHONY: help run build vendor status icons clean tidy verify test test-unit test-js test-integration test-rules \
 	test-e2e test-e2e-ui test-server docker-build gcp-bootstrap deploy deploy-rules \
-	smoke new gcp-guard adc-guard domain serve owner pair unpair keys
+	smoke new gcp-guard adc-guard domain serve owner pair unpair keys harden
 
 help:
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "%-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -108,6 +108,9 @@ unpair: ## Stop trusting a passkey: make unpair LABEL=pixel
 
 keys: ## List trusted passkeys.
 	@go run ./cmd/peyk keys
+
+harden: gcp-guard ## Disable sign-up, restrict the browser key to the app, add a budget alert.
+	./scripts/harden.sh
 
 owner: gcp-guard ## Admit a Google account after its first sign-in: make owner EMAIL=you@example.com
 	@test -n "$(EMAIL)" || { echo "EMAIL is required"; exit 1; }

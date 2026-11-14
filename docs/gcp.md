@@ -53,6 +53,15 @@ to be enabled once in the console (Authentication → Sign-in method → Google)
 because that step creates the OAuth client. Add the Cloud Run hostname under
 Authentication → Settings → Authorized domains.
 
+## Hardening
+
+`make harden` (rerunnable) disables Firebase sign-up once the owner account
+exists, which requires and performs the Identity Platform upgrade (free at
+this scale); restricts the Firebase browser key to the app's addresses and the
+auth domain; and creates a budget of `BUDGET` (default 5) in the billing
+account's currency with alerts at 50, 90 and 100 percent. A new Cloud Run
+address or custom domain needs `make harden` again, or the key refuses it.
+
 ## A custom domain
 
 ```sh
