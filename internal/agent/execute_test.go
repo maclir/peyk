@@ -33,6 +33,10 @@ func (f *fakeActions) Create(_ context.Context, dir, title string) (string, erro
 	f.calls = append(f.calls, "create "+title+" in "+dir)
 	return "new-" + title, nil
 }
+func (f *fakeActions) Clear(_ context.Context, s string) error {
+	f.calls = append(f.calls, "clear "+s)
+	return nil
+}
 func (f *fakeActions) Stop(_ context.Context, s string) error {
 	f.calls = append(f.calls, "stop "+s)
 	return nil
@@ -90,6 +94,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 		session.Snapshot{ID: "h", Title: "hamta", Path: "/c/hamta", State: session.Working},
 		session.Snapshot{ID: "z", Title: "zynk", Path: "/c/zynk", State: session.Unpushed, Git: &session.Git{Unpushed: 1}},
 		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
+		session.Snapshot{ID: "f", Title: "fresh", Path: "/c/fresh", State: session.Idle, Cleared: true},
 	)
 	mem := store.NewMemory()
 	acts := &fakeActions{}
@@ -110,6 +115,10 @@ func TestExecuteCommands(t *testing.T) {
 		failure string
 	}{
 		{"dispatch to a free session", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json"}, "send k: Add --json", ""},
+		{"clear, then dispatch", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json", Clear: true}, "clear k|send k: Add --json", ""},
+		{"clear an unpushed session, then dispatch", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x", Clear: true}, "clear z|send z: x", ""},
+		{"dispatch to a session already cleared", command.Payload{Type: command.Dispatch, Project: "fresh", Task: "t1", Text: "x", Clear: true}, "send f: x", ""},
+		{"a new session needs no clearing", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login", Clear: true}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
 		{"dispatch to a repository without a session", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login"}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
 		{"dispatch to a busy session", command.Payload{Type: command.Dispatch, Project: "hamta", Task: "t1", Text: "x"}, "", "hamta is not free: working"},
 		{"dispatch to a session with only unpushed commits", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x"}, "send z: x", ""},

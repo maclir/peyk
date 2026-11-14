@@ -69,11 +69,22 @@ type Snapshot struct {
 	Git       *Git     `firestore:"git" json:"git,omitempty"`
 	Message   *Message `firestore:"message" json:"message,omitempty"`
 	// Prompt is the last thing a person sent the agent.
-	Prompt    *Message  `firestore:"prompt" json:"prompt,omitempty"`
+	Prompt *Message `firestore:"prompt" json:"prompt,omitempty"`
+	// Cleared is true while the session's conversation is empty: just
+	// started, or just cleared with /clear.
+	Cleared   bool      `firestore:"cleared" json:"cleared"`
 	UpdatedAt time.Time `firestore:"updated_at" json:"updated_at"`
 	// Transcript is where the session's conversation is read from. It is
 	// the laptop's business and is not published.
 	Transcript Transcript `firestore:"-" json:"-"`
+}
+
+// SetExchange records the latest reply and prompt read from the transcript.
+// A conversation is known to be empty only when its own transcript, rather
+// than a guess at the directory's newest one, has neither.
+func (s *Snapshot) SetExchange(reply, prompt *Message) {
+	s.Message, s.Prompt = reply, prompt
+	s.Cleared = s.Transcript.ID != "" && reply == nil && prompt == nil
 }
 
 // Transcript locates a Claude Code transcript: the directory for the

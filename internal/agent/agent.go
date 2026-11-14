@@ -148,7 +148,7 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 	docs := make(map[string]any, len(a.sessions))
 	for id, s := range a.sessions {
 		if s.State == session.Working {
-			s.Message, s.Prompt = a.Collect.Exchange(s.Transcript)
+			s.SetExchange(a.Collect.Exchange(s.Transcript))
 			a.sessions[id] = s
 		}
 		docs[id] = s

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/maclir/peyk/internal/laptop"
 )
@@ -18,6 +19,16 @@ func (a actions) Send(ctx context.Context, session, text string) error {
 
 func (a actions) Create(ctx context.Context, dir, title string) (string, error) {
 	return a.aoe.Create(ctx, dir, title, a.group)
+}
+
+// clearWithin bounds the wait for a cleared session's new conversation, which
+// Claude Code starts in well under a second.
+const clearWithin = 20 * time.Second
+
+func (a actions) Clear(ctx context.Context, session string) error {
+	ctx, cancel := context.WithTimeout(ctx, clearWithin)
+	defer cancel()
+	return a.aoe.Clear(ctx, session, 250*time.Millisecond)
 }
 
 func (a actions) Stop(ctx context.Context, session string) error { return a.aoe.Stop(ctx, session) }

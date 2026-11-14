@@ -26,19 +26,18 @@ type Collector struct {
 func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot {
 	git := RepoState(ctx, c.Run, s.Path)
 	t := session.Transcript{Dir: TranscriptDir(c.ClaudeDir, s.Path), ID: s.AgentSessionID}
-	reply, prompt := LastExchange(t)
-	return session.Snapshot{
+	snap := session.Snapshot{
 		ID:         s.ID,
 		Title:      s.Title,
 		Path:       s.Path,
 		AoeStatus:  s.Status,
 		State:      session.Derive(s.Status, git),
 		Git:        git,
-		Message:    reply,
-		Prompt:     prompt,
 		Transcript: t,
 		UpdatedAt:  c.Now(),
 	}
+	snap.SetExchange(LastExchange(t))
+	return snap
 }
 
 // Exchange rereads a session's latest reply and prompt from its transcript.

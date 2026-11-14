@@ -325,3 +325,54 @@ func TestReposListsGitRepositoriesUnderRoot(t *testing.T) {
 		t.Fatal("a missing root should fail, not publish an empty picker")
 	}
 }
+
+func TestClearWaitsForTheNewConversation(t *testing.T) {
+	var calls []string
+	shows := 0
+	run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args[2:], " "))
+		if args[2] == "session" {
+			shows++
+			id := "old"
+			if shows > 3 {
+				id = "new"
+			}
+			return []byte(`{"id":"k","agent_session_id":"` + id + `"}`), nil
+		}
+		return nil, nil
+	}
+	if err := (Aoe{Profile: "p", Run: run}).Clear(context.Background(), "k", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(calls, "|"); got != "session show k --json|send k /clear|session show k --json|session show k --json|session show k --json" {
+		t.Fatalf("calls = %s", got)
+	}
+}
+
+func TestClearGivesUpWhenNoNewConversationStarts(t *testing.T) {
+	run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+		return []byte(`{"id":"k","agent_session_id":"old"}`), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", time.Millisecond); err == nil || !strings.Contains(err.Error(), "no new conversation") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSnapshotIsClearedOnlyWithAnEmptyOwnTranscript(t *testing.T) {
+	claude := t.TempDir()
+	work := "/w"
+	writeTranscript(t, claude, work, "empty", time.Now(), `{"type":"system"}`)
+	writeTranscript(t, claude, work, "used", time.Now(), human("2026-11-14T09:00:00Z", `"hi"`))
+	for _, tt := range []struct {
+		id      string
+		cleared bool
+	}{{"empty", true}, {"used", false}, {"", false}} {
+		s := session.Snapshot{Transcript: session.Transcript{Dir: TranscriptDir(claude, work), ID: tt.id}}
+		s.SetExchange(LastExchange(s.Transcript))
+		if s.Cleared != tt.cleared {
+			t.Errorf("transcript %q: cleared = %v", tt.id, s.Cleared)
+		}
+	}
+}

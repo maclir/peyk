@@ -16,6 +16,9 @@ type Actions interface {
 	Send(ctx context.Context, session, text string) error
 	// Create adds a session for a repository that has none and returns its id.
 	Create(ctx context.Context, dir, title string) (string, error)
+	// Clear starts a session on a fresh conversation and returns once it
+	// has one, so a prompt sent next lands in it.
+	Clear(ctx context.Context, session string) error
 	Stop(ctx context.Context, session string) error
 	Push(ctx context.Context, dir string) error
 }
@@ -68,6 +71,10 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if id == "" {
 			if id, err = act.Create(ctx, proj.Path, proj.Name); err != nil {
 				return err
+			}
+		} else if p.Clear && !a.sessions[id].Cleared {
+			if err := act.Clear(ctx, id); err != nil {
+				return fmt.Errorf("clear %s: %w", proj.Name, err)
 			}
 		}
 		sentAt := a.Now()

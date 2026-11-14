@@ -67,6 +67,17 @@ async function makeOwner(page: Page) {
   expect(update.ok()).toBe(true);
 }
 
+// Passkeys need a real domain, and the test server is reached by IP, so the
+// browser's assertion is stubbed; Go tests verify real signatures.
+async function passkeyOn(page: Page) {
+  await page.evaluate(() => {
+    const bytes = () => new Uint8Array([1, 2, 3]).buffer;
+    Object.defineProperty(navigator.credentials, 'get', {
+      value: async () => ({ rawId: bytes(), response: { authenticatorData: bytes(), clientDataJSON: bytes(), signature: bytes() } }),
+    });
+  });
+}
+
 async function seed(page: Page) {
   const now = new Date();
   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
@@ -173,10 +184,27 @@ test.describe('signed in', () => {
     await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
     await page.goto('/#inbox');
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
-    await task.getByRole('button', { name: 'Send' }).click();
+    await task.getByRole('button', { name: 'Send without clearing' }).click();
     await expect(task.getByRole('status')).toHaveText('Send to knip: the laptop is offline, so nothing was sent.');
     await page.request.delete(`${FIRESTORE}/tasks/proto`, { headers: admin });
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+  });
+
+  test('a task clears its worker first unless the worker is already cleared', async () => {
+    await put(page, 'tasks/ctx', { project: 'knip', text: 'Start fresh', status: 'queued', created_at: new Date() });
+    await page.goto('/#inbox');
+    await passkeyOn(page);
+    const task = page.locator('.task', { hasText: 'Start fresh' });
+    await task.getByRole('button', { name: 'Clear & send' }).click();
+    await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'ctx', clear: true });
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
+    await expect(task.getByRole('button', { name: 'Clear & send' })).toHaveCount(0);
+    await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+    await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
   });
 
   test('the inbox adds, edits and deletes tasks', async () => {
@@ -188,7 +216,7 @@ test.describe('signed in', () => {
 
     const task = page.locator('.task', { hasText: 'Add --json output' });
     await expect(task.locator('.proj')).toContainText('knip');
-    await expect(task.getByRole('button', { name: 'Send' })).toBeVisible();
+    await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 
     await task.getByRole('button', { name: /Edit task/ }).click();
     const editor = page.locator('form.task.editing');

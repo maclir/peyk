@@ -63,6 +63,9 @@ type Payload struct {
 	Project string `json:"project,omitempty"`
 	Task    string `json:"task,omitempty"`
 	Text    string `json:"text,omitempty"`
+	// Clear asks a dispatch to start the worker on a fresh conversation
+	// first, unless it already has one.
+	Clear bool `json:"clear,omitempty"`
 	// Expires is Unix milliseconds.
 	Expires int64 `json:"expires"`
 }

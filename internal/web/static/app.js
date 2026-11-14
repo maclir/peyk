@@ -83,7 +83,7 @@ async function start(cfg) {
     unsubscribe = [];
   }
   function failed(err) {
-    notice(`Cannot read sessions: ${err.code === "permission-denied" ? "this account is not the owner." : err.message}`);
+    notice(`Cannot read workers: ${err.code === "permission-denied" ? "this account is not the owner." : err.message}`);
   }
 
   // A phone freezes a backgrounded app and its Firestore connection dies
@@ -159,7 +159,7 @@ async function start(cfg) {
     const s = id && state.sessions.get(id);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
-      h("a", { href: "#", class: view === "board" ? "on" : "" }, "Sessions"),
+      h("a", { href: "#", class: view === "board" ? "on" : "" }, "Workers"),
       h("a", { href: "#inbox", class: view === "inbox" ? "on" : "" }, `Inbox${queuedCount() ? ` · ${queuedCount()}` : ""}`),
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.status);
@@ -223,7 +223,7 @@ async function start(cfg) {
       }
     });
     return h("article", { class: "detail" },
-      h("a", { class: "back", href: "#" }, "← Sessions"),
+      h("a", { class: "back", href: "#" }, "← Workers"),
       h("h2", {}, "Pair this device"),
       h("p", {}, "Commands to the laptop are signed with a passkey on this device. Create one, then confirm its fingerprint on the laptop."),
       button, out);
@@ -270,12 +270,24 @@ async function start(cfg) {
     const now = Date.now();
     // A send's outcome stays on its task, which may have moved between groups
     // since, rather than in a status line scrolled out of view.
-    const send = (t) => {
+    const send = (t, clear) => {
       const report = (text) => {
         state.sends.set(t.id, text);
         render();
       };
-      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text }, `Send to ${t.project}`, report);
+      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear }, clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
+    };
+    // A worker with a conversation is cleared first by default, so a task
+    // starts on its own context; sending into the conversation is the
+    // exception. A new or just-cleared worker has nothing to clear.
+    const sendButtons = (t) => {
+      const p = projects.find((x) => x.name === t.project);
+      const worker = p && p.session_id && state.sessions.get(p.session_id);
+      if (!worker || worker.cleared) return h("button", { type: "button", class: "primary", onclick: () => send(t, false) }, "Send");
+      return [
+        h("button", { type: "button", class: "primary", onclick: () => send(t, true) }, "Clear & send"),
+        h("button", { type: "button", "aria-label": "Send without clearing", title: "Send into the current conversation", onclick: () => send(t, false) }, "Send"),
+      ];
     };
     const item = (t, why) => {
       if (state.editing === t.id) return editor(t, projects);
@@ -286,7 +298,7 @@ async function start(cfg) {
           why ? h("div", { class: "meta" }, why) : null,
           state.sends.has(t.id) ? h("div", { class: "meta sent", role: "status" }, state.sends.get(t.id)) : null,
         ),
-        why ? null : h("button", { type: "button", class: "primary", onclick: () => send(t) }, "Send"),
+        why ? null : sendButtons(t),
         h("button", { type: "button", class: "icon", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; render(); } }, "✎"),
         h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
       );
@@ -297,7 +309,7 @@ async function start(cfg) {
       h("p", { class: "alert", id: "alert", role: "status" }),
       h("h2", { class: "group" }, "Ready to send"),
       ready.length ? ready.map((t) => item(t)) : h("p", { class: "empty" }, "Nothing queued for a free project."),
-      h("h2", { class: "group" }, "Waiting on its session"),
+      h("h2", { class: "group" }, "Waiting on its worker"),
       waiting.length ? waiting.map((t) => item(t, t.why)) : h("p", { class: "empty" }, "Nothing waiting."),
       finished.length ? h("h2", { class: "group" }, "Done") : null,
       finished.map((t) =>
@@ -405,9 +417,9 @@ async function start(cfg) {
     const now = Date.now();
     const list = sortSessions([...state.sessions.values()]);
     const pushRow = state.push === "off"
-      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a session finishes or needs you."), h("button", { type: "button", onclick: turnOnPush }, "Turn on notifications"))
+      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), h("button", { type: "button", onclick: turnOnPush }, "Turn on notifications"))
       : null;
-    if (!list.length) return h("div", {}, pushRow, h("p", { class: "notice" }, "No sessions published yet. Start the agent on the laptop with make serve."));
+    if (!list.length) return h("div", {}, pushRow, h("p", { class: "notice" }, "No workers published yet. Start the agent on the laptop with make serve."));
     const out = [pushRow];
     let group = "";
     for (const s of list) {
@@ -426,6 +438,7 @@ async function start(cfg) {
             last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
             h("span", {}, pushLabel(s.git)),
             s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
+            s.cleared ? h("span", {}, "cleared") : null,
           ),
         ),
       );
@@ -451,7 +464,7 @@ async function start(cfg) {
     const msg = h("div", { class: "reply" });
     msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
-      h("a", { class: "back", href: "#" }, "← Sessions"),
+      h("a", { class: "back", href: "#" }, "← Workers"),
       h("h2", {}, s.title),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       g && g.pending && g.pending.length ? pending(g, now) : null,

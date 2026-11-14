@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // AoeSession is one aoe session as `aoe list` and `aoe session show` report it.
@@ -70,6 +71,33 @@ func (a Aoe) Show(ctx context.Context, id string) (AoeSession, error) {
 func (a Aoe) Send(ctx context.Context, id, text string) error {
 	_, err := a.cmd(ctx, "send", id, text)
 	return err
+}
+
+// Clear sends /clear and waits, checking every poll, until aoe reports the
+// new conversation Claude Code starts for it. Text sent before then could
+// reach the old conversation or be typed into the clear itself.
+func (a Aoe) Clear(ctx context.Context, id string, poll time.Duration) error {
+	before, err := a.Show(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := a.Send(ctx, id, "/clear"); err != nil {
+		return err
+	}
+	for {
+		s, err := a.Show(ctx, id)
+		if err != nil {
+			return err
+		}
+		if s.AgentSessionID != "" && s.AgentSessionID != before.AgentSessionID {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("no new conversation after /clear: %w", ctx.Err())
+		case <-time.After(poll):
+		}
+	}
 }
 
 // Stop stops a session's agent process.
