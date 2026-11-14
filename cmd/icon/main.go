@@ -34,13 +34,12 @@ const (
 	tileR = 7.0 // corner radius of the app tile, a shade over a fifth of the side
 
 	// A launcher tile wants more air around the mark than a favicon does, where
-	// every pixel of the sixteen counts.
-	tileScale = 0.82
+	// every pixel of the sixteen counts. The mark covers this share of the tile.
+	tileCoverage = 0.31
 
 	// A maskable icon may be cropped to the circle that fits inside the middle
-	// 80% of the square. The mark's corners sit further out than that, so it is
-	// drawn smaller in that one file.
-	maskableScale = 0.75
+	// 80% of the square, whose radius this is.
+	safeRadius = grid * 0.4
 
 	samples = 8 // supersampling per axis
 )
@@ -66,19 +65,58 @@ func main() {
 	// ground.
 	write(filepath.Join(*out, "icon.svg"), markSVG())
 	write(filepath.Join(*out, "favicon.ico"), ico(16, 32, 48))
-	write(filepath.Join(*out, "icon-192.png"), encode(draw(192, roundedTile(tileR), accent, white, tileScale)))
-	write(filepath.Join(*out, "icon-512.png"), encode(draw(512, roundedTile(tileR), accent, white, tileScale)))
-	write(filepath.Join(*out, "icon-maskable-512.png"), encode(draw(512, square(), accent, white, maskableScale)))
+	tile, maskable := onTile()
+	write(filepath.Join(*out, "icon-192.png"), encode(draw(192, roundedTile(tileR), accent, white, tile)))
+	write(filepath.Join(*out, "icon-512.png"), encode(draw(512, roundedTile(tileR), accent, white, tile)))
+	write(filepath.Join(*out, "icon-maskable-512.png"), encode(draw(512, square(), accent, white, maskable)))
 	// iOS rounds the corners itself, so this one is handed over square.
-	write(filepath.Join(*out, "apple-touch-icon.png"), encode(draw(180, square(), accent, white, tileScale)))
+	write(filepath.Join(*out, "apple-touch-icon.png"), encode(draw(180, square(), accent, white, tile)))
 	// Android draws a notification's status-bar badge from its alpha channel
 	// alone, so an opaque tile there is a solid white square.
-	write(filepath.Join(*out, "notification-badge.png"), encode(draw(96, nothing(), transparent, white, 1)))
+	write(filepath.Join(*out, "notification-badge.png"), encode(draw(96, nothing(), transparent, white, asDrawn)))
 }
 
-// draw renders one icon: a background, then the mark laid over it. scale shrinks
-// the mark about the centre of the grid without moving the background.
-func draw(size int, bg shape, bgColor, fgColor color.NRGBA, scale float64) *image.NRGBA {
+// A placement draws the mark's point (cx, cy) at the centre of the grid,
+// scaled by s about that point.
+type placement struct{ cx, cy, s float64 }
+
+var asDrawn = placement{grid / 2, grid / 2, 1}
+
+// onTile places the mark on a launcher tile by its centroid rather than its
+// bounding box: the tail adds weight low and to the left, and a bounding-box
+// centre leaves the bubble looking high. The maskable placement shrinks the
+// mark further only if some part of it would leave the safe circle.
+func onTile() (tile, maskable placement) {
+	const n = 512
+	fg := mark()
+	var area, sx, sy float64
+	var pts [][2]float64
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			x, y := (float64(j)+0.5)*grid/n, (float64(i)+0.5)*grid/n
+			if fg(x, y) {
+				area++
+				sx += x
+				sy += y
+				pts = append(pts, [2]float64{x, y})
+			}
+		}
+	}
+	cx, cy := sx/area, sy/area
+	area *= (grid / n) * (grid / n)
+	tile = placement{cx, cy, math.Sqrt(tileCoverage * grid * grid / area)}
+
+	var reach float64
+	for _, p := range pts {
+		reach = math.Max(reach, math.Hypot(p[0]-cx, p[1]-cy))
+	}
+	maskable = tile
+	maskable.s = math.Min(tile.s, safeRadius/reach)
+	return tile, maskable
+}
+
+// draw renders one icon: a background, then the mark laid over it at p.
+func draw(size int, bg shape, bgColor, fgColor color.NRGBA, p placement) *image.NRGBA {
 	fg := mark()
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
 	unit := grid / float64(size)
@@ -93,7 +131,7 @@ func draw(size int, bg shape, bgColor, fgColor color.NRGBA, scale float64) *imag
 					if bg(x, y) {
 						bgHits++
 					}
-					if fg(grid/2+(x-grid/2)/scale, grid/2+(y-grid/2)/scale) {
+					if fg(p.cx+(x-grid/2)/p.s, p.cy+(y-grid/2)/p.s) {
 						fgHits++
 					}
 				}
@@ -123,7 +161,7 @@ func over(fg color.NRGBA, fa float64, bg color.NRGBA, ba float64) color.NRGBA {
 // The tail and the dots as points, shared by the rasteriser and the SVG so the
 // two cannot draw different shapes.
 var (
-	tail = [3][2]float64{{6.2, 20.5}, {5.2, 29.4}, {15.8, 22}}
+	tail = [3][2]float64{{6.6, 21}, {5.9, 27.4}, {13.4, 23.4}}
 	dots = [3][2]float64{{12.6, 10.6}, {19.4, 10.6}, {16, 16.6}}
 )
 
@@ -215,7 +253,7 @@ func ico(sizes ...int) []byte {
 	offset := 6 + 16*len(sizes)
 
 	for _, size := range sizes {
-		frame := encode(draw(size, nothing(), transparent, ink, 1))
+		frame := encode(draw(size, nothing(), transparent, ink, asDrawn))
 		dir.Write([]byte{byte(size), byte(size), 0, 0})
 		binary.Write(&dir, binary.LittleEndian, uint16(1))          // colour planes
 		binary.Write(&dir, binary.LittleEndian, uint16(32))         // bits per pixel
