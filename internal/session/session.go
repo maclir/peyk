@@ -55,6 +55,37 @@ type Git struct {
 	Pending []Commit `firestore:"pending" json:"pending,omitempty"`
 	Dirty   int      `firestore:"dirty" json:"dirty"`
 	Last    *Commit  `firestore:"last" json:"last,omitempty"`
+	// CI is the GitHub Actions result for Pushed.
+	CI *CI `firestore:"ci" json:"ci,omitempty"`
+	// Pushed is the full hash the upstream branch points at, and Repo the
+	// owner/name of its GitHub repository when that repository has
+	// workflows. They are the laptop's business and are not published.
+	Pushed string `firestore:"-" json:"-"`
+	Repo   string `firestore:"-" json:"-"`
+}
+
+// CIState is how a pushed commit's workflow runs went.
+type CIState string
+
+const (
+	CIQueued    CIState = "queued"
+	CIRunning   CIState = "running"
+	CISuccess   CIState = "success"
+	CIFailure   CIState = "failure"
+	CICancelled CIState = "cancelled"
+)
+
+// Done is true once no run for the commit can change.
+func (s CIState) Done() bool { return s == CISuccess || s == CIFailure || s == CICancelled }
+
+// CI is the workflow run that best says how a pushed commit is doing: a
+// failed one if any failed, else one still going, else a successful one.
+type CI struct {
+	SHA      string  `firestore:"sha" json:"sha"`
+	Workflow string  `firestore:"workflow" json:"workflow"`
+	State    CIState `firestore:"state" json:"state"`
+	// URL is the run's page on GitHub.
+	URL string `firestore:"url" json:"url"`
 }
 
 // MaxPending bounds the unpushed commits a snapshot carries, so a branch far

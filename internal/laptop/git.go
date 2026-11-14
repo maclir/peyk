@@ -2,6 +2,8 @@ package laptop
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +37,8 @@ func RepoState(ctx context.Context, run Runner, dir string) *session.Git {
 	if upstream, err := git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
 		g.Upstream = upstream
 		unpushed = []string{"@{u}..HEAD"}
+		g.Pushed, _ = git("rev-parse", "@{u}")
+		g.Repo = workflowRepo(git, g.Branch)
 	} else if g.Last == nil {
 		return g
 	}
@@ -52,6 +56,43 @@ func RepoState(ctx context.Context, run Runner, dir string) *session.Git {
 		}
 	}
 	return g
+}
+
+// workflowRepo is the owner/name of the GitHub repository branch pushes to,
+// or "" when it is elsewhere or the checkout has no workflows to run there.
+func workflowRepo(git func(...string) (string, error), branch string) string {
+	top, err := git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(top, ".github", "workflows")); err != nil {
+		return ""
+	}
+	remote, err := git("config", "branch."+branch+".remote")
+	if err != nil {
+		return ""
+	}
+	url, err := git("remote", "get-url", remote)
+	if err != nil {
+		return ""
+	}
+	return GitHubRepo(url)
+}
+
+// GitHubRepo returns owner/name for a github.com remote URL, or "".
+func GitHubRepo(url string) string {
+	var path string
+	for _, prefix := range []string{"git@github.com:", "https://github.com/", "ssh://git@github.com/"} {
+		if rest, ok := strings.CutPrefix(url, prefix); ok {
+			path = rest
+			break
+		}
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	if parts := strings.Split(path, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return path
 }
 
 const commitFormat = "%h%x00%s%x00%cI"

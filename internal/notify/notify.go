@@ -28,14 +28,21 @@ type Note struct {
 	URL     string `json:"url"`
 }
 
-// Changes returns a note for each session that started needing you or
-// finished a turn between two refreshes. A session absent from prev is new to
-// the agent, not changed, so it gets none.
+// Changes returns a note for each session that started needing you,
+// finished a turn, or whose pushed commit's workflow failed between two
+// refreshes. A session absent from prev is new to the agent, not changed, so
+// it gets none.
 func Changes(prev, next map[string]session.Snapshot) []Note {
 	var notes []Note
 	for id, n := range next {
 		p, ok := prev[id]
-		if !ok || p.State == n.State {
+		if !ok {
+			continue
+		}
+		if ci := ciOf(n); ci != nil && ci.State == session.CIFailure && !sameFailure(ciOf(p), ci) {
+			notes = append(notes, Note{Session: id, Title: n.Title + ": " + ci.Workflow + " failed", Body: ciBody(n), URL: "/#s-" + id})
+		}
+		if p.State == n.State {
 			continue
 		}
 		var title string
@@ -53,6 +60,24 @@ func Changes(prev, next map[string]session.Snapshot) []Note {
 	}
 	sort.Slice(notes, func(i, j int) bool { return notes[i].Session < notes[j].Session })
 	return notes
+}
+
+func ciOf(s session.Snapshot) *session.CI {
+	if s.Git == nil {
+		return nil
+	}
+	return s.Git.CI
+}
+
+func sameFailure(a, b *session.CI) bool {
+	return a != nil && a.State == session.CIFailure && a.SHA == b.SHA
+}
+
+func ciBody(s session.Snapshot) string {
+	if g := s.Git; g.Last != nil && g.Unpushed == 0 {
+		return g.Last.Hash + " " + oneLine(g.Last.Subject)
+	}
+	return s.Git.CI.SHA[:min(7, len(s.Git.CI.SHA))]
 }
 
 func body(s session.Snapshot) string {

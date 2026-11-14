@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2/google"
@@ -127,6 +128,11 @@ func runAgent(ctx context.Context) error {
 			Attachments: attachmentsDir(),
 		},
 	}
+	if gh, err := github(ctx); err != nil {
+		logger.Printf("not following CI: %v", err)
+	} else {
+		a.CI, a.CIPoll, a.CIWait = gh, 20*time.Second, 2*time.Minute
+	}
 	err = a.Run(ctx, pings, cmds)
 	cancel()
 	for i := 0; i < 2; i++ {
@@ -136,6 +142,20 @@ func runAgent(ctx context.Context) error {
 	}
 	logger.Print("offline")
 	return err
+}
+
+// github reads workflow runs as the account gh is logged in to, so private
+// repositories' runs are visible without a token of peyk's own.
+func github(ctx context.Context) (laptop.GitHub, error) {
+	out, err := laptop.Exec(ctx, "", "gh", "auth", "token", "--hostname", "github.com")
+	if err != nil {
+		return laptop.GitHub{}, err
+	}
+	return laptop.GitHub{
+		Client:  &http.Client{Timeout: 15 * time.Second},
+		BaseURL: "https://api.github.com",
+		Token:   strings.TrimSpace(string(out)),
+	}, nil
 }
 
 // billTo names the project that pays for a call made with your own login.

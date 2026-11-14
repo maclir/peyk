@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -55,6 +55,15 @@ describe('board', () => {
     expect(pushLabel({ upstream: 'origin/main', unpushed: 2 })).toBe('2 unpushed');
     expect(pushLabel({ upstream: '', unpushed: 1 })).toBe('1 unpushed · no remote branch');
     expect(pushLabel(null)).toBe('no repository');
+  });
+
+  it("labels a pushed commit's CI", () => {
+    const url = 'https://github.com/o/r/actions/runs/1';
+    expect(ciStatus({ ci: { workflow: 'Test and deploy', state: 'running', url } })).toEqual({ short: 'ci running', long: 'Test and deploy running', tone: 'run', url });
+    expect(ciStatus({ ci: { workflow: 'CI', state: 'success', url } })?.long).toBe('CI passed');
+    expect(ciStatus({ ci: { workflow: 'CI', state: 'failure', url } })?.tone).toBe('bad');
+    expect(ciStatus({ unpushed: 0 })).toBeNull();
+    expect(ciStatus(null)).toBeNull();
   });
 
   it('flags cleared and clean workers', () => {

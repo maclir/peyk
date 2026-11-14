@@ -55,6 +55,22 @@ export function pushLabel(git) {
   return "no remote";
 }
 
+// A pushed commit's workflow runs, in the words and tone the phone shows.
+const CI = {
+  queued: { word: "queued", tone: "run" },
+  running: { word: "running", tone: "run" },
+  success: { word: "passed", tone: "ok" },
+  failure: { word: "failed", tone: "bad" },
+  cancelled: { word: "cancelled", tone: "idle" },
+};
+
+export function ciStatus(git) {
+  const ci = git && git.ci;
+  if (!ci) return null;
+  const c = CI[ci.state] || { word: ci.state, tone: "idle" };
+  return { short: `ci ${c.word}`, long: `${ci.workflow || "CI"} ${c.word}`, tone: c.tone, url: ci.url };
+}
+
 // Flags say what a worker is ready for: cleared when its conversation is
 // empty, clean when its repository has nothing uncommitted or unpushed.
 export function flags(s) {

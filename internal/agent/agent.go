@@ -31,6 +31,11 @@ type Notifier interface {
 	Notify(context.Context, []notify.Note) error
 }
 
+// CIRuns looks up the workflow runs for a pushed commit; nil means none yet.
+type CIRuns interface {
+	Runs(ctx context.Context, repo, sha string) (*session.CI, error)
+}
+
 type Watcher interface {
 	Set(ctx context.Context, workdirs []string) error
 }
@@ -66,6 +71,14 @@ type Agent struct {
 	// Notify, when set, is told about sessions that start needing you or
 	// finish a turn.
 	Notify Notifier
+	// CI, when set, follows the workflow runs of each session's pushed
+	// commit. GitHub cannot tell the laptop a run moved on, so the agent
+	// asks every CIPoll, and only while a run is unfinished or, for CIWait
+	// after a push, not yet queued.
+	CI     CIRuns
+	CIPoll time.Duration
+	CIWait time.Duration
+	ciRuns map[string]*ciRun
 
 	published map[string]map[string]string
 	// The last published state, which commands act on.
@@ -115,6 +128,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
+	a.attachCI(ctx, snaps)
 	prev := a.sessions
 	sessions := map[string]any{}
 	a.sessions = map[string]session.Snapshot{}
@@ -145,6 +159,109 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		return nil
 	}
 	if notes := notify.Changes(prev, a.sessions); len(notes) > 0 {
+		return a.Notify.Notify(ctx, notes)
+	}
+	return nil
+}
+
+// ciRun is what the agent knows about one pushed commit's workflow runs.
+type ciRun struct {
+	result *session.CI
+	pushed time.Time
+}
+
+func ciKey(g *session.Git) string {
+	if g == nil || g.Repo == "" || g.Pushed == "" {
+		return ""
+	}
+	return g.Repo + "@" + g.Pushed
+}
+
+// attachCI gives each snapshot its pushed commit's runs, asking GitHub only
+// about commits it has not seen; RefreshCI follows the unfinished ones.
+func (a *Agent) attachCI(ctx context.Context, snaps []session.Snapshot) {
+	if a.CI == nil {
+		return
+	}
+	live := map[string]bool{}
+	for _, s := range snaps {
+		key := ciKey(s.Git)
+		if key == "" {
+			continue
+		}
+		live[key] = true
+		run, ok := a.ciRuns[key]
+		if !ok {
+			if a.ciRuns == nil {
+				a.ciRuns = map[string]*ciRun{}
+			}
+			run = &ciRun{pushed: a.Now()}
+			a.ciRuns[key] = run
+			a.lookupCI(ctx, s.Git, run)
+		}
+		s.Git.CI = run.result
+	}
+	for key := range a.ciRuns {
+		if !live[key] {
+			delete(a.ciRuns, key)
+		}
+	}
+}
+
+// lookupCI keeps the last known result when GitHub cannot be reached: the
+// board is still right about everything else, and the next poll retries.
+func (a *Agent) lookupCI(ctx context.Context, g *session.Git, run *ciRun) {
+	res, err := a.CI.Runs(ctx, g.Repo, g.Pushed)
+	if err != nil {
+		a.Log.Printf("ci: %v", err)
+		return
+	}
+	run.result = res
+}
+
+func (a *Agent) ciPending() bool {
+	for _, run := range a.ciRuns {
+		if run.result == nil && a.Now().Sub(run.pushed) < a.CIWait || run.result != nil && !run.result.State.Done() {
+			return true
+		}
+	}
+	return false
+}
+
+// RefreshCI asks GitHub again about unfinished runs and publishes the
+// sessions whose result changed.
+func (a *Agent) RefreshCI(ctx context.Context) error {
+	if a.sessions == nil {
+		return nil
+	}
+	asked := map[string]bool{}
+	prev := a.sessions
+	next := make(map[string]session.Snapshot, len(prev))
+	docs := make(map[string]any, len(prev))
+	for id, s := range prev {
+		if key := ciKey(s.Git); key != "" {
+			if run := a.ciRuns[key]; run != nil {
+				if !asked[key] && (run.result == nil || !run.result.State.Done()) {
+					asked[key] = true
+					a.lookupCI(ctx, s.Git, run)
+				}
+				// prev shares this Git, and notify compares the two.
+				g := *s.Git
+				g.CI = run.result
+				s.Git = &g
+			}
+		}
+		next[id] = s
+		docs[id] = s
+	}
+	a.sessions = next
+	if err := a.sync(ctx, store.Sessions, docs); err != nil {
+		return err
+	}
+	if a.Notify == nil {
+		return nil
+	}
+	if notes := notify.Changes(prev, next); len(notes) > 0 {
 		return a.Notify.Notify(ctx, notes)
 	}
 	return nil
@@ -278,8 +395,11 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	}
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
-	var debounce, replies <-chan time.Time
+	var debounce, replies, ci <-chan time.Time
 	for {
+		if ci == nil && a.ciPending() {
+			ci = time.After(a.CIPoll)
+		}
 		select {
 		case <-ctx.Done():
 			return nil
@@ -299,6 +419,11 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		case <-replies:
 			replies = nil
 			if err := a.RefreshReplies(ctx); err != nil {
+				return err
+			}
+		case <-ci:
+			ci = nil
+			if err := a.RefreshCI(ctx); err != nil {
 				return err
 			}
 		case in := <-cmds:

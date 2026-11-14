@@ -420,3 +420,134 @@ func TestATranscriptWriteRefreshesASessionWithAnOpenQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type fakeCI struct {
+	mu    sync.Mutex
+	runs  map[string]*session.CI
+	calls int
+}
+
+func (f *fakeCI) Runs(_ context.Context, repo, sha string) (*session.CI, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if r := f.runs[repo+"@"+sha]; r != nil {
+		c := *r
+		return &c, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeCI) set(key string, ci *session.CI) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runs[key] = ci
+}
+
+func TestCIIsFollowedUntilTheRunFinishes(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	n := &recordingNotifier{}
+	ci := &fakeCI{runs: map[string]*session.CI{}}
+	a := newAgent(c, mem)
+	a.Notify, a.CI, a.CIWait = n, ci, time.Minute
+	pushed := func() session.Snapshot {
+		return session.Snapshot{ID: "k", Title: "knip", State: session.Idle,
+			Git: &session.Git{Upstream: "origin/main", Pushed: "abc", Repo: "maclir/knip"}}
+	}
+	other := session.Snapshot{ID: "o", Title: "other", State: session.Idle, Git: &session.Git{Upstream: "origin/main"}}
+
+	c.set(pushed(), other)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ci.calls != 1 || !a.ciPending() {
+		t.Fatalf("a fresh push: %d lookups, pending %v", ci.calls, a.ciPending())
+	}
+
+	ci.set("maclir/knip@abc", &session.CI{SHA: "abc", Workflow: "deploy", State: session.CIRunning, URL: "https://github.com/run/1"})
+	if err := a.RefreshCI(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := mem.Get(store.Sessions, "k"); v.(session.Snapshot).Git.CI.State != session.CIRunning {
+		t.Fatalf("published %+v", v.(session.Snapshot).Git)
+	}
+
+	// A refresh for something else does not ask GitHub again.
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ci.calls != 2 {
+		t.Fatalf("lookups = %d, want 2", ci.calls)
+	}
+	if v, _ := mem.Get(store.Sessions, "k"); v.(session.Snapshot).Git.CI == nil {
+		t.Fatal("a refresh dropped the known run")
+	}
+
+	ci.set("maclir/knip@abc", &session.CI{SHA: "abc", Workflow: "deploy", State: session.CIFailure, URL: "https://github.com/run/1"})
+	if err := a.RefreshCI(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a.ciPending() {
+		t.Fatal("still following a finished run")
+	}
+	if strings.Join(n.titles, "|") != "knip: deploy failed" {
+		t.Fatalf("notes = %v", n.titles)
+	}
+	if v, _ := mem.Get(store.Sessions, "k"); v.(session.Snapshot).Git.CI.URL != "https://github.com/run/1" {
+		t.Fatalf("published %+v", v.(session.Snapshot).Git.CI)
+	}
+}
+
+func TestCIStopsWaitingForARunThatNeverComes(t *testing.T) {
+	ctx := context.Background()
+	c := &fakeCollector{}
+	a := newAgent(c, store.NewMemory())
+	now := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	a.Now = func() time.Time { return now }
+	a.CI, a.CIWait = &fakeCI{runs: map[string]*session.CI{}}, 90*time.Second
+	c.set(session.Snapshot{ID: "k", Title: "knip", Git: &session.Git{Pushed: "abc", Repo: "maclir/knip"}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ciPending() {
+		t.Fatal("not waiting for a run right after a push")
+	}
+	now = now.Add(90 * time.Second)
+	if a.ciPending() {
+		t.Fatal("still waiting after CIWait")
+	}
+}
+
+func TestRunAsksGitHubAgainWhileARunIsUnfinished(t *testing.T) {
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", Git: &session.Git{Pushed: "abc", Repo: "maclir/knip"}})
+	ci := &fakeCI{runs: map[string]*session.CI{"maclir/knip@abc": {SHA: "abc", State: session.CIQueued}}}
+	a := newAgent(c, mem)
+	a.CI, a.CIPoll, a.CIWait = ci, 10*time.Millisecond, time.Minute
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- a.Run(ctx, nil, nil) }()
+
+	waitFor(t, func() bool { return mem.Laptop().Online })
+	ci.set("maclir/knip@abc", &session.CI{SHA: "abc", State: session.CISuccess})
+	waitFor(t, func() bool {
+		v, _ := mem.Get(store.Sessions, "k")
+		return v.(session.Snapshot).Git.CI.State == session.CISuccess
+	})
+	ci.mu.Lock()
+	calls := ci.calls
+	ci.mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if ci.calls != calls {
+		t.Fatalf("asked GitHub %d more times after the run finished", ci.calls-calls)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

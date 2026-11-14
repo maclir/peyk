@@ -379,6 +379,18 @@ test.describe('signed in', () => {
     await expect(link).toHaveAttribute('target', '_blank');
   });
 
+  test("a worker shows its pushed commit's CI and links to the run", async () => {
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      git: { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0,
+        ci: { sha: '3f2a1c4e', workflow: 'Test and deploy', state: 'failure', url: 'https://github.com/o/knip/actions/runs/7' } } });
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.meta .ci')).toHaveText('ci failed');
+    await page.locator('.card', { hasText: 'knip' }).click();
+    const link = page.getByRole('link', { name: 'Test and deploy failed' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/o/knip/actions/runs/7');
+    await expect(link).toHaveAttribute('target', '_blank');
+  });
+
   test('a worker is cleared on its own and shows when it is cleared and clean', async () => {
     const git = { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0 };
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false, git });

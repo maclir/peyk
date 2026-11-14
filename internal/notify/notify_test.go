@@ -53,6 +53,26 @@ func TestChanges(t *testing.T) {
 	}
 }
 
+func TestChangesNotesAFailedRunOnce(t *testing.T) {
+	git := func(state session.CIState) *session.Git {
+		return &session.Git{Last: &session.Commit{Hash: "3f2a1c4", Subject: "Ship it"},
+			CI: &session.CI{SHA: "3f2a1c4e", Workflow: "Test and deploy", State: state}}
+	}
+	running := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIRunning)}}
+	failed := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIFailure)}}
+	got := Changes(running, failed)
+	if len(got) != 1 || got[0].Title != "knip: Test and deploy failed" || got[0].Body != "3f2a1c4 Ship it" || got[0].URL != "/#s-k" {
+		t.Fatalf("notes = %+v", got)
+	}
+	if got := Changes(failed, failed); len(got) != 0 {
+		t.Fatalf("a failure already seen was noted again: %+v", got)
+	}
+	passed := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CISuccess)}}
+	if got := Changes(running, passed); len(got) != 0 {
+		t.Fatalf("a passing run was noted: %+v", got)
+	}
+}
+
 func TestLoadOrCreateKeysPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vapid.json")
 	a, err := LoadOrCreateKeys(path)

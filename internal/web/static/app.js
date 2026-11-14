@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, answerText, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -747,6 +747,7 @@ async function start(cfg) {
             h("span", { class: "meta" },
               last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
               h("span", {}, pushLabel(s.git)),
+              ciMeta(s.git),
               s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
             ),
           ),
@@ -780,7 +781,8 @@ async function start(cfg) {
         face(projectOf(s), s.title, "lg"),
         h("div", { class: "dtitle" },
           h("h2", {}, s.title, chip(st), flagRow(s)),
-          h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository")),
+          h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository"),
+          ciLink(g)),
         s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
@@ -908,6 +910,21 @@ function flagRow(s) {
     ? h("span", { class: "flag proto", title: "Published a prototype; open it from the worker" }, s.prototypes.length > 1 ? `${s.prototypes.length} prototypes` : "prototype")
     : null;
   return f.length || proto ? h("span", { class: "flags" }, proto, f.map((x) => h("span", { class: `flag ${x}` }, x))) : null;
+}
+
+function ciMeta(git) {
+  const ci = ciStatus(git);
+  return ci ? h("span", { class: `ci ${ci.tone}` }, ci.short) : null;
+}
+
+// The run's own page on GitHub, opened outside the app.
+function ciLink(git) {
+  const ci = ciStatus(git);
+  if (!ci) return null;
+  const label = [h("span", { class: `dot ${ci.tone}` }), ci.long, ci.url ? icon("arrow") : null];
+  return ci.url
+    ? h("a", { class: `cilink ${ci.tone}`, href: ci.url, target: "_blank", rel: "noopener noreferrer" }, label)
+    : h("span", { class: `cilink ${ci.tone}` }, label);
 }
 
 function chip(st) {

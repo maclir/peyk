@@ -104,6 +104,44 @@ func TestRepoStateWithoutUpstreamCountsCommitsNoRemoteHas(t *testing.T) {
 	}
 }
 
+func TestRepoStateNamesTheGitHubRepositoryOnlyWithWorkflows(t *testing.T) {
+	ctx := context.Background()
+	remote := t.TempDir()
+	mustGit(t, remote, "init", "-q", "--bare", "-b", "main")
+	dir := gitRepo(t)
+	commit(t, dir, "a.txt", "First")
+	mustGit(t, dir, "remote", "add", "origin", remote)
+	mustGit(t, dir, "push", "-q", "-u", "origin", "main")
+	mustGit(t, dir, "remote", "set-url", "origin", "git@github.com:maclir/knip.git")
+	head := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
+
+	if g := RepoState(ctx, Exec, dir); g.Pushed != head || g.Repo != "" {
+		t.Fatalf("without workflows: pushed %q repo %q", g.Pushed, g.Repo)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if g := RepoState(ctx, Exec, filepath.Join(dir, ".github")); g.Repo != "maclir/knip" {
+		t.Fatalf("with workflows, from a subdirectory: repo %q", g.Repo)
+	}
+}
+
+func TestGitHubRepo(t *testing.T) {
+	for url, want := range map[string]string{
+		"git@github.com:maclir/peyk.git":        "maclir/peyk",
+		"https://github.com/maclir/relay.git":   "maclir/relay",
+		"https://github.com/maclir/relay":       "maclir/relay",
+		"ssh://git@github.com/maclir/peyk.git":  "maclir/peyk",
+		"git@gitlab.com:unbounds/dekode/x.git":  "",
+		"git@ghe.example.com:me/peyk.git": "",
+		"https://github.com/maclir":             "",
+	} {
+		if got := GitHubRepo(url); got != want {
+			t.Errorf("GitHubRepo(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
 func TestPushSetsUpstreamOnFirstPush(t *testing.T) {
 	remote := t.TempDir()
 	mustGit(t, remote, "init", "-q", "--bare", "-b", "main")

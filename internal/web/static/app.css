@@ -69,6 +69,7 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .dot.busy { background: var(--warn); }
 .dot.sent { background: var(--accent); }
 .dot.none { background: var(--none); }
+.dot.bad { background: var(--bad); } .dot.run { background: var(--run); }
 
 /* Workers */
 .board { display: flex; flex-direction: column; gap: 8px; padding: 0 0 24px; }
@@ -103,6 +104,10 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .dtitle { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .dtitle h2 { margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .branch { font: 0.72rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.meta .ci.bad { color: var(--bad); } .meta .ci.run { color: var(--run); }
+.cilink { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font: 0.72rem var(--mono); color: var(--muted); }
+a.cilink { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; padding: 4px 0; }
+.cilink .ico svg { width: 12px; height: 12px; }
 button.tool { width: 40px; height: 40px; color: var(--muted); }
 .detail > .curtask { white-space: normal; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .pushcard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
