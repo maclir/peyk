@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions, usageLeft } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions, usageLeft, onDefaultBranch } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -243,5 +243,14 @@ describe('usageLeft', () => {
   it('counts a reset or unreported window as whole', () => {
     const left = usageLeft({ five_hour: { used: 90, resets_at: at(-1) } }, now);
     expect(left.map((w: any) => [w.label, w.left, w.resetsAt])).toEqual([['5h', 100, null], ['7d', 100, null]]);
+  });
+});
+
+describe('onDefaultBranch', () => {
+  it('leaves main and master unmentioned and names any other branch', () => {
+    expect(onDefaultBranch({ branch: 'main' })).toBe(true);
+    expect(onDefaultBranch({ branch: 'master' })).toBe(true);
+    expect(onDefaultBranch({ branch: 'usage-header' })).toBe(false);
+    expect(onDefaultBranch({ branch: '' })).toBe(false);
   });
 });

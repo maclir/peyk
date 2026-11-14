@@ -138,10 +138,10 @@ test.describe('signed in', () => {
     await makeOwner(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
     await signIn(page);
-    await expect(page.getByText('laptop online')).toBeVisible();
-    const usage = page.getByRole('link', { name: 'Claude 5h 77% · 7d 5% left' });
+    await expect(page.getByRole('img', { name: 'Laptop online' })).toBeVisible();
+    const usage = page.getByRole('link', { name: 'Claude usage: 5h 77% left, 7d 5% left' });
     await expect(usage).toHaveAttribute('href', 'https://claude.ai/settings/usage');
-    await expect(usage).toHaveClass(/low/);
+    await expect(usage.locator('.meter.low')).toHaveCount(1);
   });
 
   test('the board groups sessions and shows what each is doing', async () => {
@@ -164,6 +164,8 @@ test.describe('signed in', () => {
 
   test('push asks the laptop and shows its answer', async () => {
     await page.goto('/#s-k');
+    await expect(page.locator('.facts')).toContainText('main → origin/main');
+    await expect(page.locator('.dhead .branch')).toHaveCount(0);
     await page.getByRole('button', { name: 'Push 2' }).click();
     await expect(page.getByText('Push knip: waiting for the laptop…')).toBeVisible();
     const [cmd] = await list(page, 'commands');
@@ -222,6 +224,7 @@ test.describe('signed in', () => {
     await put(page, 'laptop/status', { online: false, seen_at: new Date() });
     await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
     await page.goto('/#inbox');
+    await expect(page.getByRole('img', { name: 'Laptop offline, seen just now' })).toBeVisible();
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
     await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: 'Send without clearing' }).click();

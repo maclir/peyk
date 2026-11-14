@@ -47,6 +47,12 @@ export function ago(date, now) {
   return `${Math.floor(s / 86400)}d`;
 }
 
+// onDefaultBranch says the branch needs no mention: a worker is on main or
+// master unless it is in a worktree of its own.
+export function onDefaultBranch(git) {
+  return git.branch === "main" || git.branch === "master";
+}
+
 // usageLeft is the percentage left in each Claude rate-limit window. A window
 // past its reset is whole again, and so is one Claude Code no longer reports:
 // it drops a window once that window resets.

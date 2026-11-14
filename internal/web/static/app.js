@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -10,7 +10,9 @@ if ("serviceWorker" in navigator) {
 }
 
 const app = document.getElementById("app");
+const hstatEl = document.getElementById("hstat");
 const laptopEl = document.getElementById("laptop");
+const seenEl = document.getElementById("seen");
 const usageEl = document.getElementById("usage");
 const config = document.body.dataset.firebase;
 
@@ -33,8 +35,7 @@ function notice(text, ...extra) {
 }
 
 if (!config) {
-  laptopEl.textContent = "";
-  usageEl.hidden = true;
+  hstatEl.hidden = true;
   notice("This copy of peyk is not connected to Firebase.");
 } else {
   start(JSON.parse(config)).catch((err) => notice(`Could not start: ${err.message}`));
@@ -140,15 +141,13 @@ async function start(cfg) {
     stop();
     state.user = null;
     if (!user) {
-      laptopEl.textContent = "";
-      usageEl.hidden = true;
+      hstatEl.hidden = true;
       notice("Sign in with the Google account that owns peyk.", h("button", { class: "primary", onclick: signIn }, "Sign in with Google"));
       return;
     }
     const token = await user.getIdTokenResult();
     if (!token.claims.owner) {
-      laptopEl.textContent = "";
-      usageEl.hidden = true;
+      hstatEl.hidden = true;
       notice(
         `${user.email} is signed in but is not the owner.`,
         h("p", { class: "hint" }, "On the laptop, run ", h("code", {}, `make owner EMAIL=${user.email}`), ", then sign in again."),
@@ -164,16 +163,22 @@ async function start(cfg) {
   function renderLaptop() {
     const now = Date.now();
     const online = laptopOnline(state.laptop, now);
+    hstatEl.hidden = false;
     laptopEl.className = `laptop ${online ? "on" : "off"}`;
-    const seen = state.laptop && state.laptop.seen_at ? ` · seen ${ago(state.laptop.seen_at, now)}` : "";
-    laptopEl.textContent = (online ? "laptop online" : "laptop offline") + seen;
+    const since = !online && state.laptop && state.laptop.seen_at ? ago(state.laptop.seen_at, now) : "";
+    const seen = !since ? "" : since === "now" ? "seen just now" : `seen ${since} ago`;
+    seenEl.textContent = seen;
+    laptopEl.setAttribute("aria-label", online ? "Laptop online" : `Laptop offline${seen ? `, ${seen}` : ""}`);
 
     const left = usageLeft(state.usage, now);
     usageEl.hidden = !left;
     if (!left) return;
-    usageEl.classList.toggle("low", left.some((w) => w.left < 10));
-    usageEl.textContent = `Claude ${left.map((w) => `${w.label} ${w.left}%`).join(" · ")} left`;
-    usageEl.title = left.map((w) => w.resetsAt ? `${w.label} resets in ${ago(now, w.resetsAt.getTime())}` : `${w.label} is unused`).join("; ");
+    usageEl.querySelectorAll(".meter").forEach((m, i) => {
+      m.classList.toggle("low", left[i].left < 10);
+      m.firstElementChild.style.width = `${left[i].left}%`;
+    });
+    usageEl.setAttribute("aria-label", `Claude usage: ${left.map((w) => `${w.label} ${w.left}% left`).join(", ")}`);
+    usageEl.title = left.map((w) => `${w.label} ${w.left}% left` + (w.resetsAt ? `, resets in ${ago(now, w.resetsAt.getTime())}` : "")).join("\n");
   }
 
   function render() {
@@ -779,7 +784,9 @@ async function start(cfg) {
     const busy = s.state === "working" || s.state === "needs_input";
     const task = currentTask(state.tasks, s.id);
     const rows = [["aoe", s.aoe_status], ["path", s.path]];
+    if (!g) rows.push(["repository", "none"]);
     if (g) {
+      rows.push(["branch", g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached"]);
       if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);
       rows.push(["push", pushLabel(g)]);
       rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
@@ -796,7 +803,7 @@ async function start(cfg) {
         face(projectOf(s), s.title, "lg"),
         h("div", { class: "dtitle" },
           h("h2", {}, s.title, chip(st), flagRow(s)),
-          h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository"),
+          g && !onDefaultBranch(g) ? h("span", { class: "branch" }, g.branch || "detached") : null,
           ciLink(g)),
         s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
