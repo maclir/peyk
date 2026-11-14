@@ -419,6 +419,24 @@ test.describe('signed in', () => {
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
 
+  test('the composer stays tucked at the end of the list without lengthening the page', async () => {
+    const ids = Array.from({ length: 30 }, (_, i) => `long${i}`);
+    for (const [i, id] of ids.entries()) {
+      await put(page, `tasks/${id}`, { project: 'knip', text: `Long list item ${i}`, status: 'queued', created_at: new Date(Date.now() - 60000 + i) });
+    }
+    await page.goto('/#inbox');
+    await expect(page.locator('.task', { hasText: 'Long list item 29' })).toBeVisible();
+    await page.locator('#task-text').blur();
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
+    await expect.poll(() => page.evaluate(() => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1)).toBe(true);
+    await expect(page.locator('html')).toHaveClass(/tuck/);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height);
+    await page.mouse.wheel(0, -200);
+    await expect(page.locator('html')).not.toHaveClass(/tuck/);
+    for (const id of ids) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
   test('projects show their logo, or their initial when they have none', async () => {
     const logo = `data:image/png;base64,${PNG.toString('base64')}`;
     await put(page, 'projects/knip', { name: 'knip', path: '/c/knip', session_id: 'k', free: true, busy: '', active: new Date(), logo });
