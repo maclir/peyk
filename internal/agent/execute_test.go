@@ -131,6 +131,7 @@ func TestExecuteCommands(t *testing.T) {
 		{"dispatch to a session with uncommitted changes", command.Payload{Type: command.Dispatch, Project: "dorna", Task: "t1", Text: "x"}, "", "dorna is not free: uncommitted changes"},
 		{"dispatch to an unknown project", command.Payload{Type: command.Dispatch, Project: "nope", Task: "t1", Text: "x"}, "", "no project named nope"},
 		{"reply to a working session", command.Payload{Type: command.Reply, Session: "h", Text: "Only the current filter"}, "send h: Only the current filter", ""},
+		{"reply without text or images", command.Payload{Type: command.Reply, Session: "h"}, "", "reply needs text or an image"},
 		{"clear an idle session", command.Payload{Type: command.Clear, Session: "k"}, "clear k", ""},
 		{"clearing a cleared session does nothing", command.Payload{Type: command.Clear, Session: "f"}, "", ""},
 		{"clear a working session", command.Payload{Type: command.Clear, Session: "h"}, "", "hamta is working"},

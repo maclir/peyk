@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment, RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { addDoc, Bytes, collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import { addDoc, Bytes, collection, deleteDoc, deleteField, doc, getDoc, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 
 let env: RulesTestEnvironment;
@@ -161,7 +161,12 @@ describe('attachments', () => {
     });
     await assertSucceeds(addDoc(tasks, task(['a', 'b', 'c', 'd'].map((c) => c.repeat(64)))));
     await assertFails(addDoc(tasks, task(['a', 'b', 'c', 'd', 'e'].map((c) => c.repeat(64)))));
-    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { images: ['a'.repeat(64)] }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { images: ['a'.repeat(64)] }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { images: ['f'.repeat(64)] }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { images: [] }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { images: ['a', 'b', 'c', 'd', 'e'].map((c) => c.repeat(64)) }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { images: deleteField() }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { images: ['a'.repeat(64)] }));
   });
 
   it('images are write-once, named by a hash, and bounded', async () => {

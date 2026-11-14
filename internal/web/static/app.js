@@ -56,8 +56,8 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
-    filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickQuery: "",
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+    filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // Picks for open questions by question id, kept across redraws.
     answers: new Map() };
   let unsubscribe = [];
@@ -389,7 +389,7 @@ async function start(cfg) {
       : null;
 
     const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
-      ? list.map((t, i) => (state.editing === t.id ? editor(t, projects) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
+      ? list.map((t, i) => (state.editing === t.id ? editor(t) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
       : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
     const finished = doneTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
     return h("div", { class: "inbox" },
@@ -458,7 +458,7 @@ async function start(cfg) {
       open ? h("div", { class: "menu" },
         clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => send(t, false) }, "Send without clearing") : null,
         h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
-        h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; state.menu = null; render(); } }, "Edit"),
+        h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, "Edit"),
         h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
       ) : null,
       h("div", { class: "tfoot" },
@@ -487,52 +487,67 @@ async function start(cfg) {
       .catch((err) => alertLine(`Could not move the task: ${err.message}`));
   }
 
-  function composer() {
-    const p = projectNamed(state.picked);
-    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? "Describe a task…" : "No projects published yet", "aria-label": "New task", onpaste: pasteImages });
-    // The draft is cleared as soon as the task is accepted: a local write
-    // re-renders the inbox before the server confirms it, and the re-render
-    // would otherwise restore the text it found in the box.
-    const add = async (e) => {
-      e.preventDefault();
-      const value = text.value.trim();
-      if (!value || !state.picked) return;
-      const attaching = state.attaching;
-      text.value = "";
-      state.attaching = [];
-      try {
-        await track("add", () => addTask(state.picked, value, attaching));
-      } catch (err) {
-        const box = document.getElementById("task-text");
-        if (box && !box.value) box.value = value;
-        if (!state.attaching.length) state.attaching = attaching;
-        render();
-        alertLine(`Could not add the task: ${err.message}`);
-      }
-    };
-    const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages([...e.target.files]); e.target.value = ""; } });
-    return h("form", { class: "composer add", onsubmit: add },
-      state.attaching.length ? h("div", { class: "thumbs" }, state.attaching.map((img, i) =>
-        h("span", { class: "thumb" },
-          h("img", { src: img.url, alt: `Attached image ${i + 1}` }),
-          h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => { URL.revokeObjectURL(img.url); state.attaching.splice(i, 1); render(); } }, icon("x")),
-        ))) : null,
+  // New tasks, edits and replies share one composer, so each takes text,
+  // pasted screenshots and attached images the same way. key names both its
+  // busy state and its draft images.
+  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon = "up", send, lead = null, tail = null }) {
+    const imgs = draft(key);
+    const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
+    const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
+    return h("form", { class: `composer ${cls}`, onsubmit: (e) => { e.preventDefault(); send(text); } },
+      imgs.length ? h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))) : null,
       text,
       h("div", { class: "crow" },
-        h("button", { type: "button", class: "pill", "aria-label": `Project: ${state.picked ?? "none"}`, "aria-haspopup": "dialog",
-          disabled: state.picked ? null : "", onclick: () => { state.picking = true; state.pickQuery = ""; render(); document.getElementById("pick-search")?.focus(); } },
-          state.picked ? face(p, state.picked, "xs") : null, h("span", {}, state.picked ?? "No project"), icon("chevron")),
-        h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: state.attaching.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
+        lead,
+        h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: imgs.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
         h("span", { class: "grow" }),
-        busyButton("add", { type: "submit", class: "round go", "aria-label": "Add task" }, icon("up")),
+        tail,
+        busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel }, icon(submitIcon)),
       ),
       files,
     );
   }
 
+  function projectPill(name, task = null) {
+    return h("button", { type: "button", class: "pill", "aria-label": `Project: ${name ?? "none"}`, "aria-haspopup": "dialog", disabled: name ? null : "",
+      onclick: () => { state.picking = true; state.pickFor = task; state.pickQuery = ""; render(); document.getElementById("pick-search")?.focus(); } },
+      name ? face(projectNamed(name), name, "xs") : null, h("span", {}, name ?? "No project"), icon("chevron"));
+  }
+
+  function composer() {
+    // The draft is cleared as soon as the task is accepted: a local write
+    // re-renders the inbox before the server confirms it, and the re-render
+    // would otherwise restore the text it found in the box.
+    const add = async (text) => {
+      const value = text.value.trim();
+      if (!value || !state.picked) return;
+      const attaching = draft("add");
+      text.value = "";
+      state.drafts.delete("add");
+      try {
+        await track("add", () => addTask(state.picked, value, attaching));
+        forgetImages(attaching);
+      } catch (err) {
+        const box = document.getElementById("task-text");
+        if (box && !box.value) box.value = value;
+        if (!draft("add").length) state.drafts.set("add", attaching);
+        render();
+        alertLine(`Could not add the task: ${err.message}`);
+      }
+    };
+    return composerForm({ key: "add", id: "task-text", label: "New task", placeholder: state.picked ? "Describe a task…" : "No projects published yet",
+      cls: "add", submitLabel: "Add task", send: add, lead: projectPill(state.picked) });
+  }
+
   function picker(projects) {
-    const close = () => { state.picking = false; render(); document.getElementById("task-text")?.focus(); };
-    const pick = (name) => { state.picked = name; close(); };
+    const t = state.pickFor;
+    const current = t ? state.editProject ?? t.project : state.picked;
+    const close = () => { state.picking = false; state.pickFor = null; render(); document.getElementById(t ? `edit-${t.id}` : "task-text")?.focus(); };
+    const pick = (name) => {
+      if (t) state.editProject = name;
+      else state.picked = name;
+      close();
+    };
     const queued = new Map();
     for (const t of state.tasks) if (t.status === "queued") queued.set(t.project, (queued.get(t.project) || 0) + 1);
     const q = state.pickQuery || "";
@@ -540,7 +555,7 @@ async function start(cfg) {
     const recent = q ? [] : projects.filter((p) => p.active).slice(0, 4);
     const row = (p) => {
       const st = projectStatus(p);
-      const on = p.name === state.picked;
+      const on = p.name === current;
       return h("button", { type: "button", role: "radio", class: "prow", "aria-checked": String(on), onclick: () => pick(p.name) },
         face(p, p.name, "lg"),
         h("span", { class: "pmain" },
@@ -560,7 +575,7 @@ async function start(cfg) {
           recent.length ? [
             h("h3", { class: "group" }, "Recent"),
             h("div", { class: "recent" }, recent.map((p) =>
-              h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === state.picked), onclick: () => pick(p.name) },
+              h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === current), onclick: () => pick(p.name) },
                 face(p, p.name, "xl"), h("span", {}, p.name), h("span", { class: `dot ${projectStatus(p).tone}` })))),
           ] : null,
           h("h3", { class: "group" }, q ? `Matches · ${matches.length}` : "All projects"),
@@ -580,8 +595,6 @@ async function start(cfg) {
     batch.commit().catch((err) => alertLine(`Could not delete: ${err.message}`));
   }
 
-  // An image is named by its hash, so one already stored is the same image
-  // and is not written again; writing it again would be refused.
   // The inbox opens on ready tasks; one queued for a busy project would
   // vanish from that view as it is saved, so the view widens to show it.
   function reveal(project) {
@@ -591,31 +604,64 @@ async function start(cfg) {
   async function addTask(project, text, images) {
     reveal(project);
     const batch = fs.writeBatch(db);
-    const ids = [];
-    for (const img of images) {
-      const id = await imageID(img.bytes);
-      if (ids.includes(id)) continue;
-      ids.push(id);
-      if (!(await fs.getDoc(fs.doc(db, "attachments", id))).exists()) {
-        batch.set(fs.doc(db, "attachments", id), { data: fs.Bytes.fromUint8Array(img.bytes), type: img.type, created_at: fs.serverTimestamp() });
-      }
-    }
+    const ids = await storeImages(batch, images);
     // The rank is set here because created_at reads as null until the server
     // has confirmed it, which would sort the new task to the top meanwhile.
     const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: Date.now() };
     if (ids.length) task.images = ids;
     batch.set(fs.doc(fs.collection(db, "tasks")), task);
     await batch.commit();
-    for (const img of images) URL.revokeObjectURL(img.url);
   }
 
-  async function attachImages(files) {
-    const room = MAX_IMAGES - state.attaching.length;
-    if (files.length > room) alertLine(`A task carries at most ${MAX_IMAGES} images; the rest were left out.`);
+  // Images an edit drops go with it, unless another task shares one.
+  async function saveTask(t, text, project, images) {
+    const batch = fs.writeBatch(db);
+    const ids = await storeImages(batch, images);
+    batch.update(fs.doc(db, "tasks", t.id), { text, project, images: ids.length ? ids : fs.deleteField() });
+    const dropped = (t.images || []).filter((id) => !ids.includes(id));
+    for (const id of orphanedImages(state.tasks, [{ id: t.id, images: dropped }])) batch.delete(fs.doc(db, "attachments", id));
+    await batch.commit();
+  }
+
+  // An image is named by its hash, so one already stored is the same image
+  // and is not written again; writing it again would be refused.
+  async function storeImages(batch, images) {
+    const ids = [];
+    for (const img of images) {
+      const id = img.id ?? (await imageID(img.bytes));
+      if (ids.includes(id)) continue;
+      ids.push(id);
+      if (img.bytes && !(await fs.getDoc(fs.doc(db, "attachments", id))).exists()) {
+        batch.set(fs.doc(db, "attachments", id), { data: fs.Bytes.fromUint8Array(img.bytes), type: img.type, created_at: fs.serverTimestamp() });
+      }
+    }
+    return ids;
+  }
+
+  // A composer's images: each is either still only in this page
+  // ({bytes, type, url}) or already stored ({id}).
+  function draft(key) {
+    if (!state.drafts.has(key)) state.drafts.set(key, []);
+    return state.drafts.get(key);
+  }
+
+  function dropDraft(key) {
+    forgetImages(state.drafts.get(key) || []);
+    state.drafts.delete(key);
+  }
+
+  function forgetImages(images) {
+    for (const img of images) if (img.bytes) URL.revokeObjectURL(img.url);
+  }
+
+  async function attachImages(key, files) {
+    const imgs = draft(key);
+    const room = MAX_IMAGES - imgs.length;
+    if (files.length > room) alertLine(`At most ${MAX_IMAGES} images go with one message; the rest were left out.`);
     for (const file of files.slice(0, Math.max(0, room))) {
       try {
         const img = await prepareImage(file);
-        state.attaching.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
+        imgs.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
       } catch (err) {
         alertLine(`Could not attach: ${err.message}`);
       }
@@ -623,20 +669,38 @@ async function start(cfg) {
     render();
   }
 
-  function pasteImages(e) {
+  function pasteImages(key, e) {
     const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     e.preventDefault();
-    attachImages(files);
+    attachImages(key, files);
+  }
+
+  function draftThumb(key, img, i) {
+    const url = img.url ?? storedImage(img.id);
+    return h("span", { class: `thumb${url ? "" : " empty"}${url === "" ? " loading" : ""}` },
+      url ? h("img", { src: url, alt: `Attached image ${i + 1}` }) : null,
+      h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => {
+        forgetImages([img]);
+        draft(key).splice(i, 1);
+        render();
+      } }, icon("x")),
+    );
   }
 
   // Thumbnails load on first sight and are kept for the life of the page;
-  // stored images never change.
+  // stored images never change. "" is loading and null is gone.
+  function storedImage(id) {
+    const url = state.images.get(id);
+    if (url !== undefined) return url;
+    loadImage(id);
+    return "";
+  }
+
   function taskImages(t) {
     if (!t.images?.length) return null;
     return h("div", { class: "thumbs" }, t.images.map((id, i) => {
-      const url = state.images.get(id);
-      if (url === undefined) loadImage(id);
+      const url = storedImage(id);
       if (!url) return h("span", { class: `thumb empty${url === null ? "" : " loading"}`, title: url === null ? "Image is gone" : "Loading…" });
       const img = h("img", { src: url, alt: `Image ${i + 1} of task` });
       return h("button", { type: "button", class: "thumb", "aria-label": `Enlarge image ${i + 1}`, onclick: (e) => e.currentTarget.classList.toggle("big") }, img);
@@ -655,39 +719,41 @@ async function start(cfg) {
     });
   }
 
-  function editor(t, projects) {
+  function startEdit(t) {
+    state.editing = t.id;
+    state.editProject = undefined;
+    state.menu = null;
+    dropDraft(`edit:${t.id}`);
+    state.drafts.set(`edit:${t.id}`, (t.images || []).map((id) => ({ id })));
+    render();
+  }
+
+  function editor(t) {
+    const key = `edit:${t.id}`;
     // Snapshots re-render the editor; the chosen project survives in state.
     const chosen = state.editProject ?? t.project;
-    const select = h("select", { "aria-label": "Project", onchange: (e) => { state.editProject = e.target.value; } },
-      projects.map((p) => {
-        const o = h("option", { value: p.name }, p.free ? p.name : `${p.name} (${p.busy})`);
-        if (p.name === chosen) o.selected = true;
-        return o;
-      }),
-    );
-    const text = h("textarea", { id: `edit-${t.id}`, rows: "3", "aria-label": "Task text" });
-    text.value = t.text;
-    const save = async (e) => {
-      e.preventDefault();
+    const close = () => {
+      dropDraft(key);
+      state.editing = null;
+      state.editProject = undefined;
+      render();
+    };
+    const save = async (text) => {
       const value = text.value.trim();
       if (!value) return;
       try {
-        await track(`edit:${t.id}`, () => fs.updateDoc(fs.doc(db, "tasks", t.id), { text: value, project: select.value }));
-        state.editing = null;
-        state.editProject = undefined;
-        reveal(select.value);
-        render();
+        await track(key, () => saveTask(t, value, chosen, draft(key)));
+        reveal(chosen);
+        close();
       } catch (err) {
         alertLine(`Could not save: ${err.code === "permission-denied" ? "the task was already sent" : err.message}`);
       }
     };
-    return h("form", { class: "task editing", onsubmit: save },
-      h("div", { class: "grow" }, select, text),
-      h("div", { class: "btnrow" },
-        busyButton(`edit:${t.id}`, { type: "submit", class: "primary" }, "Save"),
-        h("button", { type: "button", onclick: () => { state.editing = null; state.editProject = undefined; render(); } }, "Cancel"),
-      ),
-    );
+    const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
+      submitLabel: "Save", submitIcon: "check", send: save, lead: projectPill(chosen, t),
+      tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
+    form.querySelector("textarea").value = t.text;
+    return form;
   }
 
   function alertLine(text) {
@@ -902,18 +968,46 @@ async function start(cfg) {
   }
 
   function replyBox(s) {
-    const text = h("textarea", { id: `reply-${s.id}`, rows: "1", placeholder: `Reply to ${s.title}…`, "aria-label": "Reply" });
-    const reply = async (e) => {
-      e.preventDefault();
+    const key = `reply:${s.id}`;
+    const label = `Reply to ${s.title}`;
+    const reply = async (text) => {
       const v = text.value.trim();
-      // A redraw while sending replaces this textarea, so clear the one on screen.
-      if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`, `reply:${s.id}`))) {
+      const imgs = draft(key);
+      if ((!v && !imgs.length) || state.busy.has(key)) return;
+      let ids = [];
+      if (imgs.length) {
+        try {
+          const batch = fs.writeBatch(db);
+          ids = await storeImages(batch, imgs);
+          await batch.commit();
+        } catch (err) {
+          setStatus(`${label}: not sent. ${err.message}`);
+          return;
+        }
+      }
+      // The laptop has saved a reply's images by the time it answers, so
+      // only images a task still names are kept.
+      const report = (msg, busy = false) => {
+        setStatus(msg, busy);
+        if (!busy) dropUnused(ids);
+      };
+      if (await sendCommand("reply", { session: s.id, text: v, ...(ids.length ? { images: ids } : {}) }, label, key, report)) {
+        // A redraw while sending replaces this textarea, so clear the one on screen.
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
+        dropDraft(key);
+        render();
       }
     };
-    return h("form", { class: "composer inline", onsubmit: reply },
-      text, busyButton(`reply:${s.id}`, { type: "submit", class: "round go", "aria-label": "Send reply" }, icon("up")));
+    return composerForm({ key, id: `reply-${s.id}`, label: "Reply", placeholder: `Reply to ${s.title}…`, rows: "1", cls: "respond", submitLabel: "Send reply", send: reply });
+  }
+
+  function dropUnused(ids) {
+    const unused = orphanedImages(state.tasks, [{ images: ids }]);
+    if (!unused.length) return;
+    const batch = fs.writeBatch(db);
+    for (const id of unused) batch.delete(fs.doc(db, "attachments", id));
+    batch.commit().catch(() => {});
   }
 }
 

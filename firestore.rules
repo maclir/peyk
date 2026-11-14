@@ -41,8 +41,8 @@ service cloud.firestore {
     }
 
     // A task names a project the laptop published. Only the agent marks it
-    // dispatched or done. The phone edits a task's text or project while it is
-    // queued, and deletes it while queued or once done, never while a session
+    // dispatched or done. The phone edits a task's text, project or images
+    // while it is queued, and deletes it while queued or once done, never while a session
     // is working on it.
     function validTarget(data) {
       return boundedString(data.project, 200)
@@ -82,9 +82,10 @@ service cloud.firestore {
         && request.resource.data.status == 'queued';
       allow update: if isOwner()
         && resource.data.status == 'queued'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images'])
         && validTarget(request.resource.data)
-        && validRank(request.resource.data);
+        && validRank(request.resource.data)
+        && validImages(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
     }
 

@@ -99,10 +99,14 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if err != nil {
 			return err
 		}
-		if p.Text == "" {
-			return errors.New("reply needs text")
+		if p.Text == "" && len(p.Images) == 0 {
+			return errors.New("reply needs text or an image")
 		}
-		return act.Send(ctx, s.ID, p.Text)
+		text, err := a.attach(ctx, p.Text, p.Images)
+		if err != nil {
+			return err
+		}
+		return act.Send(ctx, s.ID, text)
 	case command.Answer:
 		s, err := a.session(p.Session)
 		if err != nil {

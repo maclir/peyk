@@ -14,7 +14,8 @@ import (
 	"github.com/maclir/peyk/internal/store"
 )
 
-// MaxImages bounds a task's attachments; Firestore rules enforce the same.
+// MaxImages bounds the attachments of one task or reply; Firestore rules
+// enforce the same for tasks.
 const MaxImages = 4
 
 var imageID = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -26,7 +27,7 @@ var imageExt = map[string]string{
 	"image/gif":  ".gif",
 }
 
-// attach saves a dispatch's images where the session can read them and names
+// attach saves a dispatch's or reply's images where the session can read them and names
 // their paths in the prompt. Each image must hash to its id, which the
 // signed payload names, so Firestore cannot swap in another image.
 func (a *Agent) attach(ctx context.Context, text string, ids []string) (string, error) {
@@ -34,7 +35,7 @@ func (a *Agent) attach(ctx context.Context, text string, ids []string) (string, 
 		return text, nil
 	}
 	if len(ids) > MaxImages {
-		return "", fmt.Errorf("a task carries at most %d images", MaxImages)
+		return "", fmt.Errorf("at most %d images go with one message", MaxImages)
 	}
 	r, ok := a.Store.(store.AttachmentReader)
 	if !ok || a.Commands.Attachments == "" {
@@ -65,8 +66,12 @@ func (a *Agent) attach(ctx context.Context, text string, ids []string) (string, 
 		}
 		paths = append(paths, path)
 	}
+	names := "Attached images:\n- " + strings.Join(paths, "\n- ")
 	if len(paths) == 1 {
-		return text + "\n\nAttached image: " + paths[0], nil
+		names = "Attached image: " + paths[0]
 	}
-	return text + "\n\nAttached images:\n- " + strings.Join(paths, "\n- "), nil
+	if text == "" {
+		return names, nil
+	}
+	return text + "\n\n" + names, nil
 }

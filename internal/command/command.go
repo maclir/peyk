@@ -74,7 +74,7 @@ type Payload struct {
 	// Clear asks a dispatch to start the worker on a fresh conversation
 	// first, unless it already has one.
 	Clear bool `json:"clear,omitempty"`
-	// Images are a dispatch's attachments, each named by the SHA-256 of its
+	// Images are a dispatch's or reply's attachments, each named by the SHA-256 of its
 	// bytes, so the signature covers the images as well as the text.
 	Images []string `json:"images,omitempty"`
 	// Expires is Unix milliseconds.

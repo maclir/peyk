@@ -295,9 +295,12 @@ test.describe('signed in', () => {
 
     await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: /Edit task/ }).click();
-    const editor = page.locator('form.task.editing');
+    const editor = page.locator('form.composer.edit');
     await editor.getByLabel('Task text').fill('Add --json and --csv output');
-    await editor.getByLabel('Project').selectOption('hamta');
+    await editor.getByRole('button', { name: 'Project: knip' }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /hamta/ }).click();
+    await expect(editor.getByRole('button', { name: 'Project: hamta' })).toBeVisible();
+    await expect(editor.getByLabel('Task text')).toHaveValue('Add --json and --csv output');
     await editor.getByRole('button', { name: 'Save' }).click();
     const edited = page.locator('.task', { hasText: 'Add --json and --csv output' });
     await expect(edited.locator('.proj')).toContainText('hamta');
@@ -331,6 +334,26 @@ test.describe('signed in', () => {
     expect(Buffer.from(stored.data.bytesValue, 'base64')).toEqual(PNG);
     expect(stored.type.stringValue).toBe('image/png');
 
+    // An edit takes images the same way, and drops the ones removed.
+    const edit = async () => {
+      await task.getByRole('button', { name: /More actions/ }).click();
+      await task.getByRole('button', { name: /Edit task/ }).click();
+      return page.locator('form.composer.edit');
+    };
+    let editor = await edit();
+    await expect(editor.locator('.thumb img')).toHaveCount(1);
+    await editor.getByRole('button', { name: 'Remove image 1' }).click();
+    await editor.getByRole('button', { name: 'Save' }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(task.locator('.thumb')).toHaveCount(0);
+    expect((await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
+    editor = await edit();
+    await editor.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    await expect(editor.locator('.thumb img')).toHaveCount(1);
+    await editor.getByRole('button', { name: 'Save' }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(task.locator('.thumb img')).toHaveCount(1);
+
     await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toContainText('waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => JSON.parse(c.fields.payload.stringValue).text === 'Match this layout')!;
@@ -341,6 +364,28 @@ test.describe('signed in', () => {
     await expect(task).toHaveCount(0);
     const gone = await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin });
     expect(gone.status()).toBe(404);
+  });
+
+  test('a reply carries a screenshot to its worker', async () => {
+    await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    const reply = page.locator('form.composer.respond');
+    await reply.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    await expect(reply.locator('.thumb img')).toHaveCount(1);
+    await reply.getByRole('button', { name: 'Send reply' }).click();
+    await expect(page.getByText('Reply to knip: waiting for the laptop…')).toBeVisible();
+    await expect(reply.locator('.thumb')).toHaveCount(0);
+    const id = createHash('sha256').update(PNG).digest('hex');
+    expect((await get(page, `attachments/${id}`)).type.stringValue).toBe('image/png');
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'reply')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'reply', session: 'k', text: '', images: [id] });
+
+    // The laptop has saved the image once it answers, so it is not kept.
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(page.getByText('Reply to knip: done.')).toBeVisible();
+    await expect.poll(async () => (await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 
   test('the inbox filters by state and project, and keeps the order you set', async () => {

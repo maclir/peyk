@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,32 @@ func TestDispatchSavesImagesAndNamesThemInThePrompt(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, png+".png")); !bytes.Equal(got, []byte("png bytes")) {
 		t.Fatalf("saved image = %q", got)
+	}
+}
+
+func TestReplySavesImagesAndNamesThemInThePrompt(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, acts := commandAgent(t, ph)
+	dir := t.TempDir()
+	a.Commands.Attachments = dir
+	png := putImage(t, mem, []byte("png bytes"), "image/png")
+
+	for i, p := range []command.Payload{
+		{Type: command.Reply, Session: "h", Text: "Like this", Images: []string{png}},
+		{Type: command.Reply, Session: "h", Images: []string{png}},
+	} {
+		id := fmt.Sprintf("c%d", i)
+		if err := a.execute(context.Background(), ph.command(id, p, a.Now())); err != nil {
+			t.Fatal(err)
+		}
+		if res := mem.Updated(store.Commands, id); res["status"] != command.Done {
+			t.Fatalf("result = %v", res)
+		}
+	}
+	path := filepath.Join(dir, png+".png")
+	want := "send h: Like this\n\nAttached image: " + path + "|send h: Attached image: " + path
+	if got := strings.Join(acts.calls, "|"); got != want {
+		t.Fatalf("calls = %q, want %q", got, want)
 	}
 }
 
