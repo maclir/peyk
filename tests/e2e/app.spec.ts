@@ -355,6 +355,7 @@ test.describe('signed in', () => {
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false, git });
     await page.goto('/#s-k');
     await passkeyOn(page);
+    await expect(page.locator('.detail h2 .chip.idle')).toHaveText('idle');
     const flags = page.locator('.detail h2 .flag');
     await expect(flags).toHaveText(['clean']);
     await page.getByRole('button', { name: 'Clear', exact: true }).click();

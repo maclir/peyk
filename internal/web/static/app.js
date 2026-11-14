@@ -725,7 +725,7 @@ async function start(cfg) {
     const g = s.git;
     const busy = s.state === "working" || s.state === "needs_input";
     const task = currentTask(state.tasks, s.id);
-    const rows = [["state", chip(st)], ["aoe", s.aoe_status], ["path", s.path]];
+    const rows = [["aoe", s.aoe_status], ["path", s.path]];
     if (g) {
       if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);
       rows.push(["push", pushLabel(g)]);
@@ -740,7 +740,7 @@ async function start(cfg) {
         h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
         face(projectOf(s), s.title, "lg"),
         h("div", { class: "dtitle" },
-          h("h2", {}, s.title, flagRow(s)),
+          h("h2", {}, s.title, chip(st), flagRow(s)),
           h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository")),
         s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
