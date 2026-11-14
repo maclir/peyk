@@ -1,0 +1,90 @@
+name: Test and deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: replace-with-project-id
+  REGION: europe-west1
+  SERVICE: peyk
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Full project suite
+        run: make test
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud without a key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      # Deploying through the Makefile keeps one definition of what a release
+      # is. Duplicating the gcloud invocation here is how a service ends up
+      # deployed without its secrets or environment: the two copies drift and
+      # nobody notices until something is silently unconfigured in production.
+      #
+      # The account guard applies in CI too. Workload Identity Federation
+      # authenticates as the deploy service account, so that is what it expects.
+      - name: Deploy scale-to-zero service
+        run: make deploy
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ env.PROJECT_ID }}
+          GOOGLE_CLOUD_REGION: ${{ env.REGION }}
+          SERVICE_NAME: ${{ env.SERVICE }}
+          GCLOUD_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Deploy Firestore policy
+        run: make deploy-rules
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ env.PROJECT_ID }}
+          GCLOUD_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Smoke test
+        run: make smoke
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ env.PROJECT_ID }}
+          GOOGLE_CLOUD_REGION: ${{ env.REGION }}
+          SERVICE_NAME: ${{ env.SERVICE }}
+          GCLOUD_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}

@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// The browser never talks to Firestore in this baseline. All access goes
+// through the Cloud Run service using its identity, which bypasses these rules.
+// Open only the narrow reads a future feature genuinely needs, with rules tests.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

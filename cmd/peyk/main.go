@@ -1,0 +1,141 @@
+// Command peyk is the laptop side of peyk.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/maclir/peyk/internal/laptop"
+	"github.com/maclir/peyk/internal/session"
+)
+
+const usage = `usage: peyk <command>
+
+  status   print every live aoe session: state, last commit, push state, last reply
+`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "peyk:", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		fmt.Fprint(out, usage)
+		return nil
+	}
+	switch args[0] {
+	case "status":
+		snaps, err := collector().All(ctx)
+		if err != nil {
+			return err
+		}
+		printBoard(out, snaps, time.Now())
+		return nil
+	default:
+		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
+	}
+}
+
+func collector() laptop.Collector {
+	return laptop.Collector{
+		Aoe:       laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
+		Run:       laptop.Exec,
+		ClaudeDir: claudeDir(),
+		Now:       time.Now,
+	}
+}
+
+// claudeDir follows Claude Code's own setting, so a separate personal profile
+// is read where Claude Code writes it.
+func claudeDir() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+var stateLabels = map[session.State]string{
+	session.NeedsInput: "needs input",
+	session.Error:      "error",
+	session.Dirty:      "uncommitted",
+	session.Unpushed:   "unpushed",
+	session.Working:    "working",
+	session.Idle:       "idle",
+	session.Stopped:    "stopped",
+}
+
+func printBoard(out io.Writer, snaps []session.Snapshot, now time.Time) {
+	if len(snaps) == 0 {
+		fmt.Fprintln(out, "No live Claude Code sessions.")
+		return
+	}
+	for _, s := range snaps {
+		fmt.Fprintf(out, "%-14s %-12s %s\n", s.Title, stateLabels[s.State], gitLine(s.Git, now))
+		if s.Message != nil {
+			fmt.Fprintf(out, "%14s %s\n", "", oneLine(s.Message.Text, 100))
+		}
+	}
+}
+
+func gitLine(g *session.Git, now time.Time) string {
+	if g == nil {
+		return "no repository"
+	}
+	var parts []string
+	if g.Last != nil {
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", g.Last.Hash, oneLine(g.Last.Subject, 50), ago(now.Sub(g.Last.At))))
+	}
+	switch {
+	case g.Upstream == "" && g.Unpushed > 0:
+		parts = append(parts, fmt.Sprintf("%d unpushed, no remote branch", g.Unpushed))
+	case g.Unpushed > 0:
+		parts = append(parts, fmt.Sprintf("%d unpushed", g.Unpushed))
+	case g.Upstream != "":
+		parts = append(parts, "pushed")
+	}
+	if g.Dirty > 0 {
+		parts = append(parts, fmt.Sprintf("%d changed files", g.Dirty))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > max {
+		return string(r[:max-1]) + "…"
+	}
+	return s
+}
+
+func ago(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}

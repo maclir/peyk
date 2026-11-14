@@ -1,0 +1,4 @@
+resource.type="cloud_run_revision"
+resource.labels.service_name="peyk"
+jsonPayload.analytics_schema>0
+jsonPayload.sensitive=true
