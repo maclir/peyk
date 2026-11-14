@@ -427,6 +427,12 @@ test.describe('signed in', () => {
     await page.goto('/#inbox');
     await expect(page.locator('.task', { hasText: 'Long list item 29' })).toBeVisible();
     await page.locator('#task-text').blur();
+    const edges = await page.evaluate(() => {
+      const r = document.querySelector('form.composer:not(.edit)')!.getBoundingClientRect();
+      const y = r.top + r.height / 2;
+      return [r.left + 1, r.right - 1].map((x) => !!document.elementFromPoint(x, y)?.closest('.composer'));
+    });
+    expect(edges).toEqual([true, true]);
     const height = await page.evaluate(() => document.documentElement.scrollHeight);
     await page.mouse.wheel(0, 300);
     await expect(page.locator('html')).toHaveClass(/tuck/);
