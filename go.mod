@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	cloud.google.com/go/firestore v1.25.0
+	github.com/fsnotify/fsnotify v1.9.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.287.1
 )

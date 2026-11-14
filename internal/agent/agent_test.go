@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 type fakeCollector struct {
 	mu    sync.Mutex
 	snaps []session.Snapshot
+	err   error
 	calls int
 }
 
@@ -24,7 +27,13 @@ func (f *fakeCollector) All(context.Context) ([]session.Snapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
-	return append([]session.Snapshot(nil), f.snaps...), nil
+	return append([]session.Snapshot(nil), f.snaps...), f.err
+}
+
+func (f *fakeCollector) fail(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 func (f *fakeCollector) set(s ...session.Snapshot) {
@@ -42,7 +51,7 @@ func (f *fakeCollector) count() int {
 func newAgent(c Collector, s store.Store) *Agent {
 	clock := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	return &Agent{
-		Collect: c, Store: s, Debounce: 20 * time.Millisecond, Heartbeat: time.Hour,
+		Collect: c, Store: s, Debounce: 20 * time.Millisecond, Presence: time.Hour,
 		Now: func() time.Time { clock = clock.Add(time.Second); return clock },
 		Log: log.New(io.Discard, "", 0),
 	}
@@ -114,6 +123,62 @@ func TestRunCoalescesPingsAndSaysGoodbye(t *testing.T) {
 	}
 	if _, l, _ := mem.Snapshot(); l.Online {
 		t.Fatal("laptop still online after stop")
+	}
+}
+
+func TestRunStopsOnAFailedRefreshAndGoesOffline(t *testing.T) {
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	a := newAgent(c, mem)
+	pings := make(chan struct{}, 1)
+	done := make(chan error)
+	go func() { done <- a.Run(context.Background(), pings) }()
+	waitFor(t, func() bool { _, l, _ := mem.Snapshot(); return l.Online })
+
+	c.fail(errors.New("aoe list: exit status 1"))
+	pings <- struct{}{}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "aoe list") {
+			t.Fatalf("Run returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run kept going after a failed refresh")
+	}
+	if _, l, _ := mem.Snapshot(); l.Online {
+		t.Fatal("laptop left online after a failure")
+	}
+}
+
+func TestRunFailsAtStartWithoutGoingOnline(t *testing.T) {
+	mem := store.NewMemory()
+	c := &fakeCollector{err: errors.New("broken")}
+	if err := newAgent(c, mem).Run(context.Background(), nil); err == nil {
+		t.Fatal("want error")
+	}
+	if _, l, _ := mem.Snapshot(); l.Online {
+		t.Fatal("online after a failed start")
+	}
+}
+
+type recordingWatcher struct{ dirs []string }
+
+func (r *recordingWatcher) Set(_ context.Context, dirs []string) error {
+	r.dirs = dirs
+	return nil
+}
+
+func TestRefreshPointsTheWatcherAtSessionDirectories(t *testing.T) {
+	c := &fakeCollector{}
+	c.set(session.Snapshot{ID: "a", Path: "/a"}, session.Snapshot{ID: "b", Path: "/b"})
+	w := &recordingWatcher{}
+	a := newAgent(c, store.NewMemory())
+	a.Watch = w
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(w.dirs, ",") != "/a,/b" {
+		t.Fatalf("watched %v", w.dirs)
 	}
 }
 

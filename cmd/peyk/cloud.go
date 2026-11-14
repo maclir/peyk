@@ -14,6 +14,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/maclir/peyk/internal/agent"
+	"github.com/maclir/peyk/internal/laptop"
 	"github.com/maclir/peyk/internal/owner"
 	"github.com/maclir/peyk/internal/store"
 )
@@ -56,16 +57,34 @@ func runAgent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	watcher, err := agent.NewGitWatcher(laptop.Exec)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pings := make(chan struct{}, 1)
 	go agent.Serve(ctx, ln, pings)
+	watchErr := make(chan error, 1)
+	go func() {
+		err := watcher.Forward(ctx, pings)
+		watchErr <- err
+		if err != nil {
+			cancel()
+		}
+	}()
 
 	logger := log.New(os.Stderr, "peyk: ", log.LstdFlags)
 	logger.Printf("publishing to %s; Ctrl-C to go offline", p)
 	a := &agent.Agent{
-		Collect: collector(), Store: fs, Now: time.Now, Log: logger,
-		Debounce: 2 * time.Second, Heartbeat: 10 * time.Minute,
+		Collect: collector(), Store: fs, Watch: watcher, Now: time.Now, Log: logger,
+		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 	}
 	err = a.Run(ctx, pings)
+	cancel()
+	if werr := <-watchErr; err == nil {
+		err = werr
+	}
 	logger.Print("offline")
 	return err
 }
