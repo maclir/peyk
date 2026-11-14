@@ -5,62 +5,52 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
-	"github.com/maclir/peyk/internal/idea"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-)
+	"google.golang.org/api/option"
 
-const collection = "ideas"
+	"github.com/maclir/peyk/internal/session"
+)
 
 type Firestore struct{ client *firestore.Client }
 
-func NewFirestore(ctx context.Context, projectID string) (*Firestore, error) {
-	client, err := firestore.NewClient(ctx, projectID)
+func NewFirestore(ctx context.Context, projectID string, opts ...option.ClientOption) (*Firestore, error) {
+	client, err := firestore.NewClient(ctx, projectID, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create Firestore client: %w", err)
 	}
 	return &Firestore{client: client}, nil
 }
 
-func (s *Firestore) Create(ctx context.Context, v idea.Idea) error {
-	if _, err := s.client.Collection(collection).Doc(v.ID).Create(ctx, v); err != nil {
-		return fmt.Errorf("create idea: %w", err)
+func (s *Firestore) PutSession(ctx context.Context, v session.Snapshot) error {
+	if _, err := s.client.Collection("sessions").Doc(v.ID).Set(ctx, v); err != nil {
+		return fmt.Errorf("write session %s: %w", v.ID, err)
 	}
 	return nil
 }
 
-func (s *Firestore) List(ctx context.Context) ([]idea.Idea, error) {
-	docs, err := s.client.Collection(collection).OrderBy("created_at", firestore.Desc).Limit(100).Documents(ctx).GetAll()
-	if err != nil {
-		return nil, fmt.Errorf("list ideas: %w", err)
+func (s *Firestore) DeleteSession(ctx context.Context, id string) error {
+	if _, err := s.client.Collection("sessions").Doc(id).Delete(ctx); err != nil {
+		return fmt.Errorf("delete session %s: %w", id, err)
 	}
-	out := make([]idea.Idea, 0, len(docs))
-	for _, doc := range docs {
-		var v idea.Idea
-		if err := doc.DataTo(&v); err != nil {
-			return nil, fmt.Errorf("decode idea %s: %w", doc.Ref.ID, err)
-		}
-		v.ID = doc.Ref.ID
-		out = append(out, v)
-	}
-	return out, nil
+	return nil
 }
 
-// AdminKey reads config/admin's key field. The document is created by hand in
-// the console; nothing in the app writes it.
-func (s *Firestore) AdminKey(ctx context.Context) (string, error) {
-	doc, err := s.client.Collection("config").Doc("admin").Get(ctx)
-	if status.Code(err) == codes.NotFound {
-		return "", ErrNoAdminKey
-	}
+func (s *Firestore) SessionIDs(ctx context.Context) ([]string, error) {
+	refs, err := s.client.Collection("sessions").DocumentRefs(ctx).GetAll()
 	if err != nil {
-		return "", fmt.Errorf("read admin key: %w", err)
+		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	key, _ := doc.Data()["key"].(string)
-	if key == "" {
-		return "", ErrNoAdminKey
+	ids := make([]string, len(refs))
+	for i, r := range refs {
+		ids[i] = r.ID
 	}
-	return key, nil
+	return ids, nil
+}
+
+func (s *Firestore) SetLaptop(ctx context.Context, l Laptop) error {
+	if _, err := s.client.Collection("laptop").Doc("status").Set(ctx, l); err != nil {
+		return fmt.Errorf("write laptop status: %w", err)
+	}
+	return nil
 }
 
 func (s *Firestore) Close() error { return s.client.Close() }

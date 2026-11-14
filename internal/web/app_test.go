@@ -6,44 +6,56 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
-func TestCreateAndRenderIdea(t *testing.T) {
-	a := newTestApp()
-	a.ids = func() string { return "fixed" }
-	a.now = func() time.Time { return time.Unix(1, 0) }
-	srv := httptest.NewServer(a.Handler())
+func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
+	srv := httptest.NewServer(New(Firebase{APIKey: "k", AuthDomain: "p.firebaseapp.com", ProjectID: "p", AppID: "a"}).Handler())
 	defer srv.Close()
-
-	resp, err := http.PostForm(srv.URL+"/ideas", url.Values{"title": {"First spark"}})
+	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
-		t.Fatalf("POST: %v", err)
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "First spark") {
-		t.Fatalf("body does not contain created idea: %s", body)
+	if !strings.Contains(string(body), `data-firebase="{&#34;apiKey&#34;:&#34;k&#34;`) {
+		t.Fatalf("config not in page: %s", body)
 	}
-	if got := resp.Header.Get("Content-Security-Policy"); got == "" {
-		t.Error("missing Content-Security-Policy")
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, want := range []string{"frame-src https://p.firebaseapp.com", "connect-src 'self' https://*.googleapis.com", "script-src 'self' https://apis.google.com"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP %q missing %q", csp, want)
+		}
+	}
+
+	if page := get(t, httptest.NewServer(newTestApp().Handler()).URL+"/"); !strings.Contains(page, `data-firebase=""`) {
+		t.Fatalf("unconfigured page should carry no config: %s", page)
 	}
 }
 
-func TestBlankIdeaIsBadRequest(t *testing.T) {
-	a := newTestApp()
-	req := httptest.NewRequest(http.MethodPost, "/ideas", strings.NewReader("title=+"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
+func TestUnknownPathIsNotFound(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ideas", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestVendoredFirebaseLoadsNothingFromGoogleCDN(t *testing.T) {
+	for _, name := range []string{"firebase-app.js", "firebase-auth.js", "firebase-firestore.js"} {
+		body, err := staticFS.ReadFile("static/vendor/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "gstatic.com/firebasejs") {
+			t.Errorf("%s imports from gstatic; run make vendor", name)
+		}
+	}
+}
+
+func newTestApp() *App { return New(Firebase{}) }
 
 // Google's frontend reserves /healthz on *.run.app and answers it itself, so a
 // health check there reports a perfectly healthy service as broken. The path

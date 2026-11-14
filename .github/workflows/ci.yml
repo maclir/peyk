@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PROJECT_ID: replace-with-project-id
+  PROJECT_ID: peyk-relay
   REGION: europe-west1
   SERVICE: peyk
 
@@ -76,6 +76,11 @@ jobs:
           GOOGLE_CLOUD_REGION: ${{ env.REGION }}
           SERVICE_NAME: ${{ env.SERVICE }}
           GCLOUD_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          # Public web config, kept as repository variables so the page CI
+          # deploys matches the one a local `make deploy` does from .env.
+          FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
       - name: Deploy Firestore policy
         run: make deploy-rules
         env:

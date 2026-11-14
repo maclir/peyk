@@ -5,7 +5,8 @@
   "scripts": {
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:rules": "vitest run tests/rules"
+    "test:rules": "vitest run tests/rules",
+    "test:unit": "vitest run tests/unit"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

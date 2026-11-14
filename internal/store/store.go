@@ -1,20 +1,29 @@
+// Package store is where the laptop publishes what the phone reads.
+//
+// Layout:
+//
+//	sessions/{aoe session id}  session.Snapshot
+//	laptop/status              Laptop
 package store
 
 import (
 	"context"
-	"errors"
+	"time"
 
-	"github.com/maclir/peyk/internal/idea"
+	"github.com/maclir/peyk/internal/session"
 )
 
-// ErrNoAdminKey means config/admin holds no key, which locks the dashboard.
-var ErrNoAdminKey = errors.New("admin key not configured")
+// Laptop says whether the agent is running. SeenAt lets the phone tell a
+// stopped agent from one on a laptop that went to sleep without saying so.
+type Laptop struct {
+	Online bool      `firestore:"online" json:"online"`
+	SeenAt time.Time `firestore:"seen_at" json:"seen_at"`
+}
 
 type Store interface {
-	Create(context.Context, idea.Idea) error
-	List(context.Context) ([]idea.Idea, error)
-	// AdminKey returns the secret that opens the dashboard. It is read on every
-	// request, so replacing the document rotates the key without a deploy.
-	AdminKey(context.Context) (string, error)
+	PutSession(context.Context, session.Snapshot) error
+	DeleteSession(ctx context.Context, id string) error
+	SessionIDs(context.Context) ([]string, error)
+	SetLaptop(context.Context, Laptop) error
 	Close() error
 }

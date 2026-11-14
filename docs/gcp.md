@@ -45,33 +45,13 @@ in the error, or create a second billing account.
 
 Run `make deploy` for a manual release. CI runs the complete suite on pull requests and deploys `main` only after it passes.
 
-## The dashboard
+## Firebase sign-in
 
-`/admin?key=…` counts the events the app emits. Two steps turn it on:
-
-```sh
-make analytics-setup
-```
-
-creates the BigQuery dataset, the log sink that copies event lines into it
-(filter: `internal/analytics/sink.filter`), and the access both need: the
-sink's identity may write to that dataset, and the runtime may read it and run
-query jobs. Rerunning it converges on the same state, so a changed filter is
-applied by running it again. `make deploy` passes the dataset name to the
-service.
-
-Then open Firestore in the console and create the document `config/admin`
-with a string field `key`. The page compares every request against it, so
-changing the field rotates the key without a deploy. With no document, the page
-is locked.
-
-A sink carries only what is written after it exists; there is no backfill.
-
-Events that embed `analytics.Sensitive` carry data about people and go to a
-separate dataset through `make analytics-sensitive-setup`.
-`make analytics-sensitive-purge CONFIRM=yes` deletes that sink and dataset;
-then delete the event types so nothing emits them again. The counts are
-unaffected.
+`firebase projects:addfirebase` and `firebase apps:create web` give the web
+config that goes into `.env` as `FIREBASE_*`. The Google sign-in provider has
+to be enabled once in the console (Authentication → Sign-in method → Google),
+because that step creates the OAuth client. Add the Cloud Run hostname under
+Authentication → Settings → Authorized domains.
 
 ## A custom domain
 

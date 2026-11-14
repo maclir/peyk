@@ -2,16 +2,12 @@ package web
 
 import (
 	"bytes"
-	"fmt"
+	"encoding/json"
 	"html/template"
 	"log"
 	"mime"
 	"net/http"
 	"time"
-
-	"github.com/maclir/peyk/internal/analytics"
-	"github.com/maclir/peyk/internal/idea"
-	"github.com/maclir/peyk/internal/store"
 )
 
 func init() {
@@ -28,24 +24,25 @@ func init() {
 // perfectly healthy.
 const HealthPath = "/health"
 
-type App struct {
-	store     store.Store
-	events    *analytics.Logger
-	reader    analytics.Reader
-	now       func() time.Time
-	ids       func() string
-	page      *template.Template
-	adminPage *template.Template
+// Firebase is the web app's public Firebase configuration. None of it is
+// secret: it names the project, and Firestore rules and the owner claim decide
+// what a signed-in browser may read.
+type Firebase struct {
+	APIKey     string `json:"apiKey"`
+	AuthDomain string `json:"authDomain"`
+	ProjectID  string `json:"projectId"`
+	AppID      string `json:"appId"`
 }
 
-// New serves the app. events is where it reports what happened; reader is where
-// the dashboard reads those reports back.
-func New(s store.Store, events *analytics.Logger, reader analytics.Reader) *App {
-	return &App{
-		store: s, events: events, reader: reader, now: time.Now, ids: newID,
-		page:      template.Must(template.New("page").Parse(pageHTML)),
-		adminPage: adminTemplate,
-	}
+type App struct {
+	firebase Firebase
+	page     *template.Template
+}
+
+// New serves the phone app. An empty Firebase config serves the shell with a
+// notice instead of a sign-in button, which is what local runs and tests get.
+func New(fb Firebase) *App {
+	return &App{firebase: fb, page: template.Must(template.New("page").Parse(pageHTML))}
 }
 
 func (a *App) Handler() http.Handler {
@@ -55,35 +52,20 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /sw.js", serviceWorker)
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
-	mux.HandleFunc("GET /", a.home)
-	mux.HandleFunc("POST /ideas", a.create)
-	mux.HandleFunc("GET "+AdminPath, a.admin)
-	return securityHeaders(mux)
+	mux.HandleFunc("GET /{$}", a.home)
+	return securityHeaders(a.firebase.AuthDomain, mux)
 }
 
-func (a *App) home(w http.ResponseWriter, r *http.Request) {
-	ideas, err := a.store.List(r.Context())
-	if err != nil {
-		http.Error(w, "could not load ideas", http.StatusInternalServerError)
-		return
+func (a *App) home(w http.ResponseWriter, _ *http.Request) {
+	cfg := ""
+	if a.firebase.APIKey != "" {
+		b, _ := json.Marshal(a.firebase)
+		cfg = string(b)
 	}
-	if err := a.page.Execute(w, ideas); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := a.page.Execute(w, cfg); err != nil {
 		http.Error(w, "could not render page", http.StatusInternalServerError)
 	}
-}
-
-func (a *App) create(w http.ResponseWriter, r *http.Request) {
-	v, err := idea.New(a.ids(), r.FormValue("title"), a.now())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.store.Create(r.Context(), v); err != nil {
-		http.Error(w, "could not save idea", http.StatusInternalServerError)
-		return
-	}
-	a.events.Emit(analytics.IdeaCreated{})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // OfflinePath is what the worker shows when a launch cannot reach the service.
@@ -140,11 +122,17 @@ func serviceWorker(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "sw.js", time.Time{}, bytes.NewReader(serviceWorkerBody))
 }
 
-func newID() string { return fmt.Sprintf("%d", time.Now().UnixNano()) }
-
-func securityHeaders(next http.Handler) http.Handler {
+// securityHeaders allows exactly what Firebase sign-in and Firestore need:
+// Google's APIs for data and tokens, apis.google.com for the sign-in helper,
+// and the project's auth domain for the sign-in popup's frame.
+func securityHeaders(authDomain string, next http.Handler) http.Handler {
+	csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; " +
+		"script-src 'self' https://apis.google.com; connect-src 'self' https://*.googleapis.com; img-src 'self' data:"
+	if authDomain != "" {
+		csp += "; frame-src https://" + authDomain
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", csp)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
@@ -179,20 +167,20 @@ const pageHTML = `<!doctype html>
 <link rel="icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
-<body><main><h1>peyk</h1><p>A small place to start something.</p>
-<form method="post" action="/ideas"><label for="title">New idea</label><input id="title" name="title" required><button>Add</button></form>
-<ul>{{range .}}<li>{{.Title}}</li>{{else}}<li>No ideas yet.</li>{{end}}</ul></main>
-<script src="/static/app.js"></script></body></html>`
+<body data-firebase="{{.}}">
+<header class="bar"><h1>peyk</h1><span id="laptop" class="laptop">connecting…</span></header>
+<main id="app"><p class="notice" id="notice">Loading…</p></main>
+<script type="module" src="/static/app.js"></script></body></html>`
 
 // color-scheme is what tells the browser to draw the surfaces this stylesheet
 // does not own — the form controls, the scrollbar — for whichever mode the page
 // is in. Without it they are drawn light over a dark page.
 const pageCSS = `html{-webkit-text-size-adjust:100%;color-scheme:light dark}
-body{font:18px system-ui;max-width:42rem;margin:4rem auto;color:#202124;background:#ffffff;-webkit-tap-highlight-color:transparent;
-padding:0 calc(1rem + env(safe-area-inset-right,0px)) calc(1rem + env(safe-area-inset-bottom,0px)) calc(1rem + env(safe-area-inset-left,0px))}
-form{display:flex;gap:.5rem}input{flex:1;padding:.7rem}button{padding:.7rem 1rem}li{margin:.7rem 0}
-@media(prefers-color-scheme:dark){body{color:#e8eaed;background:#131516}}`
+body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:0 auto;color:#18212e;background:#ffffff;-webkit-tap-highlight-color:transparent;
+padding:env(safe-area-inset-top,0px) calc(1rem + env(safe-area-inset-right,0px)) calc(1rem + env(safe-area-inset-bottom,0px)) calc(1rem + env(safe-area-inset-left,0px))}
+@media(prefers-color-scheme:dark){body{color:#e4e9f1;background:#131516}}`
 
 // offlineHTML is what an installed icon opens when there is no signal. It says
 // what is wrong rather than showing the browser's error page, and it never

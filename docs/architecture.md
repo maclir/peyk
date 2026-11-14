@@ -1,8 +1,11 @@
 # Architecture
 
-peyk starts as one stateless Go process. It serves HTTP, owns all writes, and uses a narrow `Store` interface. With no project configured it uses memory; on Cloud Run it uses Firestore. This makes local work and browser tests quick, deterministic, and credential-free while keeping production behavior explicit.
+peyk has two processes and Firestore between them.
 
-The initial Firestore rules deny all browser access. If instant client-side reads become valuable, open only the required documents and query shapes, then prove ownership and enumeration boundaries in `tests/rules`.
+- **Laptop agent** (`cmd/peyk agent`, run by `make serve` in the `relayServer` aoe session). It reads aoe, git and Claude Code transcripts (`internal/laptop`), derives each session's state (`internal/session`), and writes `sessions/{id}` and `laptop/status` (`internal/store`). It writes a session only when its content changed. It does no polling: hooks run `peyk ping`, which touches a unix socket at `~/.peyk/agent.sock`; pings are debounced by 2 s, and a 10-minute heartbeat refreshes everything and marks the laptop seen. It authenticates by impersonating `peyk-agent@`, which holds only `roles/datastore.user`; no key file exists. Stopping it writes `online: false`.
+- **Cloud Run service** (`cmd/server`). It serves the phone app: an installable page whose modules read Firestore directly with the Firebase SDK, vendored under `internal/web/static/vendor` (`make vendor`). It holds no state and needs no Firestore access yet.
+
+Browsers only read, and only an account carrying the `owner` custom claim, set with `make owner EMAIL=…` after that account's first sign-in. Every other read and every browser write is denied; `tests/rules` proves both. The phone listens only while the app is visible.
 
 Work that outlives a response does not run. CPU is allocated only while a request is being handled, so a goroutine still going after the handler returns is throttled the moment it is on its own — it finishes late, or never, and nothing reports an error. Either complete the work before writing the response, or let the client trigger a second request and turn background work into ordinary request-driven work.
 
@@ -49,53 +52,7 @@ The worker caches the shell and never a page. Every page here is rendered from
 data, and a stale answer presented as a current one is worse than an honest
 `/offline`.
 
-## The dashboard counts events
-
-`internal/analytics` is the whole of it. The app emits typed events as JSON
-lines on stdout; a log sink copies them into BigQuery; `/admin` runs one query,
-generated from the event catalog, that counts them per day and dimension. The
-page reports what happened in a window and never application state, because a
-document says what is true now and a dashboard figure has to say what happened.
-
-Three things keep the figures true to the code:
-
-- The catalog is Go types, pinned by `testdata/events.golden`. Renaming an
-  event or changing a field's type fails the tests, because the sink infers
-  each column's type once and silently drops rows that disagree.
-- Locally and in tests the same lines go to `analytics.Memory`, which answers
-  with the counts the query would return. The dashboard's own tests click
-  through the app and read the number on the page, so a handler that stops
-  emitting, or a reader that stops matching, fails there.
-- Every sum names its event by type and its dimensions by field name, and
-  panics on one the event does not declare; a typo cannot become a figure that
-  reads zero forever.
-
-Emit an event only after the work it reports has succeeded. The page shows when
-the newest event arrived, and says so when BigQuery cannot be read, because a
-stalled pipeline and a quiet day must not look alike.
-
-The page has one layout, drawn by `internal/web/admin.go`, and a new figure
-goes into it rather than beside it:
-
-- A row of range links, then the window and when the newest event arrived.
-- A grid of figures, one for each thing people do in the app. Under each figure
-  a caption breaks it down: how often it was undone, or how it splits by a
-  dimension.
-- A table of days, newest first and labelled the way a person says them
-  ("Today", "Yesterday", "Mon 28 Sep"), with one column per series. Each
-  column's bars scale to that column's largest value, and a day with no events
-  is dimmed rather than left out.
-- Further tables in the same form for a split that has too many values for a
-  caption.
-
-An event is added to the page in the commit that starts emitting it, as a
-figure, a caption or a column. Every number on the page carries a `data-figure`
-name, which is what the tests read.
-
-Every file in `internal/analytics` except `events.go` and the two filters is
-meant to be identical across projects; change them here first.
-
 ## Testing pyramid
 
-`make test` runs formatting/module verification, race-enabled Go tests, Firestore rules tests, Firestore adapter integration tests, and Playwright. Both Firestore layers use the local emulator. Playwright starts the real server with memory storage and retains traces/screenshots on failure, which gives an agent inspectable evidence without production access.
+`make test` runs formatting/module verification, race-enabled Go tests, Firestore rules tests, Firestore adapter integration tests, and Playwright. Both Firestore layers use the local emulator. Playwright starts the real server without Firebase config and retains traces/screenshots on failure, which gives an agent inspectable evidence without production access.
 

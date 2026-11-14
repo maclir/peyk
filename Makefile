@@ -45,22 +45,14 @@ export GOOGLE_CLOUD_QUOTA_PROJECT := $(QUOTA_PROJECT)
 endif
 RUNTIME_SERVICE_ACCOUNT ?= $(APP_NAME)-runtime@$(GOOGLE_CLOUD_PROJECT).iam.gserviceaccount.com
 BUILD_SERVICE_ACCOUNT ?= projects/$(GOOGLE_CLOUD_PROJECT)/serviceAccounts/$(APP_NAME)-build@$(GOOGLE_CLOUD_PROJECT).iam.gserviceaccount.com
-# Where the log sinks land the dashboard's events. Dataset names allow no
-# hyphens. The sensitive dataset holds only events that embed
-# analytics.Sensitive, so it can be deleted without touching the counts.
-ANALYTICS_DATASET ?= $(subst -,_,$(APP_NAME))_analytics
-ANALYTICS_SINK ?= $(APP_NAME)-analytics
-ANALYTICS_SENSITIVE_DATASET ?= $(ANALYTICS_DATASET)_sensitive
-ANALYTICS_SENSITIVE_SINK ?= $(APP_NAME)-analytics-sensitive
 TEST_PROJECT ?= peyk-test
 TEST_PORT ?= 8091
 export FIREBASE_EMULATORS_PATH := $(CURDIR)/.firebase/emulators
 export TEST_PORT
 
-.PHONY: help run build status icons clean tidy verify test test-unit test-integration test-rules \
+.PHONY: help run build vendor status icons clean tidy verify test test-unit test-js test-integration test-rules \
 	test-e2e test-e2e-ui test-server docker-build gcp-bootstrap deploy deploy-rules \
-	smoke new gcp-guard adc-guard domain analytics-setup analytics-sensitive-setup \
-	analytics-sensitive-purge
+	smoke new gcp-guard adc-guard domain serve owner
 
 help:
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "%-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -83,8 +75,27 @@ build: ## Build the production binary.
 	mkdir -p bin
 	go build -trimpath -o bin/server ./cmd/server
 
+vendor: node_modules ## Copy Firebase's browser modules into the embedded static files.
+	mkdir -p internal/web/static/vendor
+	for m in app auth firestore; do \
+		sed -e 's#https://www.gstatic.com/firebasejs/[0-9.]*/firebase-app.js#./firebase-app.js#g' -e '/sourceMappingURL=/d' \
+			node_modules/firebase/firebase-$$m.js > internal/web/static/vendor/firebase-$$m.js; \
+	done
+
 status: ## Print every live aoe session: state, last commit, push state, last reply.
 	go run ./cmd/peyk status
+
+# serve is what the relayServer aoe session runs. It builds first so the
+# process that stays up is the small binary, not the Go toolchain.
+serve: ## Publish session state for the phone until Ctrl-C (run in the relayServer aoe session).
+	@test -n "$(GOOGLE_CLOUD_PROJECT)" || { echo "GOOGLE_CLOUD_PROJECT is required; set it in .env"; exit 1; }
+	@mkdir -p bin
+	@go build -trimpath -o bin/peyk ./cmd/peyk
+	@bin/peyk agent
+
+owner: gcp-guard ## Admit a Google account after its first sign-in: make owner EMAIL=you@example.com
+	@test -n "$(EMAIL)" || { echo "EMAIL is required"; exit 1; }
+	go run ./cmd/peyk owner $(EMAIL)
 
 clean: ## Remove generated artifacts.
 	rm -rf bin coverage.out playwright-report test-results
@@ -99,10 +110,13 @@ verify: ## Check formatting, modules, and static analysis without modifying file
 	@git diff --exit-code -- go.mod go.sum
 	go vet ./...
 
-test: verify test-unit test-rules test-integration test-e2e ## Run the complete local/CI test contract.
+test: verify test-unit test-js test-rules test-integration test-e2e ## Run the complete local/CI test contract.
 
 test-unit: ## Run fast Go tests with the race detector.
 	go test -race -coverprofile=coverage.out ./...
+
+test-js: node_modules ## Test the phone app's plain modules (Markdown, board logic).
+	npm run test:unit
 
 test-rules: node_modules ## Test Firestore authorization rules in the emulator.
 	npx firebase emulators:exec --only firestore --project $(TEST_PROJECT) 'npm run test:rules'
@@ -114,7 +128,7 @@ test-integration: node_modules ## Test the real Firestore adapter against the em
 test-server: ## Start the deterministic, credential-free E2E server.
 	# Ambient cloud variables are cleared, not just the obvious one. A populated
 	# .env must never change what the suite exercises, or make it billable.
-	GOOGLE_CLOUD_PROJECT= QUOTA_PROJECT= PORT=$(TEST_PORT) go run ./cmd/server
+	GOOGLE_CLOUD_PROJECT= QUOTA_PROJECT= FIREBASE_API_KEY= FIREBASE_AUTH_DOMAIN= FIREBASE_APP_ID= PORT=$(TEST_PORT) go run ./cmd/server
 
 test-e2e: node_modules ## Test user journeys with Playwright.
 	npx playwright install chromium
@@ -143,25 +157,10 @@ deploy: gcp-guard ## Deploy the current source to a scale-to-zero Cloud Run serv
 		--build-service-account $(BUILD_SERVICE_ACCOUNT) \
 		--allow-unauthenticated --min-instances 0 --max-instances 3 \
 		--memory 256Mi --cpu 1 --concurrency 80 --timeout 60 \
-		--set-env-vars GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT),ANALYTICS_DATASET=$(ANALYTICS_DATASET)
+		--set-env-vars GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT),FIREBASE_API_KEY=$(FIREBASE_API_KEY),FIREBASE_AUTH_DOMAIN=$(FIREBASE_AUTH_DOMAIN),FIREBASE_APP_ID=$(FIREBASE_APP_ID)
 
 deploy-rules: gcp-guard node_modules ## Deploy deny-by-default Firestore rules and indexes.
 	npx firebase deploy --only firestore:rules,firestore:indexes --project $(GOOGLE_CLOUD_PROJECT) --force
-
-analytics-setup: gcp-guard ## Create/update the dashboard's log sink, BigQuery dataset, and access.
-	RUNTIME_SERVICE_ACCOUNT=$(RUNTIME_SERVICE_ACCOUNT) ./scripts/analytics-sink.sh \
-		$(ANALYTICS_DATASET) $(ANALYTICS_SINK) internal/analytics/sink.filter "$(APP_NAME) dashboard events"
-
-analytics-sensitive-setup: gcp-guard ## Create/update the separate sink for events that embed analytics.Sensitive.
-	RUNTIME_SERVICE_ACCOUNT=$(RUNTIME_SERVICE_ACCOUNT) ./scripts/analytics-sink.sh \
-		$(ANALYTICS_SENSITIVE_DATASET) $(ANALYTICS_SENSITIVE_SINK) internal/analytics/sensitive.filter \
-		"$(APP_NAME) events about people; purge with make analytics-sensitive-purge"
-
-analytics-sensitive-purge: gcp-guard ## Delete the sensitive sink and every row it wrote: make analytics-sensitive-purge CONFIRM=yes
-	@test "$(CONFIRM)" = yes || { echo "This deletes $(ANALYTICS_SENSITIVE_DATASET) for good. Rerun with CONFIRM=yes."; exit 1; }
-	-gcloud logging sinks delete $(ANALYTICS_SENSITIVE_SINK) --project $(GOOGLE_CLOUD_PROJECT) --quiet
-	bq rm -r -f --dataset $(GOOGLE_CLOUD_PROJECT):$(ANALYTICS_SENSITIVE_DATASET)
-	@echo "Purged. Delete the Sensitive event types from internal/analytics/events.go so nothing emits them again."
 
 domain: gcp-guard ## Point DOMAIN at the service and print the DNS records.
 	@./scripts/domain.sh

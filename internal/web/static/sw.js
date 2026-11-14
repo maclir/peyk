@@ -12,7 +12,19 @@
 
 const SHELL = "peyk-__VERSION__";
 const OFFLINE = "/offline";
-const ASSETS = [OFFLINE, "/static/icon.svg"];
+// The Firebase modules are most of the app's weight; cached with the shell
+// they download once per release instead of on every launch.
+const ASSETS = [
+  OFFLINE,
+  "/static/icon.svg",
+  "/static/app.css",
+  "/static/app.js",
+  "/static/board.js",
+  "/static/markdown.js",
+  "/static/vendor/firebase-app.js",
+  "/static/vendor/firebase-auth.js",
+  "/static/vendor/firebase-firestore.js",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(ASSETS)));

@@ -12,13 +12,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/maclir/peyk/internal/agent"
 	"github.com/maclir/peyk/internal/laptop"
 	"github.com/maclir/peyk/internal/session"
 )
 
 const usage = `usage: peyk <command>
 
-  status   print every live aoe session: state, last commit, push state, last reply
+  status         print every live aoe session: state, last commit, push state, last reply
+  agent          publish session state for the phone until stopped
+  ping           tell a running agent that something changed (for hooks)
+  owner <email>  admit this Google account to peyk after its first sign-in
 `
 
 func main() {
@@ -43,6 +47,16 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		printBoard(out, snaps, time.Now())
 		return nil
+	case "agent":
+		return runAgent(ctx)
+	case "ping":
+		agent.Ping(socketPath())
+		return nil
+	case "owner":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: peyk owner <email>")
+		}
+		return grantOwner(ctx, args[1])
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}
