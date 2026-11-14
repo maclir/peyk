@@ -40,8 +40,13 @@ endif
 # set-quota-project` would repoint them all. Pinning the environment variable
 # scopes it to this process, and Google's client libraries prefer it over the
 # stored value.
+#
+# Not in CI: there the federated GitHub identity, not the deploy account, would
+# be billed, and it lacks serviceusage.services.use on the project.
+ifeq ($(GITHUB_ACTIONS),)
 ifneq ($(QUOTA_PROJECT),)
 export GOOGLE_CLOUD_QUOTA_PROJECT := $(QUOTA_PROJECT)
+endif
 endif
 RUNTIME_SERVICE_ACCOUNT ?= $(APP_NAME)-runtime@$(GOOGLE_CLOUD_PROJECT).iam.gserviceaccount.com
 BUILD_SERVICE_ACCOUNT ?= projects/$(GOOGLE_CLOUD_PROJECT)/serviceAccounts/$(APP_NAME)-build@$(GOOGLE_CLOUD_PROJECT).iam.gserviceaccount.com
