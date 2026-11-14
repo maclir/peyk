@@ -74,21 +74,59 @@ export function sortProjects(projects) {
   });
 }
 
-// Groups queued tasks into what can be sent now and what waits on a busy or
-// unknown project, oldest first in each.
-export function inboxGroups(tasks, projects) {
+// A task's place in the inbox: the rank it was moved to, or when it was made.
+export function taskRank(t) {
+  return typeof t.rank === "number" ? t.rank : toDate(t.created_at)?.getTime() ?? 0;
+}
+
+// Queued tasks in the inbox's order, each marked ready when its project is
+// free, or with why it waits.
+export function queue(tasks, projects) {
   const byName = new Map(projects.map((p) => [p.name, p]));
-  const ready = [];
-  const waiting = [];
-  const queued = tasks
+  return tasks
     .filter((t) => t.status === "queued")
-    .sort((a, b) => toDate(a.created_at) - toDate(b.created_at));
-  for (const t of queued) {
-    const p = byName.get(t.project);
-    if (p && p.free) ready.push(t);
-    else waiting.push({ ...t, why: p ? p.busy : "project no longer exists" });
-  }
-  return { ready, waiting };
+    .sort((a, b) => taskRank(a) - taskRank(b))
+    .map((t) => {
+      const p = byName.get(t.project);
+      return p && p.free ? { ...t, ready: true } : { ...t, ready: false, why: p ? p.busy : "project no longer exists" };
+    });
+}
+
+export function queueCounts(list) {
+  const ready = list.filter((t) => t.ready).length;
+  return { all: list.length, ready, waiting: list.length - ready };
+}
+
+export function filterQueue(list, status, project) {
+  return list.filter((t) =>
+    (!project || t.project === project) && (status === "ready" ? t.ready : status === "waiting" ? !t.ready : true));
+}
+
+// The rank that puts list[i] at position to, between the tasks that would
+// then be its neighbours, so a move writes one task.
+export function rankAt(list, i, to) {
+  const rest = list.filter((_, k) => k !== i);
+  const before = rest[to - 1];
+  const after = rest[to];
+  if (!before && !after) return taskRank(list[i]);
+  if (!before) return taskRank(after) - 1000;
+  if (!after) return taskRank(before) + 1000;
+  return (taskRank(before) + taskRank(after)) / 2;
+}
+
+// A project with no logo is drawn as its initial on one of six tints, the
+// same one every time.
+export function monogram(name) {
+  let hash = 0;
+  for (const ch of String(name)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return { letter: String(name).charAt(0).toUpperCase() || "?", tint: hash % 6 };
+}
+
+export function searchProjects(projects, query) {
+  const q = query.trim().toLowerCase();
+  return projects
+    .filter((p) => !q || p.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // The task a session is working on: the most recently dispatched one.

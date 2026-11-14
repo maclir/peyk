@@ -80,6 +80,8 @@ type Task struct {
 	Commit string `firestore:"commit,omitempty" json:"commit,omitempty"`
 	// Images are attachment ids.
 	Images []string `firestore:"images,omitempty" json:"images,omitempty"`
+	// Rank is the phone's order for queued tasks.
+	Rank float64 `firestore:"rank,omitempty" json:"rank,omitempty"`
 }
 
 const (

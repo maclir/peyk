@@ -51,6 +51,12 @@ service cloud.firestore {
         && boundedString(data.text, 20000);
     }
 
+    // The phone's order for queued tasks; a task without one sorts by when
+    // it was made.
+    function validRank(data) {
+      return !('rank' in data) || data.rank is number;
+    }
+
     // A task's images are created in the same batch as the task, so they
     // are checked as they will be after it.
     function imageExists(images, i) {
@@ -68,15 +74,17 @@ service cloud.firestore {
     match /tasks/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
-        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images'])
+        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank'])
         && validTarget(request.resource.data)
+        && validRank(request.resource.data)
         && validImages(request.resource.data)
         && request.resource.data.created_at == request.time
         && request.resource.data.status == 'queued';
       allow update: if isOwner()
         && resource.data.status == 'queued'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text'])
-        && validTarget(request.resource.data);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank'])
+        && validTarget(request.resource.data)
+        && validRank(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
     }
 

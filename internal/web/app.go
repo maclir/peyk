@@ -172,7 +172,7 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 const pageHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#131516" media="(prefers-color-scheme: dark)">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -186,7 +186,7 @@ const pageHTML = `<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
 <body data-firebase="{{.}}">
-<header class="bar"><h1>peyk</h1><span id="laptop" class="laptop">connecting…</span></header>
+<header class="bar"><h1><img src="/static/icon.svg" alt="" width="24" height="24">peyk</h1><span id="laptop" class="laptop">connecting…</span></header>
 <main id="app"><p class="notice" id="notice">Loading…</p></main>
 <script type="module" src="/static/app.js"></script></body></html>`
 
@@ -194,7 +194,7 @@ const pageHTML = `<!doctype html>
 // does not own — the form controls, the scrollbar — for whichever mode the page
 // is in. Without it they are drawn light over a dark page.
 const pageCSS = `html{-webkit-text-size-adjust:100%;color-scheme:light dark}
-body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:0 auto;color:#18212e;background:#ffffff;-webkit-tap-highlight-color:transparent;
+body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:0 auto;color:#18212e;background:#f5f6f8;-webkit-tap-highlight-color:transparent;
 padding:env(safe-area-inset-top,0px) calc(1rem + env(safe-area-inset-right,0px)) calc(1rem + env(safe-area-inset-bottom,0px)) calc(1rem + env(safe-area-inset-left,0px))}
 @media(prefers-color-scheme:dark){body{color:#e4e9f1;background:#131516}}`
 
@@ -204,7 +204,7 @@ padding:env(safe-area-inset-top,0px) calc(1rem + env(safe-area-inset-right,0px))
 const offlineHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#131516" media="(prefers-color-scheme: dark)">
 <title>Offline</title>
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">

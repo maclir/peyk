@@ -154,6 +154,8 @@ type Project struct {
 	Busy string `firestore:"busy" json:"busy"`
 	// Active is the latest commit or reply, for ordering the picker.
 	Active time.Time `firestore:"active" json:"active"`
+	// Logo is the repository's own mark as a data URI, if it has one.
+	Logo string `firestore:"logo,omitempty" json:"logo,omitempty"`
 }
 
 // Projects lists every session, plus every repository in repoDirs that no

@@ -88,20 +88,49 @@ describe('inbox', () => {
     expect(got).toEqual(['new', 'old', 'a', 'b']);
   });
 
-  it('splits queued tasks by whether their project is free', async () => {
-    const { inboxGroups } = await load();
-    const { ready, waiting } = inboxGroups(
+  it('queues tasks in the order set, marking which can be sent now', async () => {
+    const { queue, queueCounts, filterQueue } = await load();
+    const list = queue(
       [
         { project: 'knip', text: 'later', status: 'queued', created_at: new Date(2026, 0, 2) },
         { project: 'knip', text: 'first', status: 'queued', created_at: new Date(2026, 0, 1) },
-        { project: 'hamta', text: 'h', status: 'queued', created_at: new Date(2026, 0, 1) },
-        { project: 'gone', text: 'g', status: 'queued', created_at: new Date(2026, 0, 1) },
+        { project: 'knip', text: 'moved up', status: 'queued', created_at: new Date(2026, 0, 3), rank: 0 },
+        { project: 'hamta', text: 'h', status: 'queued', created_at: new Date(2026, 0, 1, 12) },
+        { project: 'gone', text: 'g', status: 'queued', created_at: new Date(2026, 0, 5) },
         { project: 'knip', text: 'sent', status: 'dispatched', created_at: new Date(2026, 0, 1) },
       ],
       [{ name: 'knip', free: true }, { name: 'hamta', free: false, busy: 'working' }],
     );
-    expect(ready.map((t: any) => t.text)).toEqual(['first', 'later']);
-    expect(waiting.map((t: any) => `${t.text}:${t.why}`)).toEqual(['h:working', 'g:project no longer exists']);
+    expect(list.map((t: any) => t.text)).toEqual(['moved up', 'first', 'h', 'later', 'g']);
+    expect(list.filter((t: any) => !t.ready).map((t: any) => `${t.text}:${t.why}`)).toEqual(['h:working', 'g:project no longer exists']);
+    expect(queueCounts(list)).toEqual({ all: 5, ready: 3, waiting: 2 });
+    expect(filterQueue(list, 'ready', null).map((t: any) => t.text)).toEqual(['moved up', 'first', 'later']);
+    expect(filterQueue(list, 'all', 'hamta').map((t: any) => t.text)).toEqual(['h']);
+  });
+
+  it('moves a task by giving it a rank between its new neighbours', async () => {
+    const { rankAt } = await load();
+    const list = [{ rank: 10 }, { rank: 20 }, { rank: 30 }];
+    expect(rankAt(list, 2, 1)).toBe(15);
+    expect(rankAt(list, 0, 1)).toBe(25);
+    expect(rankAt(list, 2, 0)).toBe(-990);
+    expect(rankAt(list, 0, 2)).toBe(1030);
+    expect(rankAt([{ rank: 5 }], 0, 0)).toBe(5);
+  });
+
+  it('draws a project without a logo as its initial on a stable tint', async () => {
+    const { monogram } = await load();
+    expect(monogram('sakku')).toEqual(monogram('sakku'));
+    expect(monogram('sakku').letter).toBe('S');
+    expect(monogram('sakku').tint).toBeGreaterThanOrEqual(0);
+    expect(monogram('sakku').tint).toBeLessThan(6);
+  });
+
+  it('finds projects by any part of the name, alphabetically', async () => {
+    const { searchProjects } = await load();
+    const projects = [{ name: 'popq' }, { name: 'knip' }, { name: 'dekode-firebase' }, { name: 'dekode-cloud' }];
+    expect(searchProjects(projects, ' DEKODE ').map((p: any) => p.name)).toEqual(['dekode-cloud', 'dekode-firebase']);
+    expect(searchProjects(projects, '').map((p: any) => p.name)).toEqual(['dekode-cloud', 'dekode-firebase', 'knip', 'popq']);
   });
 });
 

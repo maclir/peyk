@@ -88,6 +88,7 @@ func collector() laptop.Collector {
 		Root:       projectsRoot(),
 		Now:        time.Now,
 		Prototypes: &laptop.Prototypes{},
+		Logos:      &laptop.Logos{Now: time.Now, TTL: 10 * time.Minute},
 	}
 }
 

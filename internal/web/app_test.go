@@ -87,7 +87,7 @@ func TestPageIsInstallable(t *testing.T) {
 		"viewport-fit=cover",
 		"safe-area-inset-bottom",
 		// A page whose status bar follows the phone has to follow it too.
-		`content="#ffffff" media="(prefers-color-scheme: light)"`,
+		`content="#f5f6f8" media="(prefers-color-scheme: light)"`,
 		`content="#131516" media="(prefers-color-scheme: dark)"`,
 		"color-scheme:light dark",
 		"prefers-color-scheme:dark",

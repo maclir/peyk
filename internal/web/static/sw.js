@@ -73,7 +73,7 @@ self.addEventListener("push", (event) => {
       tag: note.session || undefined,
       renotify: Boolean(note.session),
       icon: "/static/icon-192.png",
-      badge: "/static/icon-192.png",
+      badge: "/static/notification-badge.png",
       data: { url: note.url },
     }),
   );

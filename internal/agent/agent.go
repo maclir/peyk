@@ -21,6 +21,11 @@ type Collector interface {
 	Exchange(session.Transcript) (reply, prompt *session.Message)
 }
 
+// logoFinder is a Collector that can also find a project's mark.
+type logoFinder interface {
+	Logo(dir string) string
+}
+
 // Watcher follows the working directories of the published sessions.
 type Notifier interface {
 	Notify(context.Context, []notify.Note) error
@@ -117,7 +122,11 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	projects := map[string]any{}
 	a.projects = map[string]session.Project{}
+	logos, _ := a.Collect.(logoFinder)
 	for _, p := range session.Projects(snaps, repos) {
+		if logos != nil {
+			p.Logo = logos.Logo(p.Path)
+		}
 		projects[ProjectID(p.Name)] = p
 		a.projects[p.Name] = p
 	}

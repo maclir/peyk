@@ -113,6 +113,31 @@ func TestRefreshWritesOnlyChangesAndRemovesGoneDocuments(t *testing.T) {
 	}
 }
 
+type logoCollector struct{ fakeCollector }
+
+func (*logoCollector) Logo(dir string) string {
+	if dir == "/c/sakku" {
+		return "data:image/png;base64,AA=="
+	}
+	return ""
+}
+
+func TestRefreshPublishesEachProjectsLogo(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	c := &logoCollector{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle})
+	if err := newAgent(c, mem).Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := mem.Get(store.Projects, "sakku"); v.(session.Project).Logo != "data:image/png;base64,AA==" {
+		t.Fatalf("project sakku = %+v", v)
+	}
+	if v, _ := mem.Get(store.Projects, "knip"); v.(session.Project).Logo != "" {
+		t.Fatalf("project knip = %+v", v)
+	}
+}
+
 func TestProjectIDDropsSlashes(t *testing.T) {
 	if got := ProjectID("a/b"); got != "a_b" {
 		t.Fatal(got)

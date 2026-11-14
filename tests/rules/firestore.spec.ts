@@ -91,6 +91,11 @@ describe('tasks', () => {
     await assertFails(addDoc(tasks, task({ status: 'dispatched' })));
     await assertFails(addDoc(tasks, task({ created_at: Timestamp.fromDate(new Date(2020, 0, 1)) })));
     await assertFails(addDoc(tasks, task({ session_id: 'k' })));
+    await assertFails(addDoc(tasks, task({ rank: 'first' })));
+  });
+
+  it('a task carries the phone\'s order', async () => {
+    await assertSucceeds(addDoc(collection(owner(), 'tasks'), task({ rank: 1763100000000 })));
   });
 
   it('the owner deletes queued and done tasks, not ones being worked on', async () => {
@@ -99,8 +104,11 @@ describe('tasks', () => {
     await assertFails(deleteDoc(doc(owner(), 'tasks/sent')));
   });
 
-  it('the owner edits a queued task\'s text and project only', async () => {
+  it('the owner edits a queued task\'s text, project and place only', async () => {
     await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { text: 'edited' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { rank: -1000.5 }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { rank: 'top' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { rank: 1 }));
     await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { project: 'hamta' }));
     await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { project: 'unknown' }));
     await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { text: '' }));

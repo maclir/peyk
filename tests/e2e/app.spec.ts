@@ -187,6 +187,7 @@ test.describe('signed in', () => {
     await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
     await page.goto('/#inbox');
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
+    await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: 'Send without clearing' }).click();
     await expect(task.getByRole('status')).toHaveText('Send to knip: the laptop is offline, so nothing was sent.');
     await page.request.delete(`${FIRESTORE}/tasks/proto`, { headers: admin });
@@ -198,30 +199,38 @@ test.describe('signed in', () => {
     await page.goto('/#inbox');
     await passkeyOn(page);
     const task = page.locator('.task', { hasText: 'Start fresh' });
-    await task.getByRole('button', { name: 'Clear & send' }).click();
+    await expect(task).toContainText('Free · clears the conversation first');
+    await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'ctx', clear: true });
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
 
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
-    await expect(task.getByRole('button', { name: 'Clear & send' })).toHaveCount(0);
-    await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+    await task.getByRole('button', { name: /More actions/ }).click();
+    await expect(task.getByRole('button', { name: 'Move to top' })).toBeVisible();
+    await expect(task.getByRole('button', { name: 'Send without clearing' })).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
   });
 
   test('the inbox adds, edits and deletes tasks', async () => {
     await page.goto('/#inbox');
-    await expect(page.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
-    await page.getByRole('radio', { name: /knip/ }).click();
+    await page.getByRole('button', { name: 'Project: hamta' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Choose a project' });
+    await expect(sheet.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
+    await sheet.getByLabel('Search projects').fill('kn');
+    await expect(sheet.getByRole('radio')).toHaveCount(1);
+    await sheet.getByRole('radio', { name: /knip/ }).click();
+    await expect(sheet).toHaveCount(0);
     await page.getByLabel('New task').fill('Add --json output');
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByRole('button', { name: 'Add task' }).click();
     await expect(page.getByLabel('New task')).toHaveValue('');
 
     const task = page.locator('.task', { hasText: 'Add --json output' });
     await expect(task.locator('.proj')).toContainText('knip');
     await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 
+    await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: /Edit task/ }).click();
     const editor = page.locator('form.task.editing');
     await editor.getByLabel('Task text').fill('Add --json and --csv output');
@@ -232,6 +241,7 @@ test.describe('signed in', () => {
     await expect(edited.getByText('needs input')).toBeVisible();
 
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
+    await edited.getByRole('button', { name: /More actions/ }).click();
     await edited.getByRole('button', { name: /Delete task/ }).click();
     await expect(edited).toHaveCount(0);
   });
@@ -239,11 +249,12 @@ test.describe('signed in', () => {
   test('a task carries a screenshot to its worker and drops it when deleted', async () => {
     await page.goto('/#inbox');
     await passkeyOn(page);
-    await page.getByRole('radio', { name: /knip/ }).click();
+    await page.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();
     await page.getByLabel('New task').fill('Match this layout');
     await page.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
     await expect(page.locator('form.add .thumb img')).toHaveCount(1);
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByRole('button', { name: 'Add task' }).click();
     await expect(page.getByLabel('New task')).toHaveValue('');
     await expect(page.locator('form.add .thumb')).toHaveCount(0);
 
@@ -254,15 +265,54 @@ test.describe('signed in', () => {
     expect(Buffer.from(stored.data.bytesValue, 'base64')).toEqual(PNG);
     expect(stored.type.stringValue).toBe('image/png');
 
-    await task.getByRole('button', { name: /^(Clear & send|Send)$/ }).first().click();
+    await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toContainText('waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => JSON.parse(c.fields.payload.stringValue).text === 'Match this layout')!;
     expect(JSON.parse(cmd.fields.payload.stringValue).images).toEqual([id]);
 
+    await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: /Delete task/ }).click();
     await expect(task).toHaveCount(0);
     const gone = await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin });
     expect(gone.status()).toBe(404);
+  });
+
+  test('the inbox filters by state and project, and keeps the order you set', async () => {
+    await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
+    await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });
+    await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
+    await page.goto('/#inbox');
+    const texts = page.locator('.tasks .ttext');
+    await expect(texts).toHaveText(['First thing', 'Second thing', 'Waits on hamta']);
+
+    await page.getByRole('button', { name: /^Waiting/ }).click();
+    await expect(texts).toHaveText(['Waits on hamta']);
+    await expect(page.locator('.task', { hasText: 'Waits on hamta' })).toContainText('Waiting · needs input');
+    await page.getByRole('button', { name: /^All/ }).click();
+    await page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' }).click();
+    await expect(texts).toHaveText(['First thing', 'Second thing']);
+    await page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' }).click();
+
+    await page.getByRole('button', { name: 'Reorder' }).click();
+    await page.getByRole('button', { name: 'Move up: Waits on hamta' }).click();
+    await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.locator('.task', { hasText: 'Second thing' }).getByRole('button', { name: /More actions/ }).click();
+    await page.getByRole('button', { name: 'Move to top' }).click();
+    await expect(texts).toHaveText(['Second thing', 'First thing', 'Waits on hamta']);
+    expect((await get(page, 'tasks/two')).rank).toBeDefined();
+
+    for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
+  test('projects show their logo, or their initial when they have none', async () => {
+    const logo = `data:image/png;base64,${PNG.toString('base64')}`;
+    await put(page, 'projects/knip', { name: 'knip', path: '/c/knip', session_id: 'k', free: true, busy: '', active: new Date(), logo });
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('img.face')).toHaveAttribute('src', logo);
+    await expect(page.locator('.card', { hasText: 'hamta' }).locator('.face.mono')).toHaveText('H');
+    await page.goto('/#inbox');
+    await expect(page.getByRole('button', { name: /^Project:/ }).locator('.face')).toHaveCount(1);
   });
 
   test('a worker that published a prototype links to it', async () => {

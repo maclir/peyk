@@ -61,7 +61,7 @@ func manifest(w http.ResponseWriter, _ *http.Request) {
 		// light one is choosing white at midnight. Named nothing, the strip
 		// falls to the browser's own default, which is the only value in this
 		// business that already knows which mode the phone is in.
-		BackgroundColor: "#ffffff",
+		BackgroundColor: "#f5f6f8",
 		Lang:            "en",
 		Icons: []manifestIcon{
 			{Src: "/static/icon.svg", Sizes: "any", Type: "image/svg+xml"},

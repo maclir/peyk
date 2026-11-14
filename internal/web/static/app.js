@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, currentTask, doneTasks, flags, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -51,7 +51,8 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map() };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
+    filter: "all", only: null, arranging: false, menu: null, picking: false, pickQuery: "" };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -154,15 +155,16 @@ async function start(cfg) {
     if (!state.user) return;
     renderLaptop();
     // Snapshots re-render the whole view; keep what is being typed.
-    const drafts = new Map([...app.querySelectorAll("textarea")].map((t) => [t.id, t.value]));
-    const focused = document.activeElement && document.activeElement.tagName === "TEXTAREA" ? document.activeElement.id : null;
+    const typed = 'textarea, input[type="search"]';
+    const drafts = new Map([...app.querySelectorAll(typed)].map((t) => [t.id, t.value]));
+    const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
     const id = location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
     const s = id && state.sessions.get(id);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
-      h("a", { href: "#", class: view === "board" ? "on" : "" }, "Workers"),
-      h("a", { href: "#inbox", class: view === "inbox" ? "on" : "" }, `Inbox${queuedCount() ? ` · ${queuedCount()}` : ""}`),
+      h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(state.sessions.size))),
+      h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", queuedCount() ? h("span", { class: "n" }, String(queuedCount())) : null),
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
@@ -170,7 +172,8 @@ async function start(cfg) {
     else if (view === "inbox") app.replaceChildren(tabs, status, inbox());
     else app.replaceChildren(tabs, status, board());
 
-    for (const t of app.querySelectorAll("textarea")) if (drafts.has(t.id)) t.value = drafts.get(t.id);
+    for (const t of app.querySelectorAll(typed)) if (drafts.has(t.id)) t.value = drafts.get(t.id);
+    document.documentElement.classList.toggle("locked", view === "inbox" && state.picking);
     if (focused) document.getElementById(focused)?.focus();
   }
 
@@ -235,26 +238,150 @@ async function start(cfg) {
     return state.tasks.filter((t) => t.status === "queued").length;
   }
 
+  function projectNamed(name) {
+    return state.projects.find((p) => p.name === name);
+  }
+
+  // A worker's project is the one its session publishes as.
+  function projectOf(s) {
+    return state.projects.find((p) => p.session_id === s.id) || projectNamed(s.title);
+  }
+
+  function face(p, name, size) {
+    if (p && p.logo) return h("img", { class: `face ${size}`, src: p.logo, alt: "" });
+    const m = monogram(name);
+    return h("span", { class: `face mono t${m.tint} ${size}`, "aria-hidden": "true" }, m.letter);
+  }
+
+  function projectStatus(p) {
+    if (!p.session_id) return { text: "no worker · a task starts one", tone: "none" };
+    return p.free ? { text: "free", tone: "ok" } : { text: p.busy, tone: "busy" };
+  }
+
   function inbox() {
     const projects = sortProjects(state.projects);
     if (!state.picked || !projects.some((p) => p.name === state.picked)) state.picked = projects[0]?.name ?? null;
-    const counts = new Map();
-    for (const t of state.tasks) if (t.status === "queued") counts.set(t.project, (counts.get(t.project) || 0) + 1);
+    const all = queue(state.tasks, state.projects);
+    if (state.only && !all.some((t) => t.project === state.only)) state.only = null;
+    const counts = queueCounts(state.only ? all.filter((t) => t.project === state.only) : all);
+    const list = filterQueue(all, state.filter, state.only);
+    const now = Date.now();
 
-    const picker = h("div", { class: "picker", role: "radiogroup", "aria-label": "Project" },
-      projects.map((p) =>
-        h("button", {
-          type: "button", role: "radio", class: "pchip", "aria-checked": String(p.name === state.picked),
-          title: p.free ? "free" : p.busy,
-          onclick: () => { state.picked = p.name; render(); },
-        },
-          h("span", { class: `dot ${p.free ? "free" : "busy"}` }),
-          p.name,
-          counts.get(p.name) ? h("span", { class: "q" }, String(counts.get(p.name))) : null,
-        ),
+    const chips = [["all", "All"], ["ready", "Ready"], ["waiting", "Waiting"]].map(([key, label]) =>
+      h("button", { type: "button", class: "fchip", "aria-pressed": String(state.filter === key), onclick: () => { state.filter = key; render(); } },
+        label, h("span", { class: "n" }, String(counts[key]))));
+    const filters = h("div", { class: "filters" }, chips, h("span", { class: "grow" }),
+      list.length > 1 || state.arranging
+        ? h("button", { type: "button", class: "link", onclick: () => { state.arranging = !state.arranging; state.menu = null; render(); } },
+          icon("sort"), state.arranging ? "Done" : "Reorder")
+        : null);
+    const names = [...new Set(all.map((t) => t.project))];
+    const strip = names.length > 1
+      ? h("div", { class: "strip", role: "group", "aria-label": "Filter by project" }, names.map((n) =>
+        h("button", { type: "button", class: "sface", title: n, "aria-label": n, "aria-pressed": String(state.only === n),
+          onclick: () => { state.only = state.only === n ? null : n; render(); } }, face(projectNamed(n), n, "md"))))
+      : null;
+
+    const items = list.length
+      ? list.map((t, i) => (state.editing === t.id ? editor(t, projects) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
+      : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
+    const finished = doneTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
+    return h("div", { class: "inbox" },
+      filters, strip,
+      h("p", { class: "alert", id: "alert", role: "status" }),
+      h("div", { class: "tasks" }, items),
+      finished.length && state.filter === "all" && !state.arranging ? [
+        h("h2", { class: "group" }, "Done"),
+        ...finished.map((t) =>
+          h("div", { class: "task done" },
+            h("div", { class: "thead" }, face(projectNamed(t.project), t.project, "sm"),
+              h("span", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),
+              h("span", { class: "grow" }),
+              h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
+            h("div", { class: "ttext" }, t.text),
+            taskImages(t),
+          )),
+      ] : null,
+      composer(),
+      state.picking ? picker(projects) : null,
+    );
+  }
+
+  // A send's outcome stays on its task, which may have moved since, rather
+  // than in a status line scrolled out of view.
+  function send(t, clear) {
+    const report = (text) => {
+      state.sends.set(t.id, text);
+      render();
+    };
+    state.menu = null;
+    sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}) },
+      clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
+  }
+
+  // A worker with a conversation is cleared first, so a task starts on its own
+  // context; sending into the conversation is the exception, in the menu. A
+  // new or just-cleared worker has nothing to clear.
+  function hasConversation(t) {
+    const p = projectNamed(t.project);
+    const worker = p && p.session_id && state.sessions.get(p.session_id);
+    return Boolean(worker && !worker.cleared);
+  }
+
+  function taskCard(t, now) {
+    const clears = t.ready && hasConversation(t);
+    const open = state.menu === t.id;
+    const sent = state.sends.get(t.id);
+    const status = sent
+      ? h("span", { class: "tstatus", role: "status" }, sent)
+      : h("span", { class: "tstatus" }, t.ready
+        ? (projectNamed(t.project)?.session_id ? (clears ? "Free · clears the conversation first" : "Free") : "Starts a new worker")
+        : `Waiting · ${t.why}`);
+    return h("article", { class: `task${t.ready ? "" : " waiting"}` },
+      h("div", { class: "thead" },
+        face(projectNamed(t.project), t.project, "sm"),
+        h("span", { class: "proj" }, t.project),
+        h("span", { class: "when" }, ago(t.created_at, now)),
+        h("span", { class: "grow" }),
+        h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
+          onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more"))),
+      h("div", { class: "ttext" }, t.text),
+      taskImages(t),
+      open ? h("div", { class: "menu" },
+        clears ? h("button", { type: "button", onclick: () => send(t, false) }, "Send without clearing") : null,
+        h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
+        h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; state.menu = null; render(); } }, "Edit"),
+        h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
+      ) : null,
+      h("div", { class: "tfoot" },
+        h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
+        status,
+        t.ready ? h("button", { type: "button", class: "primary send", onclick: () => send(t, clears) }, "Send", icon("arrow")) : null,
       ),
     );
-    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? `Task for ${state.picked}…` : "No projects published yet", "aria-label": "New task", onpaste: pasteImages });
+  }
+
+  function arrangeRow(list, t, i) {
+    return h("div", { class: "task arrange" },
+      icon("grip"),
+      face(projectNamed(t.project), t.project, "sm"),
+      h("span", { class: "ttext one" }, t.text),
+      h("button", { type: "button", class: "icon step", "aria-label": `Move up: ${t.text}`, disabled: i === 0 ? "" : null, onclick: () => move(t, i - 1, list) }, icon("up")),
+      h("button", { type: "button", class: "icon step", "aria-label": `Move down: ${t.text}`, disabled: i === list.length - 1 ? "" : null, onclick: () => move(t, i + 1, list) }, icon("down")),
+    );
+  }
+
+  // Moves within the list on screen; to the top moves within the whole queue.
+  function move(t, to, list = queue(state.tasks, state.projects)) {
+    const i = list.findIndex((x) => x.id === t.id);
+    state.menu = null;
+    fs.updateDoc(fs.doc(db, "tasks", t.id), { rank: rankAt(list, i, to) })
+      .catch((err) => alertLine(`Could not move the task: ${err.message}`));
+  }
+
+  function composer() {
+    const p = projectNamed(state.picked);
+    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? "Describe a task…" : "No projects published yet", "aria-label": "New task", onpaste: pasteImages });
     // The draft is cleared as soon as the task is accepted: a local write
     // re-renders the inbox before the server confirms it, and the re-render
     // would otherwise restore the text it found in the box.
@@ -277,73 +404,62 @@ async function start(cfg) {
       }
     };
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages([...e.target.files]); e.target.value = ""; } });
-    const form = h("form", { class: "add", onsubmit: add }, picker,
-      h("div", { class: "addrow" }, text,
-        h("button", { type: "button", class: "attach", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: state.attaching.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, "📎"),
-        h("button", { class: "primary", type: "submit" }, "Add")),
-      files,
+    return h("form", { class: "composer add", onsubmit: add },
       state.attaching.length ? h("div", { class: "thumbs" }, state.attaching.map((img, i) =>
         h("span", { class: "thumb" },
           h("img", { src: img.url, alt: `Attached image ${i + 1}` }),
-          h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => { URL.revokeObjectURL(img.url); state.attaching.splice(i, 1); render(); } }, "×"),
+          h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => { URL.revokeObjectURL(img.url); state.attaching.splice(i, 1); render(); } }, icon("x")),
         ))) : null,
+      text,
+      h("div", { class: "crow" },
+        h("button", { type: "button", class: "pill", "aria-label": `Project: ${state.picked ?? "none"}`, "aria-haspopup": "dialog",
+          disabled: state.picked ? null : "", onclick: () => { state.picking = true; state.pickQuery = ""; render(); document.getElementById("pick-search")?.focus(); } },
+          state.picked ? face(p, state.picked, "xs") : null, h("span", {}, state.picked ?? "No project"), icon("chevron")),
+        h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: state.attaching.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
+        h("span", { class: "grow" }),
+        h("button", { type: "submit", class: "round go", "aria-label": "Add task" }, icon("up")),
+      ),
+      files,
     );
+  }
 
-    const { ready, waiting } = inboxGroups(state.tasks, state.projects);
-    const now = Date.now();
-    // A send's outcome stays on its task, which may have moved between groups
-    // since, rather than in a status line scrolled out of view.
-    const send = (t, clear) => {
-      const report = (text) => {
-        state.sends.set(t.id, text);
-        render();
-      };
-      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}) }, clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
+  function picker(projects) {
+    const close = () => { state.picking = false; render(); document.getElementById("task-text")?.focus(); };
+    const pick = (name) => { state.picked = name; close(); };
+    const queued = new Map();
+    for (const t of state.tasks) if (t.status === "queued") queued.set(t.project, (queued.get(t.project) || 0) + 1);
+    const q = state.pickQuery || "";
+    const matches = searchProjects(projects, q);
+    const recent = q ? [] : projects.filter((p) => p.active).slice(0, 4);
+    const row = (p) => {
+      const st = projectStatus(p);
+      const on = p.name === state.picked;
+      return h("button", { type: "button", role: "radio", class: "prow", "aria-checked": String(on), onclick: () => pick(p.name) },
+        face(p, p.name, "lg"),
+        h("span", { class: "pmain" },
+          h("span", { class: "pname" }, p.name),
+          h("span", { class: `pstat ${st.tone}` }, h("span", { class: `dot ${st.tone}` }), st.text)),
+        queued.get(p.name) ? h("span", { class: "badge" }, `${queued.get(p.name)} queued`) : null,
+        on ? icon("check") : null);
     };
-    // A worker with a conversation is cleared first by default, so a task
-    // starts on its own context; sending into the conversation is the
-    // exception. A new or just-cleared worker has nothing to clear.
-    const sendButtons = (t) => {
-      const p = projects.find((x) => x.name === t.project);
-      const worker = p && p.session_id && state.sessions.get(p.session_id);
-      if (!worker || worker.cleared) return h("button", { type: "button", class: "primary", onclick: () => send(t, false) }, "Send");
-      return [
-        h("button", { type: "button", class: "primary", onclick: () => send(t, true) }, "Clear & send"),
-        h("button", { type: "button", "aria-label": "Send without clearing", title: "Send into the current conversation", onclick: () => send(t, false) }, "Send"),
-      ];
-    };
-    const item = (t, why) => {
-      if (state.editing === t.id) return editor(t, projects);
-      return h("div", { class: "task" },
-        h("div", { class: "grow" },
-          h("div", { class: "proj" }, `${t.project} · ${ago(t.created_at, now)}`),
-          h("div", { class: "ttext" }, t.text),
-          taskImages(t),
-          why ? h("div", { class: "meta" }, why) : null,
-          state.sends.has(t.id) ? h("div", { class: "meta sent", role: "status" }, state.sends.get(t.id)) : null,
-        ),
-        why ? null : sendButtons(t),
-        h("button", { type: "button", class: "icon", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; render(); } }, "✎"),
-        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
-      );
-    };
-    const finished = doneTasks(state.tasks);
-    return h("div", { class: "inbox" },
-      form,
-      h("p", { class: "alert", id: "alert", role: "status" }),
-      h("h2", { class: "group" }, "Ready to send"),
-      ready.length ? ready.map((t) => item(t)) : h("p", { class: "empty" }, "Nothing queued for a free project."),
-      h("h2", { class: "group" }, "Waiting on its worker"),
-      waiting.length ? waiting.map((t) => item(t, t.why)) : h("p", { class: "empty" }, "Nothing waiting."),
-      finished.length ? h("h2", { class: "group" }, "Done") : null,
-      finished.map((t) =>
-        h("div", { class: "task done" },
-          h("div", { class: "grow" },
-            h("div", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),
-            h("div", { class: "ttext" }, t.text),
-            taskImages(t),
-          ),
-          h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
+    return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
+      h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Choose a project", onkeydown: (e) => e.key === "Escape" && close() },
+        h("div", { class: "grabber" }),
+        h("div", { class: "sheethead" }, h("h2", {}, "Send to"), h("button", { type: "button", class: "link", onclick: close }, "Cancel")),
+        h("label", { class: "search" }, icon("search"),
+          h("input", { type: "search", id: "pick-search", placeholder: `Search ${projects.length} projects`, "aria-label": "Search projects", value: q,
+            oninput: (e) => { state.pickQuery = e.target.value; render(); } })),
+        h("div", { class: "sheetbody" },
+          recent.length ? [
+            h("h3", { class: "group" }, "Recent"),
+            h("div", { class: "recent" }, recent.map((p) =>
+              h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === state.picked), onclick: () => pick(p.name) },
+                face(p, p.name, "xl"), h("span", {}, p.name), h("span", { class: `dot ${projectStatus(p).tone}` })))),
+          ] : null,
+          h("h3", { class: "group" }, q ? `Matches · ${matches.length}` : "All projects"),
+          matches.length
+            ? h("div", { class: "plist", role: "radiogroup", "aria-label": "Project" }, matches.map(row))
+            : h("p", { class: "empty" }, "No project matches."),
         ),
       ),
     );
@@ -370,7 +486,9 @@ async function start(cfg) {
         batch.set(fs.doc(db, "attachments", id), { data: fs.Bytes.fromUint8Array(img.bytes), type: img.type, created_at: fs.serverTimestamp() });
       }
     }
-    const task = { project, text, created_at: fs.serverTimestamp(), status: "queued" };
+    // The rank is set here because created_at reads as null until the server
+    // has confirmed it, which would sort the new task to the top meanwhile.
+    const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: Date.now() };
     if (ids.length) task.images = ids;
     batch.set(fs.doc(fs.collection(db, "tasks")), task);
     await batch.commit();
@@ -524,15 +642,19 @@ async function start(cfg) {
         out.push(h("h2", { class: "group" }, group));
       }
       const last = s.git && s.git.last;
+      const task = currentTask(state.tasks, s.id);
       out.push(
         h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
-          h("div", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), chip(st)),
-          currentTask(state.tasks, s.id) ? h("p", { class: "curtask" }, `Task: ${oneLine(currentTask(state.tasks, s.id).text)}`) : null,
-          s.message ? h("p", { class: "msg" }, oneLine(s.message.text)) : null,
-          h("div", { class: "meta" },
-            last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
-            h("span", {}, pushLabel(s.git)),
-            s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
+          h("span", { class: "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
+          h("span", { class: "cbody" },
+            h("span", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), h("span", { class: "grow" }), chip(st)),
+            task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
+            s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
+            h("span", { class: "meta" },
+              last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
+              h("span", {}, pushLabel(s.git)),
+              s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
+            ),
           ),
         ),
       );
@@ -544,11 +666,10 @@ async function start(cfg) {
     const now = Date.now();
     const st = STATES[s.state] || { label: s.state, tone: "idle" };
     const g = s.git;
-    const rows = [["state", chip(st)], ["aoe", s.aoe_status], ["path", s.path]];
+    const busy = s.state === "working" || s.state === "needs_input";
     const task = currentTask(state.tasks, s.id);
-    if (task) rows.unshift(["task", `${task.text} (sent ${ago(task.dispatched_at, now)} ago)`]);
+    const rows = [["state", chip(st)], ["aoe", s.aoe_status], ["path", s.path]];
     if (g) {
-      rows.push(["branch", g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached"]);
       if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);
       rows.push(["push", pushLabel(g)]);
       rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
@@ -558,60 +679,64 @@ async function start(cfg) {
     const msg = h("div", { class: "reply" });
     msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
-      h("a", { class: "back", href: "#" }, "← Workers"),
-      h("h2", {}, s.title, flagRow(s)),
-      h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      h("div", { class: "dhead" },
+        h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
+        face(projectOf(s), s.title, "lg"),
+        h("div", { class: "dtitle" },
+          h("h2", {}, s.title, flagRow(s)),
+          h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository")),
+        s.cleared || busy ? null : h("button", { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`) }, icon("trash")),
+        s.aoe_status !== "stopped" ? h("button", { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`) }, icon("stop")) : null,
+      ),
+      task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
+      g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
-      g && g.pending && g.pending.length ? pending(g, now) : null,
-      h("h3", {}, "Last sent", s.prompt ? h("span", { class: "when" }, ` · ${ago(s.prompt.at, now)}`) : null),
-      sent,
-      h("h3", {}, "Last reply", s.message ? h("span", { class: "when" }, ` · ${ago(s.message.at, now)}`) : null),
-      msg,
-      actions(s),
+      h("div", { class: "convo" },
+        h("span", { class: "who mine" }, "You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""),
+        sent,
+        h("span", { class: "who" }, s.title, s.message ? ` · ${ago(s.message.at, now)}` : ""),
+        msg,
+      ),
+      h("details", { class: "facts" }, h("summary", {}, "Details"),
+        h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
+      replyBox(s),
     );
   }
 
-  function actions(s) {
-    const text = h("textarea", { id: `reply-${s.id}`, rows: "3", placeholder: "Reply to the agent…", "aria-label": "Reply" });
-    const reply = async () => {
+  function pushCard(s, now) {
+    const g = s.git;
+    const more = g.unpushed - (g.pending?.length ?? 0);
+    return h("section", { class: "pushcard" },
+      h("div", { class: "phead" },
+        h("h3", {}, `Unpushed commits · ${g.unpushed}`),
+        h("span", { class: "grow" }),
+        h("button", { type: "button", class: "primary ok", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`) }, `Push ${g.unpushed}`)),
+      g.pending?.length ? h("ul", { class: "pending" },
+        g.pending.map((c) => h("li", {}, h("code", {}, c.hash), ` ${c.subject}`, h("span", { class: "when" }, ago(c.at, now)))),
+        more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
+      ) : null,
+    );
+  }
+
+  function replyBox(s) {
+    const text = h("textarea", { id: `reply-${s.id}`, rows: "1", placeholder: `Reply to ${s.title}…`, "aria-label": "Reply" });
+    const reply = async (e) => {
+      e.preventDefault();
       const v = text.value.trim();
       if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`))) text.value = "";
     };
-    const g = s.git;
-    const busy = s.state === "working" || s.state === "needs_input";
-    return h("div", { class: "actions" },
-      text,
-      h("div", { class: "btnrow" },
-        h("button", { type: "button", class: "primary", onclick: reply }, "Send reply"),
-        g && g.unpushed > 0 ? h("button", { type: "button", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`) }, `Push ${g.unpushed}`) : null,
-        s.cleared || busy ? null : h("button", { type: "button", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`) }, "Clear"),
-        s.aoe_status !== "stopped" ? h("button", { type: "button", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`) }, "Stop") : null,
-      ),
-    );
+    return h("form", { class: "composer inline", onsubmit: reply },
+      text, h("button", { type: "submit", class: "round go", "aria-label": "Send reply" }, icon("up")));
   }
 }
 
-function pending(g, now) {
-  const more = g.unpushed - g.pending.length;
-  return [
-    h("h3", {}, `Unpushed commits · ${g.unpushed}`),
-    h("ul", { class: "pending" },
-      g.pending.map((c) => h("li", {}, h("code", {}, c.hash), ` ${c.subject}`, h("span", { class: "when" }, ago(c.at, now)))),
-      more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
-    ),
-  ];
-}
-
 function prototypes(list, now) {
-  return [
-    h("h3", {}, "Prototypes"),
-    h("ul", { class: "protos" },
-      list.map((p) => h("li", {},
-        h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, p.title || p.url),
-        h("span", { class: "when" }, ago(p.at, now)),
-      )),
-    ),
-  ];
+  return h("ul", { class: "protos" },
+    list.map((p) => h("li", {},
+      h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, icon("frame"), h("span", { class: "grow" }, p.title || p.url)),
+      h("span", { class: "when" }, ago(p.at, now)),
+    )),
+  );
 }
 
 function flagRow(s) {
@@ -631,3 +756,29 @@ function oneLine(text) {
   return s.length > 160 ? `${s.slice(0, 159)}…` : s;
 }
 
+// Stroke icons drawn in the text colour; static markup, never data.
+const ICONS = {
+  more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
+  back: '<path d="M15 18l-6-6 6-6"/>',
+  clip: '<path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/>',
+  sort: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
+  grip: '<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
+};
+
+function icon(name) {
+  const span = document.createElement("span");
+  span.className = `ico ${name}`;
+  span.setAttribute("aria-hidden", "true");
+  span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+  return span;
+}
