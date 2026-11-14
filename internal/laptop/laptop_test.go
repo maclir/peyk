@@ -347,37 +347,62 @@ func TestReposListsGitRepositoriesUnderRoot(t *testing.T) {
 	}
 }
 
-func TestClearWaitsForTheNewConversation(t *testing.T) {
+func TestClearWaitsForTheNewConversationInTheTranscripts(t *testing.T) {
+	claude, work := t.TempDir(), "/w"
+	dir := TranscriptDir(claude, work)
+	writeTranscript(t, claude, work, "old", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
 	var calls []string
-	shows := 0
 	run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
 		calls = append(calls, strings.Join(args[2:], " "))
-		if args[2] == "session" {
-			shows++
-			id := "old"
-			if shows > 3 {
-				id = "new"
-			}
-			return []byte(`{"id":"k","agent_session_id":"` + id + `"}`), nil
-		}
 		return nil, nil
 	}
-	if err := (Aoe{Profile: "p", Run: run}).Clear(context.Background(), "k", time.Millisecond); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", dir, time.Millisecond) }()
+	select {
+	case err := <-done:
+		t.Fatalf("returned before a new conversation: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	at := time.Now().Add(time.Second)
+	writeTranscript(t, claude, work, "new", at, clearEntry(at.UTC().Format(time.RFC3339Nano)))
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(calls, "|"); got != "session show k --json|send k /clear|session show k --json|session show k --json|session show k --json" {
+	if got := strings.Join(calls, "|"); got != "send k /clear" {
 		t.Fatalf("calls = %s", got)
 	}
 }
 
 func TestClearGivesUpWhenNoNewConversationStarts(t *testing.T) {
-	run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
-		return []byte(`{"id":"k","agent_session_id":"old"}`), nil
-	}
+	claude, work := t.TempDir(), "/w"
+	run := func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil }
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", time.Millisecond); err == nil || !strings.Contains(err.Error(), "no new conversation") {
+	err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", TranscriptDir(claude, work), time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "no new conversation") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClearedSinceNeedsATranscriptOpenedByALaterClear(t *testing.T) {
+	claude, work := t.TempDir(), "/w"
+	dir := TranscriptDir(claude, work)
+	since := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	later := since.Add(time.Hour)
+	writeTranscript(t, claude, work, "earlier", later, clearEntry("2026-11-14T09:59:59.999Z"))
+	writeTranscript(t, claude, work, "fresh", later, `{"type":"mode"}`, human("2026-11-14T10:00:01Z", `"hi"`))
+	writeTranscript(t, claude, work, "sidechain", later, `{"type":"user","isSidechain":true,"timestamp":"2026-11-14T10:00:01Z","message":{"content":"<command-name>/clear</command-name>"}}`)
+	if ClearedSince(dir, since) {
+		t.Fatal("no transcript was opened by a /clear since then")
+	}
+	writeTranscript(t, claude, work, "new", later, `{"type":"mode"}`, clearEntry("2026-11-14T10:00:00Z"))
+	if !ClearedSince(dir, since) {
+		t.Fatal("missed the transcript opened by /clear")
+	}
+	if ClearedSince(filepath.Join(claude, "missing"), since) {
+		t.Fatal("a missing directory holds no new conversation")
 	}
 }
 

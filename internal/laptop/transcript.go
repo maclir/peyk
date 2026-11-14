@@ -160,6 +160,57 @@ func tail(path string) [][]byte {
 // conversation it opens. The entry carries no human origin.
 var clearMarker = []byte(`<command-name>/clear</command-name>`)
 
+// headBytes bounds how much of a transcript's start is read for the /clear
+// that opened it, which follows a few small bookkeeping entries.
+const headBytes = 64 << 10
+
+// ClearedSince reports whether a transcript in dir was opened by a /clear
+// recorded at or after since.
+func ClearedSince(dir string, since time.Time) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		if info, err := e.Info(); err != nil || info.ModTime().Before(since) {
+			continue
+		}
+		if at, ok := openingClear(filepath.Join(dir, e.Name())); ok && !at.Before(since) {
+			return true
+		}
+	}
+	return false
+}
+
+// openingClear returns when the /clear that opened a transcript was recorded.
+func openingClear(path string) (time.Time, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, headBytes))
+	if err != nil {
+		return time.Time{}, false
+	}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var e entry
+		if json.Unmarshal(line, &e) != nil || e.Type != "user" || e.IsSidechain {
+			continue
+		}
+		if bytes.Contains(line, clearMarker) {
+			return e.Timestamp, true
+		}
+		if e.Origin.Kind == "human" {
+			return time.Time{}, false
+		}
+	}
+	return time.Time{}, false
+}
+
 // lastInFile reports the /clear that started the transcript as its prompt
 // when a person has sent nothing since.
 func lastInFile(path string) (reply, prompt *session.Message) {

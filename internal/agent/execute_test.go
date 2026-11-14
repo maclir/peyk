@@ -33,7 +33,7 @@ func (f *fakeActions) Create(_ context.Context, dir, title string) (string, erro
 	f.calls = append(f.calls, "create "+title+" in "+dir)
 	return "new-" + title, nil
 }
-func (f *fakeActions) Clear(_ context.Context, s string) error {
+func (f *fakeActions) Clear(_ context.Context, s string, _ session.Transcript) error {
 	f.calls = append(f.calls, "clear "+s)
 	return nil
 }
