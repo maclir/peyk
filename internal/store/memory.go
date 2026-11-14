@@ -4,42 +4,42 @@ import (
 	"context"
 	"sort"
 	"sync"
-
-	"github.com/maclir/peyk/internal/session"
 )
 
 // Memory is the store for tests and local runs.
 type Memory struct {
-	mu       sync.Mutex
-	Sessions map[string]session.Snapshot
-	Laptop   Laptop
-	// Writes counts every write, so tests can prove unchanged state is not rewritten.
-	Writes int
+	mu     sync.Mutex
+	docs   map[string]map[string]any
+	laptop Laptop
+	writes int
 }
 
-func NewMemory() *Memory { return &Memory{Sessions: map[string]session.Snapshot{}} }
+func NewMemory() *Memory { return &Memory{docs: map[string]map[string]any{}} }
 
-func (m *Memory) PutSession(_ context.Context, s session.Snapshot) error {
+func (m *Memory) Put(_ context.Context, collection, id string, v any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Sessions[s.ID] = s
-	m.Writes++
+	if m.docs[collection] == nil {
+		m.docs[collection] = map[string]any{}
+	}
+	m.docs[collection][id] = v
+	m.writes++
 	return nil
 }
 
-func (m *Memory) DeleteSession(_ context.Context, id string) error {
+func (m *Memory) Delete(_ context.Context, collection, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.Sessions, id)
-	m.Writes++
+	delete(m.docs[collection], id)
+	m.writes++
 	return nil
 }
 
-func (m *Memory) SessionIDs(context.Context) ([]string, error) {
+func (m *Memory) IDs(_ context.Context, collection string) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ids := make([]string, 0, len(m.Sessions))
-	for id := range m.Sessions {
+	ids := make([]string, 0, len(m.docs[collection]))
+	for id := range m.docs[collection] {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -49,20 +49,31 @@ func (m *Memory) SessionIDs(context.Context) ([]string, error) {
 func (m *Memory) SetLaptop(_ context.Context, l Laptop) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Laptop = l
-	m.Writes++
+	m.laptop = l
+	m.writes++
 	return nil
 }
 
-// Snapshot returns a copy of the stored state.
-func (m *Memory) Snapshot() (map[string]session.Snapshot, Laptop, int) {
+// Get returns one stored document.
+func (m *Memory) Get(collection, id string) (any, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make(map[string]session.Snapshot, len(m.Sessions))
-	for k, v := range m.Sessions {
-		out[k] = v
-	}
-	return out, m.Laptop, m.Writes
+	v, ok := m.docs[collection][id]
+	return v, ok
+}
+
+// Laptop returns the stored laptop status.
+func (m *Memory) Laptop() Laptop {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.laptop
+}
+
+// Writes counts every write, so tests can prove unchanged state is not rewritten.
+func (m *Memory) Writes() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.writes
 }
 
 func (m *Memory) Close() error { return nil }

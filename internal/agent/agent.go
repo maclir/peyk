@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/maclir/peyk/internal/session"
@@ -14,6 +15,7 @@ import (
 
 type Collector interface {
 	All(context.Context) ([]session.Snapshot, error)
+	Repos() ([]string, error)
 }
 
 // Watcher follows the working directories of the published sessions.
@@ -35,24 +37,19 @@ type Agent struct {
 	Presence time.Duration
 	Log      *log.Logger
 
-	published map[string]string
+	published map[string]map[string]string
 }
 
-// Refresh collects every session and writes only the ones whose content changed.
+// Refresh collects every session and project and writes only the documents
+// whose content changed.
 func (a *Agent) Refresh(ctx context.Context) error {
 	snaps, err := a.Collect.All(ctx)
 	if err != nil {
 		return err
 	}
-	if a.published == nil {
-		ids, err := a.Store.SessionIDs(ctx)
-		if err != nil {
-			return err
-		}
-		a.published = make(map[string]string, len(ids))
-		for _, id := range ids {
-			a.published[id] = ""
-		}
+	repos, err := a.Collect.Repos()
+	if err != nil {
+		return err
 	}
 	if a.Watch != nil {
 		dirs := make([]string, len(snaps))
@@ -63,33 +60,71 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
-	seen := make(map[string]bool, len(snaps))
+	sessions := map[string]any{}
 	for _, s := range snaps {
-		seen[s.ID] = true
-		key := contentKey(s)
-		if a.published[s.ID] == key {
-			continue
-		}
-		if err := a.Store.PutSession(ctx, s); err != nil {
-			return err
-		}
-		a.published[s.ID] = key
+		sessions[s.ID] = s
 	}
-	for id := range a.published {
-		if seen[id] {
-			continue
-		}
-		if err := a.Store.DeleteSession(ctx, id); err != nil {
+	projects := map[string]any{}
+	for _, p := range session.Projects(snaps, repos) {
+		projects[ProjectID(p.Name)] = p
+	}
+	if err := a.sync(ctx, store.Sessions, sessions); err != nil {
+		return err
+	}
+	return a.sync(ctx, store.Projects, projects)
+}
+
+// ProjectID is a project's document id: its name, which Firestore accepts
+// once slashes are gone.
+func ProjectID(name string) string { return strings.ReplaceAll(name, "/", "_") }
+
+// sync makes a collection hold exactly docs, writing only what changed since
+// the last sync. The first sync learns what is already there, so documents
+// left by an earlier run are removed.
+func (a *Agent) sync(ctx context.Context, collection string, docs map[string]any) error {
+	if a.published == nil {
+		a.published = map[string]map[string]string{}
+	}
+	published, ok := a.published[collection]
+	if !ok {
+		ids, err := a.Store.IDs(ctx, collection)
+		if err != nil {
 			return err
 		}
-		delete(a.published, id)
+		published = make(map[string]string, len(ids))
+		for _, id := range ids {
+			published[id] = ""
+		}
+		a.published[collection] = published
+	}
+	for id, v := range docs {
+		key := contentKey(v)
+		if published[id] == key {
+			continue
+		}
+		if err := a.Store.Put(ctx, collection, id, v); err != nil {
+			return err
+		}
+		published[id] = key
+	}
+	for id := range published {
+		if _, ok := docs[id]; ok {
+			continue
+		}
+		if err := a.Store.Delete(ctx, collection, id); err != nil {
+			return err
+		}
+		delete(published, id)
 	}
 	return nil
 }
 
-func contentKey(s session.Snapshot) string {
-	s.UpdatedAt = time.Time{}
-	b, _ := json.Marshal(s)
+func contentKey(v any) string {
+	if s, ok := v.(session.Snapshot); ok {
+		s.UpdatedAt = time.Time{}
+		v = s
+	}
+	b, _ := json.Marshal(v)
 	return string(b)
 }
 

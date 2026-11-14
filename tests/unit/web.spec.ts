@@ -65,3 +65,35 @@ describe('board', () => {
     expect(ago(new Date(now - 3 * 86400_000), now)).toBe('3d');
   });
 });
+
+describe('inbox', () => {
+  // @ts-expect-error plain browser module
+  const load = () => import('../../internal/web/static/board.js');
+
+  it('orders the picker by recent activity, then name', async () => {
+    const { sortProjects } = await load();
+    const got = sortProjects([
+      { name: 'b' },
+      { name: 'old', active: new Date(2026, 0, 1) },
+      { name: 'new', active: new Date(2026, 10, 1) },
+      { name: 'a' },
+    ]).map((p: any) => p.name);
+    expect(got).toEqual(['new', 'old', 'a', 'b']);
+  });
+
+  it('splits queued tasks by whether their project is free', async () => {
+    const { inboxGroups } = await load();
+    const { ready, waiting } = inboxGroups(
+      [
+        { project: 'knip', text: 'later', status: 'queued', created_at: new Date(2026, 0, 2) },
+        { project: 'knip', text: 'first', status: 'queued', created_at: new Date(2026, 0, 1) },
+        { project: 'hamta', text: 'h', status: 'queued', created_at: new Date(2026, 0, 1) },
+        { project: 'gone', text: 'g', status: 'queued', created_at: new Date(2026, 0, 1) },
+        { project: 'knip', text: 'sent', status: 'dispatched', created_at: new Date(2026, 0, 1) },
+      ],
+      [{ name: 'knip', free: true }, { name: 'hamta', free: false, busy: 'working' }],
+    );
+    expect(ready.map((t: any) => t.text)).toEqual(['first', 'later']);
+    expect(waiting.map((t: any) => `${t.text}:${t.why}`)).toEqual(['h:working', 'g:project no longer exists']);
+  });
+});

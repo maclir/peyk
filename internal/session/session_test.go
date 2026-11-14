@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDerive(t *testing.T) {
 	clean := &Git{}
@@ -40,5 +43,29 @@ func TestRankPutsAttentionFirst(t *testing.T) {
 	}
 	if State("other").Rank() <= Stopped.Rank() {
 		t.Fatal("unknown states should sort last")
+	}
+}
+
+func TestProjectsFromSessionsAndRepositories(t *testing.T) {
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	snaps := []Snapshot{
+		{ID: "k", Title: "knip", Path: "/c/knip", State: Unpushed, Git: &Git{Unpushed: 2, Last: &Commit{At: at}}},
+		{ID: "m", Title: "maclir.net", Path: "/c/maclir", State: Idle, Message: &Message{At: at.Add(time.Hour)}},
+		{ID: "w", Title: "hamta", Path: "/c/hamta", State: Working},
+	}
+	got := Projects(snaps, []string{"/c/knip", "/c/maclir", "/c/sakku"})
+	want := []Project{
+		{Name: "knip", Path: "/c/knip", SessionID: "k", Busy: "2 unpushed commits", Active: at},
+		{Name: "maclir.net", Path: "/c/maclir", SessionID: "m", Free: true, Active: at.Add(time.Hour)},
+		{Name: "hamta", Path: "/c/hamta", SessionID: "w", Busy: "working"},
+		{Name: "sakku", Path: "/c/sakku", Free: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d projects: %+v", len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("project %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }

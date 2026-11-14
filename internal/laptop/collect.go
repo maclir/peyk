@@ -2,7 +2,11 @@ package laptop
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/maclir/peyk/internal/session"
@@ -13,7 +17,9 @@ type Collector struct {
 	Aoe       Aoe
 	Run       Runner
 	ClaudeDir string
-	Now       func() time.Time
+	// Root holds project repositories that can get a new session.
+	Root string
+	Now  func() time.Time
 }
 
 // Snapshot describes one aoe session.
@@ -47,5 +53,27 @@ func (c Collector) All(ctx context.Context) ([]session.Snapshot, error) {
 		}
 		return out[i].Title < out[j].Title
 	})
+	return out, nil
+}
+
+// Repos lists the git repositories directly under Root.
+func (c Collector) Repos() ([]string, error) {
+	if c.Root == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(c.Root)
+	if err != nil {
+		return nil, fmt.Errorf("list projects root: %w", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(c.Root, e.Name())
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			out = append(out, dir)
+		}
+	}
 	return out, nil
 }

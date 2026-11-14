@@ -28,7 +28,7 @@ func TestFirestoreRoundTrip(t *testing.T) {
 		Git:     &session.Git{Branch: "main", Upstream: "origin/main", Unpushed: 2, Last: &session.Commit{Hash: "3f2a1c4", Subject: "Ship", At: at}},
 		Message: &session.Message{Text: "Done.\n\n- one", At: at},
 	}
-	if err := s.PutSession(ctx, snap); err != nil {
+	if err := s.Put(ctx, Sessions, snap.ID, snap); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := s.client.Collection("sessions").Doc("it-knip").Get(ctx)
@@ -42,14 +42,14 @@ func TestFirestoreRoundTrip(t *testing.T) {
 	if got.Git.Unpushed != 2 || got.Message.Text != snap.Message.Text || got.State != session.Unpushed {
 		t.Fatalf("round trip: %+v", got)
 	}
-	ids, err := s.SessionIDs(ctx)
+	ids, err := s.IDs(ctx, Sessions)
 	if err != nil || !contains(ids, "it-knip") {
 		t.Fatalf("SessionIDs = %v, %v", ids, err)
 	}
-	if err := s.DeleteSession(ctx, "it-knip"); err != nil {
+	if err := s.Delete(ctx, Sessions, "it-knip"); err != nil {
 		t.Fatal(err)
 	}
-	if ids, _ = s.SessionIDs(ctx); contains(ids, "it-knip") {
+	if ids, _ = s.IDs(ctx, Sessions); contains(ids, "it-knip") {
 		t.Fatal("session not deleted")
 	}
 	if err := s.SetLaptop(ctx, Laptop{Online: true, SeenAt: at}); err != nil {

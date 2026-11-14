@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,8 +15,10 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/maclir/peyk/internal/agent"
+	"github.com/maclir/peyk/internal/inbox"
 	"github.com/maclir/peyk/internal/laptop"
 	"github.com/maclir/peyk/internal/owner"
+	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
 )
 
@@ -32,22 +35,27 @@ func project() (string, error) {
 	return p, nil
 }
 
-// runAgent publishes as the peyk-agent service account, impersonated from
+// openStore connects as the peyk-agent service account, impersonated from
 // your own login. The token it holds can reach this project's Firestore and
 // nothing else, and no key file exists to leak.
-func runAgent(ctx context.Context) error {
+func openStore(ctx context.Context) (*store.Firestore, string, error) {
 	p, err := project()
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	ts, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
 		TargetPrincipal: env("PEYK_AGENT_ACCOUNT", "peyk-agent@"+p+".iam.gserviceaccount.com"),
 		Scopes:          []string{"https://www.googleapis.com/auth/datastore"},
 	})
 	if err != nil {
-		return fmt.Errorf("impersonate agent account: %w", err)
+		return nil, "", fmt.Errorf("impersonate agent account: %w", err)
 	}
 	fs, err := store.NewFirestore(ctx, p, option.WithTokenSource(ts))
+	return fs, p, err
+}
+
+func runAgent(ctx context.Context) error {
+	fs, p, err := openStore(ctx)
 	if err != nil {
 		return err
 	}
@@ -118,5 +126,29 @@ func grantOwner(ctx context.Context, email string) error {
 		return err
 	}
 	fmt.Printf("%s (%s) is the owner. Sign out and in again on the phone to pick it up.\n", email, uid)
+	return nil
+}
+
+// importTasks adds tasks from a JSON array on stdin to the inbox.
+func importTasks(ctx context.Context, in io.Reader, out io.Writer) error {
+	c := collector()
+	snaps, err := c.All(ctx)
+	if err != nil {
+		return err
+	}
+	repos, err := c.Repos()
+	if err != nil {
+		return err
+	}
+	fs, _, err := openStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer fs.Close()
+	n, err := inbox.Import(ctx, in, session.Projects(snaps, repos), fs)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Imported %d tasks.\n", n)
 	return nil
 }

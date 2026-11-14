@@ -6,8 +6,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/option"
-
-	"github.com/maclir/peyk/internal/session"
 )
 
 type Firestore struct{ client *firestore.Client }
@@ -20,24 +18,24 @@ func NewFirestore(ctx context.Context, projectID string, opts ...option.ClientOp
 	return &Firestore{client: client}, nil
 }
 
-func (s *Firestore) PutSession(ctx context.Context, v session.Snapshot) error {
-	if _, err := s.client.Collection("sessions").Doc(v.ID).Set(ctx, v); err != nil {
-		return fmt.Errorf("write session %s: %w", v.ID, err)
+func (s *Firestore) Put(ctx context.Context, collection, id string, v any) error {
+	if _, err := s.client.Collection(collection).Doc(id).Set(ctx, v); err != nil {
+		return fmt.Errorf("write %s/%s: %w", collection, id, err)
 	}
 	return nil
 }
 
-func (s *Firestore) DeleteSession(ctx context.Context, id string) error {
-	if _, err := s.client.Collection("sessions").Doc(id).Delete(ctx); err != nil {
-		return fmt.Errorf("delete session %s: %w", id, err)
+func (s *Firestore) Delete(ctx context.Context, collection, id string) error {
+	if _, err := s.client.Collection(collection).Doc(id).Delete(ctx); err != nil {
+		return fmt.Errorf("delete %s/%s: %w", collection, id, err)
 	}
 	return nil
 }
 
-func (s *Firestore) SessionIDs(ctx context.Context) ([]string, error) {
-	refs, err := s.client.Collection("sessions").DocumentRefs(ctx).GetAll()
+func (s *Firestore) IDs(ctx context.Context, collection string) ([]string, error) {
+	refs, err := s.client.Collection(collection).DocumentRefs(ctx).GetAll()
 	if err != nil {
-		return nil, fmt.Errorf("list sessions: %w", err)
+		return nil, fmt.Errorf("list %s: %w", collection, err)
 	}
 	ids := make([]string, len(refs))
 	for i, r := range refs {

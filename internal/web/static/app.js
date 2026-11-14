@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, laptopOnline, pushLabel, sortSessions } from "./board.js";
+import { STATES, ago, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
 // with no signal at all.
@@ -43,7 +43,7 @@ async function start(cfg) {
   const a = auth.getAuth(fb);
   const db = fs.getFirestore(fb);
 
-  const state = { sessions: new Map(), laptop: null, user: null };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -56,6 +56,14 @@ async function start(cfg) {
     unsubscribe = [
       fs.onSnapshot(fs.collection(db, "sessions"), (snap) => {
         state.sessions = new Map(snap.docs.map((d) => [d.id, d.data()]));
+        render();
+      }, failed),
+      fs.onSnapshot(fs.collection(db, "projects"), (snap) => {
+        state.projects = snap.docs.map((d) => d.data());
+        render();
+      }, failed),
+      fs.onSnapshot(fs.collection(db, "tasks"), (snap) => {
+        state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         render();
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "status"), (snap) => {
@@ -115,8 +123,81 @@ async function start(cfg) {
     renderLaptop();
     const id = location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
     const s = id && state.sessions.get(id);
-    if (s) app.replaceChildren(detail(s));
-    else app.replaceChildren(board());
+    const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
+    const tabs = h("nav", { class: "tabs" },
+      h("a", { href: "#", class: view === "board" ? "on" : "" }, "Sessions"),
+      h("a", { href: "#inbox", class: view === "inbox" ? "on" : "" }, `Inbox${queuedCount() ? ` · ${queuedCount()}` : ""}`),
+    );
+    const focused = document.activeElement && document.activeElement.id === "task-text";
+    const draft = document.getElementById("task-text")?.value ?? "";
+    if (s) app.replaceChildren(tabs, detail(s));
+    else if (view === "inbox") app.replaceChildren(tabs, inbox(draft));
+    else app.replaceChildren(tabs, board());
+    if (focused) document.getElementById("task-text")?.focus();
+  }
+
+  function queuedCount() {
+    return state.tasks.filter((t) => t.status === "queued").length;
+  }
+
+  function inbox(draft) {
+    const projects = sortProjects(state.projects);
+    if (!state.picked || !projects.some((p) => p.name === state.picked)) state.picked = projects[0]?.name ?? null;
+    const counts = new Map();
+    for (const t of state.tasks) if (t.status === "queued") counts.set(t.project, (counts.get(t.project) || 0) + 1);
+
+    const picker = h("div", { class: "picker", role: "radiogroup", "aria-label": "Project" },
+      projects.map((p) =>
+        h("button", {
+          type: "button", role: "radio", class: "pchip", "aria-checked": String(p.name === state.picked),
+          title: p.free ? "free" : p.busy,
+          onclick: () => { state.picked = p.name; render(); },
+        },
+          h("span", { class: `dot ${p.free ? "free" : "busy"}` }),
+          p.name,
+          counts.get(p.name) ? h("span", { class: "q" }, String(counts.get(p.name))) : null,
+        ),
+      ),
+    );
+    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? `Task for ${state.picked}…` : "No projects published yet", "aria-label": "New task" });
+    text.value = draft;
+    const add = async (e) => {
+      e.preventDefault();
+      const value = text.value.trim();
+      if (!value || !state.picked) return;
+      try {
+        await fs.addDoc(fs.collection(db, "tasks"), { project: state.picked, text: value, created_at: fs.serverTimestamp(), status: "queued" });
+        text.value = "";
+      } catch (err) {
+        alertLine(`Could not add the task: ${err.message}`);
+      }
+    };
+    const form = h("form", { class: "add", onsubmit: add }, picker, h("div", { class: "addrow" }, text, h("button", { class: "primary", type: "submit" }, "Add")));
+
+    const { ready, waiting } = inboxGroups(state.tasks, state.projects);
+    const now = Date.now();
+    const item = (t, why) =>
+      h("div", { class: "task" },
+        h("div", { class: "grow" },
+          h("div", { class: "proj" }, `${t.project} · ${ago(t.created_at, now)}`),
+          h("div", { class: "ttext" }, t.text),
+          why ? h("div", { class: "meta" }, why) : null,
+        ),
+        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => fs.deleteDoc(fs.doc(db, "tasks", t.id)).catch((err) => alertLine(`Could not delete: ${err.message}`)) }, "×"),
+      );
+    return h("div", { class: "inbox" },
+      form,
+      h("p", { class: "alert", id: "alert", role: "status" }),
+      h("h2", { class: "group" }, "Ready to send"),
+      ready.length ? ready.map((t) => item(t)) : h("p", { class: "empty" }, "Nothing queued for a free project."),
+      h("h2", { class: "group" }, "Waiting on its session"),
+      waiting.length ? waiting.map((t) => item(t, t.why)) : h("p", { class: "empty" }, "Nothing waiting."),
+    );
+  }
+
+  function alertLine(text) {
+    const el = document.getElementById("alert");
+    if (el) el.textContent = text;
   }
 
   function board() {

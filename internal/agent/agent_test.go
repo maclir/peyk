@@ -30,6 +30,8 @@ func (f *fakeCollector) All(context.Context) ([]session.Snapshot, error) {
 	return append([]session.Snapshot(nil), f.snaps...), f.err
 }
 
+func (f *fakeCollector) Repos() ([]string, error) { return []string{"/c/sakku"}, nil }
+
 func (f *fakeCollector) fail(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -57,40 +59,54 @@ func newAgent(c Collector, s store.Store) *Agent {
 	}
 }
 
-func TestRefreshWritesOnlyChangesAndRemovesGoneSessions(t *testing.T) {
+func TestRefreshWritesOnlyChangesAndRemovesGoneDocuments(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemory()
-	_ = mem.PutSession(ctx, session.Snapshot{ID: "stale", Title: "gone"})
+	_ = mem.Put(ctx, store.Sessions, "stale", session.Snapshot{ID: "stale"})
+	_ = mem.Put(ctx, store.Projects, "gone", session.Project{Name: "gone"})
 	c := &fakeCollector{}
 	a := newAgent(c, mem)
 
-	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle, UpdatedAt: time.Unix(1, 0)})
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, UpdatedAt: time.Unix(1, 0)})
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	sessions, _, writes := mem.Snapshot()
-	if _, ok := sessions["stale"]; ok || len(sessions) != 1 {
-		t.Fatalf("sessions = %v", sessions)
+	if ids, _ := mem.IDs(ctx, store.Sessions); strings.Join(ids, ",") != "k" {
+		t.Fatalf("sessions = %v", ids)
 	}
-	if writes != 3 { // seed, put k, delete stale
-		t.Fatalf("writes = %d, want 3", writes)
+	if ids, _ := mem.IDs(ctx, store.Projects); strings.Join(ids, ",") != "knip,sakku" {
+		t.Fatalf("projects = %v", ids)
 	}
+	if v, _ := mem.Get(store.Projects, "knip"); !v.(session.Project).Free || v.(session.Project).SessionID != "k" {
+		t.Fatalf("project knip = %+v", v)
+	}
+	writes := mem.Writes()
 
 	// Same content, newer timestamp: nothing to write.
-	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle, UpdatedAt: time.Unix(2, 0)})
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, UpdatedAt: time.Unix(2, 0)})
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, w := mem.Snapshot(); w != 3 {
-		t.Fatalf("unchanged session was rewritten: writes = %d", w)
+	if mem.Writes() != writes {
+		t.Fatalf("unchanged documents were rewritten: %d writes, want %d", mem.Writes(), writes)
 	}
 
-	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Unpushed})
+	// A busy session changes both its session and its project.
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Working})
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if s, _, w := mem.Snapshot(); w != 4 || s["k"].State != session.Unpushed {
-		t.Fatalf("changed session: writes = %d, %+v", w, s["k"])
+	if mem.Writes() != writes+2 {
+		t.Fatalf("writes = %d, want %d", mem.Writes(), writes+2)
+	}
+	if v, _ := mem.Get(store.Projects, "knip"); v.(session.Project).Free || v.(session.Project).Busy != "working" {
+		t.Fatalf("project knip = %+v", v)
+	}
+}
+
+func TestProjectIDDropsSlashes(t *testing.T) {
+	if got := ProjectID("a/b"); got != "a_b" {
+		t.Fatal(got)
 	}
 }
 
@@ -104,7 +120,7 @@ func TestRunCoalescesPingsAndSaysGoodbye(t *testing.T) {
 	done := make(chan error)
 	go func() { done <- a.Run(ctx, pings) }()
 
-	waitFor(t, func() bool { _, l, _ := mem.Snapshot(); return l.Online })
+	waitFor(t, func() bool { return mem.Laptop().Online })
 	if c.count() != 1 {
 		t.Fatalf("start should refresh once, got %d", c.count())
 	}
@@ -121,7 +137,7 @@ func TestRunCoalescesPingsAndSaysGoodbye(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, l, _ := mem.Snapshot(); l.Online {
+	if mem.Laptop().Online {
 		t.Fatal("laptop still online after stop")
 	}
 }
@@ -133,7 +149,7 @@ func TestRunStopsOnAFailedRefreshAndGoesOffline(t *testing.T) {
 	pings := make(chan struct{}, 1)
 	done := make(chan error)
 	go func() { done <- a.Run(context.Background(), pings) }()
-	waitFor(t, func() bool { _, l, _ := mem.Snapshot(); return l.Online })
+	waitFor(t, func() bool { return mem.Laptop().Online })
 
 	c.fail(errors.New("aoe list: exit status 1"))
 	pings <- struct{}{}
@@ -145,7 +161,7 @@ func TestRunStopsOnAFailedRefreshAndGoesOffline(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run kept going after a failed refresh")
 	}
-	if _, l, _ := mem.Snapshot(); l.Online {
+	if mem.Laptop().Online {
 		t.Fatal("laptop left online after a failure")
 	}
 }
@@ -156,7 +172,7 @@ func TestRunFailsAtStartWithoutGoingOnline(t *testing.T) {
 	if err := newAgent(c, mem).Run(context.Background(), nil); err == nil {
 		t.Fatal("want error")
 	}
-	if _, l, _ := mem.Snapshot(); l.Online {
+	if mem.Laptop().Online {
 		t.Fatal("online after a failed start")
 	}
 }

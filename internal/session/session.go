@@ -2,7 +2,11 @@
 // its state is derived. It does no I/O.
 package session
 
-import "time"
+import (
+	"path/filepath"
+	"strconv"
+	"time"
+)
 
 // State is what a card on the board shows, ordered by how urgently it needs you.
 type State string
@@ -86,4 +90,68 @@ func Derive(aoeStatus string, git *Git) State {
 		return Stopped
 	}
 	return Idle
+}
+
+// Project is something a task can be sent to: a live aoe session, or a git
+// repository under the projects root that would get a new session.
+type Project struct {
+	Name      string `firestore:"name" json:"name"`
+	Path      string `firestore:"path" json:"path"`
+	SessionID string `firestore:"session_id" json:"session_id"`
+	// Free is false while the project's session is busy or has work you have
+	// not dealt with; a task sent then would land on top of it.
+	Free bool `firestore:"free" json:"free"`
+	// Busy says why a project is not free, in words the phone shows.
+	Busy string `firestore:"busy" json:"busy"`
+	// Active is the latest commit or reply, for ordering the picker.
+	Active time.Time `firestore:"active" json:"active"`
+}
+
+// Projects lists every session, plus every repository in repoDirs that no
+// session works in, by name.
+func Projects(snaps []Snapshot, repoDirs []string) []Project {
+	var out []Project
+	taken := map[string]bool{}
+	for _, s := range snaps {
+		taken[s.Path] = true
+		p := Project{Name: s.Title, Path: s.Path, SessionID: s.ID, Free: true, Active: active(s)}
+		switch s.State {
+		case NeedsInput:
+			p.Free, p.Busy = false, "needs input"
+		case Error:
+			p.Free, p.Busy = false, "session error"
+		case Working:
+			p.Free, p.Busy = false, "working"
+		case Dirty:
+			p.Free, p.Busy = false, "uncommitted changes"
+		case Unpushed:
+			p.Free, p.Busy = false, plural(s.Git.Unpushed, "unpushed commit")
+		}
+		out = append(out, p)
+	}
+	for _, dir := range repoDirs {
+		if taken[dir] {
+			continue
+		}
+		out = append(out, Project{Name: filepath.Base(dir), Path: dir, Free: true})
+	}
+	return out
+}
+
+func active(s Snapshot) time.Time {
+	var t time.Time
+	if s.Git != nil && s.Git.Last != nil {
+		t = s.Git.Last.At
+	}
+	if s.Message != nil && s.Message.At.After(t) {
+		t = s.Message.At
+	}
+	return t
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
 }

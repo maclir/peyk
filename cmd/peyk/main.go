@@ -23,6 +23,7 @@ const usage = `usage: peyk <command>
   agent          publish session state for the phone until stopped
   ping           tell a running agent that something changed (for hooks)
   owner <email>  admit this Google account to peyk after its first sign-in
+  import-tasks   add tasks from a JSON array on stdin: [{"project","text","created_at"}]
 `
 
 func main() {
@@ -52,6 +53,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "ping":
 		agent.Ping(socketPath())
 		return nil
+	case "import-tasks":
+		return importTasks(ctx, os.Stdin, out)
 	case "owner":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: peyk owner <email>")
@@ -67,6 +70,7 @@ func collector() laptop.Collector {
 		Aoe:       laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
 		Run:       laptop.Exec,
 		ClaudeDir: claudeDir(),
+		Root:      projectsRoot(),
 		Now:       time.Now,
 	}
 }
@@ -79,6 +83,16 @@ func claudeDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
+}
+
+// projectsRoot is where repositories without a session live, offered in the
+// phone's project picker.
+func projectsRoot() string {
+	if d := os.Getenv("PEYK_PROJECTS_ROOT"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "code")
 }
 
 func env(key, fallback string) string {

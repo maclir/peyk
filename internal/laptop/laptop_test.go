@@ -263,3 +263,26 @@ func TestCollectorAllSortsByAttention(t *testing.T) {
 		t.Fatalf("got %+v", got[0])
 	}
 }
+
+func TestReposListsGitRepositoriesUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"a/.git", "b", ".hidden/.git", "c/.git"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "file"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Collector{Root: root}.Repos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "a"), filepath.Join(root, "c")}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if _, err := (Collector{Root: filepath.Join(root, "missing")}).Repos(); err == nil {
+		t.Fatal("a missing root should fail, not publish an empty picker")
+	}
+}

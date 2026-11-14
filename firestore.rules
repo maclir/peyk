@@ -1,20 +1,44 @@
 rules_version = '2';
 
-// Browsers only read, and only the owner: the account `peyk owner` marked
-// with the owner claim. The laptop agent and the server write with service
-// account credentials, which these rules do not apply to.
+// The owner is the account `peyk owner` marked with the owner claim. It reads
+// what the laptop publishes and adds and removes queued tasks. The laptop
+// agent writes with service account credentials, which these rules do not
+// apply to.
 service cloud.firestore {
   match /databases/{database}/documents {
     function isOwner() {
       return request.auth != null && request.auth.token.owner == true;
     }
 
+    function boundedString(v, max) {
+      return v is string && v.size() > 0 && v.size() <= max;
+    }
+
     match /sessions/{id} {
+      allow read: if isOwner();
+    }
+
+    match /projects/{id} {
       allow read: if isOwner();
     }
 
     match /laptop/status {
       allow get: if isOwner();
+    }
+
+    // A task names a project the laptop published. Only the agent marks it
+    // dispatched, so the phone can delete a task only while it is queued.
+    match /tasks/{id} {
+      allow read: if isOwner();
+      allow create: if isOwner()
+        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status'])
+        && boundedString(request.resource.data.project, 200)
+        && !request.resource.data.project.matches('.*/.*')
+        && exists(/databases/$(database)/documents/projects/$(request.resource.data.project))
+        && boundedString(request.resource.data.text, 20000)
+        && request.resource.data.created_at == request.time
+        && request.resource.data.status == 'queued';
+      allow delete: if isOwner() && resource.data.status == 'queued';
     }
 
     match /{document=**} {

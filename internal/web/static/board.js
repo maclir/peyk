@@ -54,3 +54,30 @@ export function pushLabel(git) {
   if (git.upstream) return "pushed";
   return "no remote";
 }
+
+// The picker shows recently active projects first; never-active ones follow
+// by name.
+export function sortProjects(projects) {
+  return [...projects].sort((a, b) => {
+    const ta = a.active ? toDate(a.active).getTime() : 0;
+    const tb = b.active ? toDate(b.active).getTime() : 0;
+    return tb - ta || String(a.name).localeCompare(String(b.name));
+  });
+}
+
+// Groups queued tasks into what can be sent now and what waits on a busy or
+// unknown project, oldest first in each.
+export function inboxGroups(tasks, projects) {
+  const byName = new Map(projects.map((p) => [p.name, p]));
+  const ready = [];
+  const waiting = [];
+  const queued = tasks
+    .filter((t) => t.status === "queued")
+    .sort((a, b) => toDate(a.created_at) - toDate(b.created_at));
+  for (const t of queued) {
+    const p = byName.get(t.project);
+    if (p && p.free) ready.push(t);
+    else waiting.push({ ...t, why: p ? p.busy : "project no longer exists" });
+  }
+  return { ready, waiting };
+}
