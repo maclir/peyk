@@ -35,7 +35,7 @@ const (
 
 	// A launcher tile wants more air around the mark than a favicon does, where
 	// every pixel of the sixteen counts. The mark covers this share of the tile.
-	tileCoverage = 0.31
+	tileCoverage = 0.20
 
 	// A maskable icon may be cropped to the circle that fits inside the middle
 	// 80% of the square, whose radius this is.
