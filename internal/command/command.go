@@ -28,6 +28,8 @@ const (
 	Stop     = "stop"
 	Clear    = "clear"
 	Push     = "push"
+	// Answer replies to a session's open multiple-choice dialog.
+	Answer = "answer"
 )
 
 const (
@@ -66,6 +68,9 @@ type Payload struct {
 	Project string `json:"project,omitempty"`
 	Task    string `json:"task,omitempty"`
 	Text    string `json:"text,omitempty"`
+	// Question is the tool call id of the dialog an answer is for, so an
+	// answer cannot land on a later question.
+	Question string `json:"question,omitempty"`
 	// Clear asks a dispatch to start the worker on a fresh conversation
 	// first, unless it already has one.
 	Clear bool `json:"clear,omitempty"`

@@ -25,6 +25,7 @@ func TestChanges(t *testing.T) {
 		"z": {ID: "z", Title: "zynk", State: session.Idle},
 		"a": {ID: "a", Title: "areh", State: session.Idle},
 		"p": {ID: "p", Title: "popq", State: session.Working},
+		"q": {ID: "q", Title: "quiz", State: session.Working},
 	}
 	next := map[string]session.Snapshot{
 		"k": {ID: "k", Title: "knip", State: session.Unpushed, Git: &session.Git{Unpushed: 2, Last: &session.Commit{Hash: "3f2a1c4", At: at}},
@@ -34,9 +35,11 @@ func TestChanges(t *testing.T) {
 		"a": {ID: "a", Title: "areh", State: session.Idle},
 		"p": {ID: "p", Title: "popq", State: session.Working},
 		"n": {ID: "n", Title: "new", State: session.NeedsInput},
+		"q": {ID: "q", Title: "quiz", State: session.NeedsInput, Message: &session.Message{Text: "Reading the code."},
+			Question: &session.Question{Items: []session.QuestionItem{{Question: "Which `colour`?"}, {Question: "Which pets?"}}}},
 	}
 	got := Changes(prev, next)
-	if len(got) != 2 {
+	if len(got) != 3 {
 		t.Fatalf("notes = %+v", got)
 	}
 	if got[0].Session != "h" || got[0].Title != "hamta needs you" || got[0].Body != "Include archived rows?" || got[0].URL != "/#s-h" {
@@ -44,6 +47,9 @@ func TestChanges(t *testing.T) {
 	}
 	if got[1].Title != "knip finished" || got[1].Body != "3f2a1c4 · 2 unpushed\nCommitted 3f2a1c4. All tests pass." {
 		t.Errorf("knip note = %+v", got[1])
+	}
+	if got[2].Title != "quiz needs you" || got[2].Body != "Which colour?\nWhich pets?" {
+		t.Errorf("quiz note = %+v", got[2])
 	}
 }
 

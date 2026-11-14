@@ -65,14 +65,22 @@ func body(s session.Snapshot) string {
 			parts = append(parts, fmt.Sprintf("%s · %d unpushed", g.Last.Hash, g.Unpushed))
 		}
 	}
-	if s.Message != nil {
-		line := strings.Join(strings.Fields(strings.NewReplacer("`", "", "*", "", "#", "").Replace(s.Message.Text)), " ")
-		if r := []rune(line); len(r) > 160 {
-			line = string(r[:159]) + "…"
+	if s.Question != nil {
+		for _, q := range s.Question.Items {
+			parts = append(parts, oneLine(q.Question))
 		}
-		parts = append(parts, line)
+	} else if s.Message != nil {
+		parts = append(parts, oneLine(s.Message.Text))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func oneLine(text string) string {
+	line := strings.Join(strings.Fields(strings.NewReplacer("`", "", "*", "", "#", "").Replace(text)), " ")
+	if r := []rune(line); len(r) > 160 {
+		line = string(r[:159]) + "…"
+	}
+	return line
 }
 
 // Subscription is one phone's push endpoint.

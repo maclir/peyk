@@ -143,3 +143,19 @@ export function doneTasks(tasks, limit = 10) {
     .sort((a, b) => toDate(b.done_at) - toDate(a.done_at))
     .slice(0, limit);
 }
+
+// answerText turns picks on the phone into the prompt the session gets after
+// its dialog is dismissed. picks[i] is { chosen: [labels], other: "" } for
+// question i. It returns "" until every question has an answer.
+export function answerText(question, picks) {
+  const lines = [];
+  for (const [i, item] of question.items.entries()) {
+    const p = picks[i] || {};
+    const parts = [...(p.chosen || [])];
+    const other = String(p.other || "").trim();
+    if (other) parts.push(other);
+    if (!parts.length) return "";
+    lines.push(`- ${item.question} ${parts.join("; ")}`);
+  }
+  return `My answers to your questions:\n${lines.join("\n")}`;
+}

@@ -115,6 +115,20 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .protos a { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
 .protos .ico { color: var(--warn); }
 .protos .when { font-size: 0.8rem; }
+.qcard { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; background: var(--card); border: 1px solid var(--bad-soft); border-radius: 14px; }
+.qcard h3 { margin: 0; font-size: 0.9rem; }
+.qitem { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.qitem legend { padding: 0; margin-bottom: 6px; font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.qhead { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 999px; background: var(--paper); font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+.qopt { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.qopt:has(input:checked) { border-color: var(--accent); }
+.qopt input { margin: 3px 0 0; flex: none; accent-color: var(--accent); }
+.qopt > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; font-size: 0.9rem; }
+.qdesc { color: var(--muted); font-size: 0.8rem; }
+.qother { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--bg); min-width: 0; }
+.qfoot { display: flex; align-items: center; gap: 10px; }
+.qfoot .hint { flex: 1; min-width: 0; margin: 0; font-size: 0.78rem; color: var(--muted); }
+.msg.ask { color: var(--bad); }
 .convo { display: flex; flex-direction: column; gap: 4px; }
 .who { font-size: 0.72rem; color: var(--muted); margin-top: 6px; }
 .who.mine { align-self: flex-end; }

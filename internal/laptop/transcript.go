@@ -130,15 +130,16 @@ func (e entry) text() string {
 	return strings.Join(texts, "\n\n")
 }
 
-func lastInFile(path string) (reply, prompt *session.Message) {
+// tail returns the transcript's last tailBytes as whole lines.
+func tail(path string) [][]byte {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	start := info.Size() - tailBytes
 	if start < 0 {
@@ -146,12 +147,17 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 	}
 	data, err := io.ReadAll(io.NewSectionReader(f, start, info.Size()-start))
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	lines := bytes.Split(data, []byte("\n"))
 	if start > 0 && len(lines) > 0 {
 		lines = lines[1:] // the first line was cut by the offset
 	}
+	return lines
+}
+
+func lastInFile(path string) (reply, prompt *session.Message) {
+	lines := tail(path)
 	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil); i-- {
 		isReply := reply == nil && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
 		isPrompt := prompt == nil && bytes.Contains(lines[i], []byte(`"kind":"human"`))
@@ -174,4 +180,73 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		}
 	}
 	return reply, prompt
+}
+
+// askTool is the tool behind Claude Code's multiple-choice dialog.
+const askTool = "AskUserQuestion"
+
+type toolUse struct {
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input struct {
+		Questions []session.QuestionItem `json:"questions"`
+	} `json:"input"`
+}
+
+// PendingQuestion returns the dialog the session's agent has open: its latest
+// AskUserQuestion call that has no result yet. Only the session's own
+// transcript is read, because a question is answered in that session alone.
+func PendingQuestion(t session.Transcript) *session.Question {
+	if t.ID == "" {
+		return nil
+	}
+	lines := tail(filepath.Join(t.Dir, t.ID+".jsonl"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], []byte(`"name":"`+askTool+`"`)) || !bytes.Contains(lines[i], []byte(`"type":"tool_use"`)) {
+			continue
+		}
+		var e entry
+		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain || e.Type != "assistant" {
+			continue
+		}
+		var parts []toolUse
+		if json.Unmarshal(e.Message.Content, &parts) != nil {
+			continue
+		}
+		for _, p := range parts {
+			if p.Type != "tool_use" || p.Name != askTool || len(p.Input.Questions) == 0 {
+				continue
+			}
+			if hasResult(lines[i+1:], p.ID) {
+				return nil
+			}
+			return &session.Question{ID: p.ID, At: e.Timestamp, Items: p.Input.Questions}
+		}
+		return nil
+	}
+	return nil
+}
+
+// Outcome says what became of a tool call: whether the transcript holds its
+// result yet, and whether that result is a refusal, as when a dialog is
+// dismissed with Esc.
+func Outcome(t session.Transcript, id string) (done, refused bool) {
+	if t.ID == "" {
+		return false, false
+	}
+	line := resultLine(tail(filepath.Join(t.Dir, t.ID+".jsonl")), id)
+	return line != nil, bytes.Contains(line, []byte(`"is_error":true`))
+}
+
+func hasResult(lines [][]byte, id string) bool { return resultLine(lines, id) != nil }
+
+func resultLine(lines [][]byte, id string) []byte {
+	needle := []byte(`"tool_use_id":"` + id + `"`)
+	for _, l := range lines {
+		if bytes.Contains(l, needle) {
+			return l
+		}
+	}
+	return nil
 }

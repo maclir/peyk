@@ -21,6 +21,9 @@ type Actions interface {
 	Clear(ctx context.Context, session string) error
 	Stop(ctx context.Context, session string) error
 	Push(ctx context.Context, dir string) error
+	// Answer closes a session's open dialog for question and sends text as
+	// the answer.
+	Answer(ctx context.Context, session string, t session.Transcript, question, text string) error
 }
 
 // Commands is what the agent needs to accept commands. Without it the agent
@@ -99,6 +102,18 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return errors.New("reply needs text")
 		}
 		return act.Send(ctx, s.ID, p.Text)
+	case command.Answer:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		if p.Text == "" || p.Question == "" {
+			return errors.New("answer needs the question and its text")
+		}
+		if s.Question == nil || s.Question.ID != p.Question {
+			return fmt.Errorf("%s is no longer asking that question", s.Title)
+		}
+		return act.Answer(ctx, s.ID, s.Transcript, p.Question, p.Text)
 	case command.Clear:
 		s, err := a.session(p.Session)
 		if err != nil {

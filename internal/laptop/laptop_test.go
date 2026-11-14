@@ -376,3 +376,57 @@ func TestSnapshotIsClearedOnlyWithAnEmptyOwnTranscript(t *testing.T) {
 		}
 	}
 }
+
+func ask(ts, id string) string {
+	return `{"type":"assistant","isSidechain":false,"timestamp":"` + ts + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"AskUserQuestion","input":{"questions":[` +
+		`{"question":"Which colour?","header":"Colour","multiSelect":false,"options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}]},` +
+		`{"question":"Which pets?","header":"Pets","multiSelect":true,"options":[{"label":"Cat","description":""},{"label":"Dog","description":""}]}]}}]}}`
+}
+
+func result(id string) string {
+	return `{"type":"user","isSidechain":false,"message":{"content":[{"type":"tool_result","content":"x","tool_use_id":"` + id + `"}]}}`
+}
+
+func TestPendingQuestionIsTheOpenDialog(t *testing.T) {
+	claude := t.TempDir()
+	work := "/Users/me/code/knip"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		ask("2026-11-14T09:00:00Z", "toolu_old"),
+		result("toolu_old"),
+		`{"type":"api-request-shape","shape":{"tools":[{"name":"AskUserQuestion","description":"..."}]}}`,
+		ask("2026-11-14T09:05:00Z", "toolu_new"),
+	)
+	tr := session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"}
+	q := PendingQuestion(tr)
+	if q == nil || q.ID != "toolu_new" || len(q.Items) != 2 {
+		t.Fatalf("question = %+v", q)
+	}
+	if it := q.Items[1]; it.Header != "Pets" || !it.MultiSelect || len(it.Options) != 2 || it.Options[1].Label != "Dog" {
+		t.Fatalf("second tab = %+v", it)
+	}
+	if q.Items[0].Options[0].Description != "warm" || !q.At.Equal(time.Date(2026, 11, 14, 9, 5, 0, 0, time.UTC)) {
+		t.Fatalf("first tab = %+v at %v", q.Items[0], q.At)
+	}
+	if done, _ := Outcome(tr, "toolu_new"); done {
+		t.Fatal("open dialog reported done")
+	}
+	if done, refused := Outcome(tr, "toolu_old"); !done || refused {
+		t.Fatalf("answered dialog: done=%v refused=%v", done, refused)
+	}
+}
+
+func TestPendingQuestionIsGoneOnceAnswered(t *testing.T) {
+	claude := t.TempDir()
+	work := "/Users/me/code/knip"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		ask("2026-11-14T09:00:00Z", "toolu_1"),
+		result("toolu_1"),
+		assistant("2026-11-14T09:01:00Z", "Going ahead."),
+	)
+	if q := PendingQuestion(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"}); q != nil {
+		t.Fatalf("answered dialog still pending: %+v", q)
+	}
+	if q := PendingQuestion(session.Transcript{Dir: TranscriptDir(claude, work)}); q != nil {
+		t.Fatalf("a session without its own transcript has no question: %+v", q)
+	}
+}

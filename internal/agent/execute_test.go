@@ -45,6 +45,10 @@ func (f *fakeActions) Push(_ context.Context, dir string) error {
 	f.calls = append(f.calls, "push "+dir)
 	return nil
 }
+func (f *fakeActions) Answer(_ context.Context, s string, tr session.Transcript, question, text string) error {
+	f.calls = append(f.calls, "answer "+s+" in "+tr.ID+" to "+question+": "+text)
+	return nil
+}
 
 type phone struct {
 	priv *ecdsa.PrivateKey
@@ -95,6 +99,8 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 		session.Snapshot{ID: "z", Title: "zynk", Path: "/c/zynk", State: session.Unpushed, Git: &session.Git{Unpushed: 1}},
 		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
 		session.Snapshot{ID: "f", Title: "fresh", Path: "/c/fresh", State: session.Idle, Cleared: true},
+		session.Snapshot{ID: "q", Title: "quiz", Path: "/c/quiz", State: session.NeedsInput,
+			Transcript: session.Transcript{ID: "conv"}, Question: &session.Question{ID: "toolu_1"}},
 	)
 	mem := store.NewMemory()
 	acts := &fakeActions{}
@@ -130,7 +136,11 @@ func TestExecuteCommands(t *testing.T) {
 		{"clear a working session", command.Payload{Type: command.Clear, Session: "h"}, "", "hamta is working"},
 		{"stop", command.Payload{Type: command.Stop, Session: "h"}, "stop h", ""},
 		{"push without a signature", command.Payload{Type: command.Push, Session: "z"}, "push /c/zynk", ""},
-		{"push to an unknown session", command.Payload{Type: command.Push, Session: "q"}, "", "no session q"},
+		{"push to an unknown session", command.Payload{Type: command.Push, Session: "nope"}, "", "no session nope"},
+		{"answer the open question", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1", Text: "Colour: Blue"}, "answer q in conv to toolu_1: Colour: Blue", ""},
+		{"answer a question no longer asked", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_0", Text: "x"}, "", "quiz is no longer asking that question"},
+		{"answer a session asking nothing", command.Payload{Type: command.Answer, Session: "k", Question: "toolu_1", Text: "x"}, "", "knip is no longer asking"},
+		{"answer without text", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1"}, "", "needs the question and its text"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

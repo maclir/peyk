@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, answerText, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -54,7 +54,9 @@ async function start(cfg) {
   }
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
-    filter: "all", only: null, arranging: false, menu: null, picking: false, pickQuery: "" };
+    filter: "all", only: null, arranging: false, menu: null, picking: false, pickQuery: "",
+    // Picks for open questions by question id, kept across redraws.
+    answers: new Map() };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -703,7 +705,8 @@ async function start(cfg) {
           h("span", { class: "cbody" },
             h("span", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), h("span", { class: "grow" }), chip(st)),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
-            s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
+            s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
+              : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
             h("span", { class: "meta" },
               last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
               h("span", {}, pushLabel(s.git)),
@@ -751,6 +754,7 @@ async function start(cfg) {
         h("span", { class: "who" }, s.title, s.message ? ` · ${ago(s.message.at, now)}` : ""),
         msg,
       ),
+      s.question ? questionCard(s) : null,
       h("details", { class: "facts" }, h("summary", {}, "Details"),
         h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
       replyBox(s),
@@ -770,6 +774,64 @@ async function start(cfg) {
         more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
       ) : null,
     );
+  }
+
+  // questionCard answers the session's open multiple-choice dialog. The
+  // laptop dismisses the dialog and sends the answers as a prompt, so the
+  // terminal can still answer until then.
+  function questionCard(s) {
+    const q = s.question;
+    if (!state.answers.has(q.id)) state.answers.set(q.id, q.items.map(() => ({ chosen: [], other: "" })));
+    const picks = state.answers.get(q.id);
+    const key = `answer:${s.id}`;
+    const send = busyButton(key, { type: "submit", class: "primary send" }, "Send answers");
+    const sync = () => { send.disabled = state.busy.has(key) || !answerText(q, picks); };
+    const items = q.items.map((item, i) => {
+      const p = picks[i];
+      const name = `q-${q.id}-${i}`;
+      const other = h("input", { type: "text", class: "qother", placeholder: "Or type your own answer…", "aria-label": `Own answer: ${item.question}` });
+      other.value = p.other;
+      const choices = item.options.map((o) => {
+        const input = h("input", { type: item.multi_select ? "checkbox" : "radio", name, value: o.label });
+        input.checked = p.chosen.includes(o.label);
+        input.addEventListener("change", () => {
+          if (item.multi_select) {
+            p.chosen = input.checked ? [...p.chosen, o.label] : p.chosen.filter((x) => x !== o.label);
+          } else {
+            // The terminal dialog takes one option or typed text, not both.
+            p.chosen = [o.label];
+            p.other = other.value = "";
+          }
+          sync();
+        });
+        return h("label", { class: "qopt" }, input,
+          h("span", {}, h("strong", {}, o.label), o.description ? h("span", { class: "qdesc" }, o.description) : null));
+      });
+      other.addEventListener("input", () => {
+        p.other = other.value;
+        if (!item.multi_select && other.value.trim()) {
+          p.chosen = [];
+          for (const c of choices) c.querySelector("input").checked = false;
+        }
+        sync();
+      });
+      return h("fieldset", { class: "qitem" },
+        h("legend", {}, item.header ? h("span", { class: "qhead" }, item.header) : null, item.question),
+        item.multi_select ? h("span", { class: "qdesc" }, "Pick any") : null,
+        choices, other);
+    });
+    sync();
+    const submit = async (e) => {
+      e.preventDefault();
+      const text = answerText(q, picks);
+      if (text && (await sendCommand("answer", { session: s.id, question: q.id, text }, `Answer ${s.title}`, key))) {
+        state.answers.delete(q.id);
+      }
+    };
+    return h("form", { class: "qcard", onsubmit: submit },
+      h("h3", {}, `${s.title} asks`),
+      items,
+      h("div", { class: "qfoot" }, h("span", { class: "hint" }, "Closes the dialog on the laptop and sends these answers."), send));
   }
 
   function replyBox(s) {

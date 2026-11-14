@@ -83,7 +83,10 @@ type Snapshot struct {
 	Cleared bool `firestore:"cleared" json:"cleared"`
 	// Prototypes are the pages the conversation published, newest first.
 	Prototypes []Prototype `firestore:"prototypes" json:"prototypes,omitempty"`
-	UpdatedAt  time.Time   `firestore:"updated_at" json:"updated_at"`
+	// Question is what the agent is asking with its multiple-choice dialog,
+	// while that dialog is open.
+	Question  *Question `firestore:"question" json:"question,omitempty"`
+	UpdatedAt time.Time `firestore:"updated_at" json:"updated_at"`
 	// Transcript is where the session's conversation is read from. It is
 	// the laptop's business and is not published.
 	Transcript Transcript `firestore:"-" json:"-"`
@@ -94,6 +97,28 @@ type Prototype struct {
 	URL   string    `firestore:"url" json:"url"`
 	Title string    `firestore:"title" json:"title"`
 	At    time.Time `firestore:"at" json:"at"`
+}
+
+// Question is one open AskUserQuestion dialog. ID is the tool call's id, so
+// an answer can name the dialog it was given for.
+type Question struct {
+	ID    string         `firestore:"id" json:"id"`
+	At    time.Time      `firestore:"at" json:"at"`
+	Items []QuestionItem `firestore:"items" json:"items"`
+}
+
+// QuestionItem is one tab of the dialog.
+type QuestionItem struct {
+	Question    string   `firestore:"question" json:"question"`
+	Header      string   `firestore:"header" json:"header"`
+	MultiSelect bool     `firestore:"multi_select" json:"multiSelect"`
+	Options     []Option `firestore:"options" json:"options"`
+}
+
+// Option is one choice in a dialog tab.
+type Option struct {
+	Label       string `firestore:"label" json:"label"`
+	Description string `firestore:"description" json:"description"`
 }
 
 // MaxPrototypes bounds the pages a snapshot lists, newest kept.

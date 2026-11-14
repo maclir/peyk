@@ -369,6 +369,43 @@ test.describe('signed in', () => {
     await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag')).toHaveText(['cleared', 'clean']);
     await expect(page.locator('.card', { hasText: 'hamta' }).locator('.flag')).toHaveCount(0);
   });
+
+  test("a worker's question is answered from the phone", async () => {
+    const asking = {
+      id: 'q', title: 'quiz', path: '/c/quiz', aoe_status: 'waiting', state: 'needs_input', updated_at: new Date(),
+      question: { id: 'toolu_1', at: new Date(), items: [
+        { question: 'Which colour?', header: 'Colour', multi_select: false, options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
+        { question: 'Which pets?', header: 'Pets', multi_select: true, options: [{ label: 'Cat', description: '' }, { label: 'Dog', description: '' }] },
+      ] },
+    };
+    await put(page, 'sessions/q', asking);
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'quiz' }).locator('.msg')).toHaveText('Asks: Which colour? · Which pets?');
+    await page.locator('.card', { hasText: 'quiz' }).click();
+    await passkeyOn(page);
+    const send = page.getByRole('button', { name: 'Send answers' });
+    await expect(send).toBeDisabled();
+    await page.getByLabel('Blue').check();
+    await expect(send).toBeDisabled();
+    await page.getByLabel('Cat').check();
+    await page.getByLabel('Own answer: Which pets?').fill('a fish');
+    // A redraw keeps the picks made so far.
+    await put(page, 'sessions/q', { ...asking, updated_at: new Date() });
+    await expect(page.getByLabel('Blue')).toBeChecked();
+    await send.click();
+    await expect(page.getByText('Answer quiz: waiting for the laptop…')).toBeVisible();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'answer')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({
+      type: 'answer', session: 'q', question: 'toolu_1',
+      text: 'My answers to your questions:\n- Which colour? Blue\n- Which pets? Cat; a fish',
+    });
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(page.getByText('Answer quiz: done.')).toBeVisible();
+
+    const { question, ...answered } = asking;
+    await put(page, 'sessions/q', { ...answered, aoe_status: 'running', state: 'working' });
+    await expect(page.locator('.qcard')).toHaveCount(0);
+  });
 });
 
 // Strips Firestore's typed values back to plain ones for a rewrite.

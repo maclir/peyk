@@ -48,7 +48,9 @@ type Agent struct {
 	// Transcripts, when set, is pointed at the transcript directories of
 	// working sessions, and pings Replies when one is written. No hook fires
 	// when a working agent writes a reply in the middle of its turn, and a
-	// full refresh per tool call would rerun every git command for it.
+	// full refresh per tool call would rerun every git command for it. It
+	// also follows sessions with an open question, because no hook fires
+	// when the question is answered at the terminal either.
 	Transcripts Watcher
 	Replies     <-chan struct{}
 	// Debounce coalesces the burst of pings one agent turn produces.
@@ -105,7 +107,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if a.Transcripts != nil {
 		var dirs []string
 		for _, s := range snaps {
-			if s.State == session.Working && s.Transcript.Dir != "" {
+			if (s.State == session.Working || s.Question != nil) && s.Transcript.Dir != "" {
 				dirs = append(dirs, s.Transcript.Dir)
 			}
 		}
@@ -149,10 +151,17 @@ func (a *Agent) Refresh(ctx context.Context) error {
 }
 
 // RefreshReplies rereads the transcripts of working sessions and publishes
-// the ones whose reply or prompt changed. Their state is left to Refresh.
+// the ones whose reply or prompt changed. Their state is left to Refresh,
+// unless a session has an open question.
 func (a *Agent) RefreshReplies(ctx context.Context) error {
 	if a.sessions == nil {
 		return nil
+	}
+	for _, s := range a.sessions {
+		// The question may have been answered, which changes its state.
+		if s.Question != nil {
+			return a.Refresh(ctx)
+		}
 	}
 	docs := make(map[string]any, len(a.sessions))
 	for id, s := range a.sessions {

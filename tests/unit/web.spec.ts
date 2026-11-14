@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, flags, laptopOnline, pushLabel, sortSessions } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -174,5 +174,29 @@ describe('task images', () => {
     expect(orphanedImages(tasks, [tasks[0]])).toEqual(['x']);
     expect(orphanedImages(tasks, [tasks[2]])).toEqual([]);
     expect(orphanedImages(tasks, [tasks[0], tasks[1]])).toEqual(['x', 'y']);
+  });
+});
+
+describe('answerText', () => {
+  const question = {
+    id: 'toolu_1',
+    items: [
+      { question: 'Which colour?', header: 'Colour', multi_select: false, options: [{ label: 'Red' }, { label: 'Blue' }] },
+      { question: 'Which pets?', header: 'Pets', multi_select: true, options: [{ label: 'Cat' }, { label: 'Dog' }] },
+    ],
+  };
+
+  it('names each question with its picks and own words', () => {
+    expect(answerText(question, [{ chosen: ['Blue'] }, { chosen: ['Cat', 'Dog'], other: ' and a fish ' }])).toBe(
+      'My answers to your questions:\n- Which colour? Blue\n- Which pets? Cat; Dog; and a fish',
+    );
+    expect(answerText(question, [{ other: 'Green' }, { chosen: ['Cat'] }])).toBe(
+      'My answers to your questions:\n- Which colour? Green\n- Which pets? Cat',
+    );
+  });
+
+  it('is empty until every question is answered', () => {
+    expect(answerText(question, [{ chosen: ['Blue'] }])).toBe('');
+    expect(answerText(question, [{ chosen: ['Blue'] }, { chosen: [], other: '  ' }])).toBe('');
   });
 });

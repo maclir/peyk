@@ -49,6 +49,9 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		UpdatedAt:  c.Now(),
 	}
 	snap.SetExchange(LastExchange(t))
+	if snap.State == session.NeedsInput {
+		snap.Question = PendingQuestion(t)
+	}
 	if c.Prototypes != nil {
 		snap.Prototypes = c.Prototypes.Find(t)
 	}
