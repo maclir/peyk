@@ -11,6 +11,7 @@
 //	pairings/{code}            Pairing              phone creates, agent deletes
 //	subscriptions/{id}         notify.Subscription  phone creates, agent deletes when gone
 //	laptop/push                {vapid_public_key}   agent writes
+//	attachments/{sha256}       Attachment           phone creates and deletes
 package store
 
 import (
@@ -28,7 +29,21 @@ const (
 	Commands      = "commands"
 	Pairings      = "pairings"
 	Subscriptions = "subscriptions"
+	Attachments   = "attachments"
 )
+
+// Attachment is an image added to a task. Its id is the SHA-256 of Data in
+// hex, so whoever reads it can tell it is the image that was signed for.
+type Attachment struct {
+	Data      []byte    `firestore:"data"`
+	Type      string    `firestore:"type"`
+	CreatedAt time.Time `firestore:"created_at"`
+}
+
+// AttachmentReader fetches a task's images.
+type AttachmentReader interface {
+	Attachment(ctx context.Context, id string) (Attachment, error)
+}
 
 // Pairing is the public half of a passkey the phone just created.
 type Pairing struct {
@@ -63,6 +78,8 @@ type Task struct {
 	// Commit is the session's last commit when the task finished, if it was
 	// made after the task was sent.
 	Commit string `firestore:"commit,omitempty" json:"commit,omitempty"`
+	// Images are attachment ids.
+	Images []string `firestore:"images,omitempty" json:"images,omitempty"`
 }
 
 const (

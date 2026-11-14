@@ -143,7 +143,7 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 		frame = "http://" + e.Auth
 	}
 	csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; " +
-		"script-src 'self' https://apis.google.com; connect-src " + connect + "; img-src 'self' data:"
+		"script-src 'self' https://apis.google.com; connect-src " + connect + "; img-src 'self' data: blob:"
 	if frame != "" {
 		csp += "; frame-src " + frame
 	}

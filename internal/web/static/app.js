@@ -1,5 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
 import { STATES, ago, currentTask, doneTasks, flags, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
+import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
@@ -15,6 +16,7 @@ const config = document.body.dataset.firebase;
 const h = (tag, attrs = {}, ...children) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
     if (k === "class") el.className = v;
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v);
@@ -49,7 +51,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map() };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map() };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -252,19 +254,40 @@ async function start(cfg) {
         ),
       ),
     );
-    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? `Task for ${state.picked}…` : "No projects published yet", "aria-label": "New task" });
+    const text = h("textarea", { id: "task-text", rows: "2", placeholder: state.picked ? `Task for ${state.picked}…` : "No projects published yet", "aria-label": "New task", onpaste: pasteImages });
+    // The draft is cleared as soon as the task is accepted: a local write
+    // re-renders the inbox before the server confirms it, and the re-render
+    // would otherwise restore the text it found in the box.
     const add = async (e) => {
       e.preventDefault();
       const value = text.value.trim();
       if (!value || !state.picked) return;
+      const attaching = state.attaching;
+      text.value = "";
+      state.attaching = [];
+      render();
       try {
-        await fs.addDoc(fs.collection(db, "tasks"), { project: state.picked, text: value, created_at: fs.serverTimestamp(), status: "queued" });
-        text.value = "";
+        await addTask(state.picked, value, attaching);
       } catch (err) {
+        const box = document.getElementById("task-text");
+        if (box && !box.value) box.value = value;
+        if (!state.attaching.length) state.attaching = attaching;
+        render();
         alertLine(`Could not add the task: ${err.message}`);
       }
     };
-    const form = h("form", { class: "add", onsubmit: add }, picker, h("div", { class: "addrow" }, text, h("button", { class: "primary", type: "submit" }, "Add")));
+    const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages([...e.target.files]); e.target.value = ""; } });
+    const form = h("form", { class: "add", onsubmit: add }, picker,
+      h("div", { class: "addrow" }, text,
+        h("button", { type: "button", class: "attach", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: state.attaching.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, "📎"),
+        h("button", { class: "primary", type: "submit" }, "Add")),
+      files,
+      state.attaching.length ? h("div", { class: "thumbs" }, state.attaching.map((img, i) =>
+        h("span", { class: "thumb" },
+          h("img", { src: img.url, alt: `Attached image ${i + 1}` }),
+          h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => { URL.revokeObjectURL(img.url); state.attaching.splice(i, 1); render(); } }, "×"),
+        ))) : null,
+    );
 
     const { ready, waiting } = inboxGroups(state.tasks, state.projects);
     const now = Date.now();
@@ -275,7 +298,7 @@ async function start(cfg) {
         state.sends.set(t.id, text);
         render();
       };
-      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear }, clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
+      sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}) }, clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
     };
     // A worker with a conversation is cleared first by default, so a task
     // starts on its own context; sending into the conversation is the
@@ -295,6 +318,7 @@ async function start(cfg) {
         h("div", { class: "grow" },
           h("div", { class: "proj" }, `${t.project} · ${ago(t.created_at, now)}`),
           h("div", { class: "ttext" }, t.text),
+          taskImages(t),
           why ? h("div", { class: "meta" }, why) : null,
           state.sends.has(t.id) ? h("div", { class: "meta sent", role: "status" }, state.sends.get(t.id)) : null,
         ),
@@ -317,6 +341,7 @@ async function start(cfg) {
           h("div", { class: "grow" },
             h("div", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),
             h("div", { class: "ttext" }, t.text),
+            taskImages(t),
           ),
           h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
         ),
@@ -324,8 +349,78 @@ async function start(cfg) {
     );
   }
 
+  // A task's images go with it, unless another task shares one.
   function remove(t) {
-    fs.deleteDoc(fs.doc(db, "tasks", t.id)).catch((err) => alertLine(`Could not delete: ${err.message}`));
+    const batch = fs.writeBatch(db);
+    batch.delete(fs.doc(db, "tasks", t.id));
+    for (const id of orphanedImages(state.tasks, [t])) batch.delete(fs.doc(db, "attachments", id));
+    batch.commit().catch((err) => alertLine(`Could not delete: ${err.message}`));
+  }
+
+  // An image is named by its hash, so one already stored is the same image
+  // and is not written again; writing it again would be refused.
+  async function addTask(project, text, images) {
+    const batch = fs.writeBatch(db);
+    const ids = [];
+    for (const img of images) {
+      const id = await imageID(img.bytes);
+      if (ids.includes(id)) continue;
+      ids.push(id);
+      if (!(await fs.getDoc(fs.doc(db, "attachments", id))).exists()) {
+        batch.set(fs.doc(db, "attachments", id), { data: fs.Bytes.fromUint8Array(img.bytes), type: img.type, created_at: fs.serverTimestamp() });
+      }
+    }
+    const task = { project, text, created_at: fs.serverTimestamp(), status: "queued" };
+    if (ids.length) task.images = ids;
+    batch.set(fs.doc(fs.collection(db, "tasks")), task);
+    await batch.commit();
+    for (const img of images) URL.revokeObjectURL(img.url);
+  }
+
+  async function attachImages(files) {
+    const room = MAX_IMAGES - state.attaching.length;
+    if (files.length > room) alertLine(`A task carries at most ${MAX_IMAGES} images; the rest were left out.`);
+    for (const file of files.slice(0, Math.max(0, room))) {
+      try {
+        const img = await prepareImage(file);
+        state.attaching.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
+      } catch (err) {
+        alertLine(`Could not attach: ${err.message}`);
+      }
+    }
+    render();
+  }
+
+  function pasteImages(e) {
+    const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault();
+    attachImages(files);
+  }
+
+  // Thumbnails load on first sight and are kept for the life of the page;
+  // stored images never change.
+  function taskImages(t) {
+    if (!t.images?.length) return null;
+    return h("div", { class: "thumbs" }, t.images.map((id, i) => {
+      const url = state.images.get(id);
+      if (url === undefined) loadImage(id);
+      if (!url) return h("span", { class: "thumb empty", title: url === null ? "Image is gone" : "Loading…" });
+      const img = h("img", { src: url, alt: `Image ${i + 1} of task` });
+      return h("button", { type: "button", class: "thumb", "aria-label": `Enlarge image ${i + 1}`, onclick: (e) => e.currentTarget.classList.toggle("big") }, img);
+    }));
+  }
+
+  function loadImage(id) {
+    state.images.set(id, "");
+    fs.getDoc(fs.doc(db, "attachments", id)).then((snap) => {
+      const d = snap.data();
+      state.images.set(id, d ? URL.createObjectURL(new Blob([d.data.toUint8Array()], { type: d.type })) : null);
+      render();
+    }, () => {
+      state.images.set(id, null);
+      render();
+    });
   }
 
   function editor(t, projects) {
@@ -466,6 +561,7 @@ async function start(cfg) {
       h("a", { class: "back", href: "#" }, "← Workers"),
       h("h2", {}, s.title, flagRow(s)),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       g && g.pending && g.pending.length ? pending(g, now) : null,
       h("h3", {}, "Last sent", s.prompt ? h("span", { class: "when" }, ` · ${ago(s.prompt.at, now)}`) : null),
       sent,
@@ -506,9 +602,24 @@ function pending(g, now) {
   ];
 }
 
+function prototypes(list, now) {
+  return [
+    h("h3", {}, "Prototypes"),
+    h("ul", { class: "protos" },
+      list.map((p) => h("li", {},
+        h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, p.title || p.url),
+        h("span", { class: "when" }, ago(p.at, now)),
+      )),
+    ),
+  ];
+}
+
 function flagRow(s) {
   const f = flags(s);
-  return f.length ? h("span", { class: "flags" }, f.map((x) => h("span", { class: `flag ${x}` }, x))) : null;
+  const proto = s.prototypes && s.prototypes.length
+    ? h("span", { class: "flag proto", title: "Published a prototype; open it from the worker" }, s.prototypes.length > 1 ? `${s.prototypes.length} prototypes` : "prototype")
+    : null;
+  return f.length || proto ? h("span", { class: "flags" }, proto, f.map((x) => h("span", { class: `flag ${x}` }, x))) : null;
 }
 
 function chip(st) {

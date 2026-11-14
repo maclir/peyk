@@ -135,3 +135,15 @@ describe('task lifecycle', () => {
     expect(doneTasks(tasks).map((t: any) => t.id)).toEqual(['d', 'c']);
   });
 });
+
+describe('task images', () => {
+  it('names an image by its SHA-256 and keeps one a remaining task shares', async () => {
+    // @ts-expect-error plain browser module
+    const { imageID, orphanedImages } = await import('../../internal/web/static/images.js');
+    expect(await imageID(new TextEncoder().encode('abc'))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    const tasks = [{ id: 'a', images: ['x', 'y'] }, { id: 'b', images: ['y'] }, { id: 'c' }];
+    expect(orphanedImages(tasks, [tasks[0]])).toEqual(['x']);
+    expect(orphanedImages(tasks, [tasks[2]])).toEqual([]);
+    expect(orphanedImages(tasks, [tasks[0], tasks[1]])).toEqual(['x', 'y']);
+  });
+});

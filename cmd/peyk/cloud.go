@@ -28,6 +28,11 @@ func socketPath() string {
 	return filepath.Join(home, ".peyk", "agent.sock")
 }
 
+func attachmentsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "attachments")
+}
+
 func project() (string, error) {
 	p := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if p == "" {
@@ -115,10 +120,11 @@ func runAgent(ctx context.Context) error {
 		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 		Commands: &agent.Commands{
-			Act:    actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal")},
-			Keys:   keyring().Load,
-			Origin: o.String(),
-			RPID:   o.Hostname(),
+			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal")},
+			Keys:        keyring().Load,
+			Origin:      o.String(),
+			RPID:        o.Hostname(),
+			Attachments: attachmentsDir(),
 		},
 	}
 	err = a.Run(ctx, pings, cmds)

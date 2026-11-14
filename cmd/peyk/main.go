@@ -82,11 +82,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 
 func collector() laptop.Collector {
 	return laptop.Collector{
-		Aoe:       laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
-		Run:       laptop.Exec,
-		ClaudeDir: claudeDir(),
-		Root:      projectsRoot(),
-		Now:       time.Now,
+		Aoe:        laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
+		Run:        laptop.Exec,
+		ClaudeDir:  claudeDir(),
+		Root:       projectsRoot(),
+		Now:        time.Now,
+		Prototypes: &laptop.Prototypes{},
 	}
 }
 

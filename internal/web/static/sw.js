@@ -21,6 +21,7 @@ const ASSETS = [
   "/static/app.js",
   "/static/board.js",
   "/static/markdown.js",
+  "/static/images.js",
   "/static/passkey.js",
   "/static/vendor/firebase-app.js",
   "/static/vendor/firebase-auth.js",

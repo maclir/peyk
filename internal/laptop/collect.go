@@ -20,6 +20,8 @@ type Collector struct {
 	// Root holds project repositories that can get a new session.
 	Root string
 	Now  func() time.Time
+	// Prototypes, when set, finds the pages each session published.
+	Prototypes *Prototypes
 }
 
 // Snapshot describes one aoe session.
@@ -37,6 +39,9 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		UpdatedAt:  c.Now(),
 	}
 	snap.SetExchange(LastExchange(t))
+	if c.Prototypes != nil {
+		snap.Prototypes = c.Prototypes.Find(t)
+	}
 	return snap
 }
 

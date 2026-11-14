@@ -1,4 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
 
 // The test server runs against the Auth and Firestore emulators (make
 // test-server). Data the laptop agent would publish is seeded through the
@@ -8,6 +9,7 @@ const FIRESTORE = `http://127.0.0.1:8181/v1/projects/${PROJECT}/databases/(defau
 const AUTH = `http://127.0.0.1:9190`;
 const admin = { Authorization: 'Bearer owner' };
 const EMAIL = 'owner@example.com';
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 type Value = string | number | boolean | Date | null | Value[] | { [k: string]: Value };
 
@@ -213,7 +215,8 @@ test.describe('signed in', () => {
     await expect(page.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
     await page.getByRole('radio', { name: /knip/ }).click();
     await page.getByLabel('New task').fill('Add --json output');
-    await page.getByRole('button', { name: 'Add' }).click();
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.getByLabel('New task')).toHaveValue('');
 
     const task = page.locator('.task', { hasText: 'Add --json output' });
     await expect(task.locator('.proj')).toContainText('knip');
@@ -231,6 +234,46 @@ test.describe('signed in', () => {
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /Delete task/ }).click();
     await expect(edited).toHaveCount(0);
+  });
+
+  test('a task carries a screenshot to its worker and drops it when deleted', async () => {
+    await page.goto('/#inbox');
+    await passkeyOn(page);
+    await page.getByRole('radio', { name: /knip/ }).click();
+    await page.getByLabel('New task').fill('Match this layout');
+    await page.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    await expect(page.locator('form.add .thumb img')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.getByLabel('New task')).toHaveValue('');
+    await expect(page.locator('form.add .thumb')).toHaveCount(0);
+
+    const task = page.locator('.task', { hasText: 'Match this layout' });
+    await expect(task.locator('.thumb img')).toHaveCount(1);
+    const id = createHash('sha256').update(PNG).digest('hex');
+    const stored = await get(page, `attachments/${id}`);
+    expect(Buffer.from(stored.data.bytesValue, 'base64')).toEqual(PNG);
+    expect(stored.type.stringValue).toBe('image/png');
+
+    await task.getByRole('button', { name: /^(Clear & send|Send)$/ }).first().click();
+    await expect(task.getByRole('status')).toContainText('waiting for the laptop…');
+    const cmd = (await list(page, 'commands')).find((c) => JSON.parse(c.fields.payload.stringValue).text === 'Match this layout')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue).images).toEqual([id]);
+
+    await task.getByRole('button', { name: /Delete task/ }).click();
+    await expect(task).toHaveCount(0);
+    const gone = await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin });
+    expect(gone.status()).toBe(404);
+  });
+
+  test('a worker that published a prototype links to it', async () => {
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      prototypes: [{ url: 'https://claude.ai/artifact/abc', title: 'Knip table sign', at: new Date() }] });
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag.proto')).toHaveText('prototype');
+    await page.locator('.card', { hasText: 'knip' }).click();
+    const link = page.getByRole('link', { name: 'Knip table sign' });
+    await expect(link).toHaveAttribute('href', 'https://claude.ai/artifact/abc');
+    await expect(link).toHaveAttribute('target', '_blank');
   });
 
   test('a worker is cleared on its own and shows when it is cleared and clean', async () => {

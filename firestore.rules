@@ -51,11 +51,26 @@ service cloud.firestore {
         && boundedString(data.text, 20000);
     }
 
+    // A task's images are created in the same batch as the task, so they
+    // are checked as they will be after it.
+    function imageExists(images, i) {
+      return images.size() <= i
+        || (images[i] is string && existsAfter(/databases/$(database)/documents/attachments/$(images[i])));
+    }
+
+    function validImages(data) {
+      return !('images' in data)
+        || (data.images is list && data.images.size() >= 1 && data.images.size() <= 4
+          && imageExists(data.images, 0) && imageExists(data.images, 1)
+          && imageExists(data.images, 2) && imageExists(data.images, 3));
+    }
+
     match /tasks/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
-        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status'])
+        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images'])
         && validTarget(request.resource.data)
+        && validImages(request.resource.data)
         && request.resource.data.created_at == request.time
         && request.resource.data.status == 'queued';
       allow update: if isOwner()
@@ -63,6 +78,21 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text'])
         && validTarget(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
+    }
+
+    // An image attached to a task, named by the SHA-256 of its bytes, which
+    // the laptop checks against the signed dispatch. It is never changed:
+    // other bytes are another image.
+    match /attachments/{id} {
+      allow create: if isOwner()
+        && id.matches('[0-9a-f]{64}')
+        && request.resource.data.keys().hasOnly(['data', 'type', 'created_at'])
+        && request.resource.data.data is bytes
+        && request.resource.data.data.size() > 0
+        && request.resource.data.data.size() <= 1000000
+        && request.resource.data.type in ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+        && request.resource.data.created_at == request.time;
+      allow get, delete: if isOwner();
     }
 
     // The laptop checks every command's passkey signature against keys it

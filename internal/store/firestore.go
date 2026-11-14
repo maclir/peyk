@@ -105,6 +105,18 @@ func (s *Firestore) DispatchedTasks(ctx context.Context) (map[string]Task, error
 	return out, nil
 }
 
+func (s *Firestore) Attachment(ctx context.Context, id string) (Attachment, error) {
+	doc, err := s.client.Collection(Attachments).Doc(id).Get(ctx)
+	if err != nil {
+		return Attachment{}, fmt.Errorf("read attachment %s: %w", id, err)
+	}
+	var a Attachment
+	if err := doc.DataTo(&a); err != nil {
+		return Attachment{}, fmt.Errorf("decode attachment %s: %w", id, err)
+	}
+	return a, nil
+}
+
 func (s *Firestore) Subscriptions(ctx context.Context) ([]notify.Subscription, error) {
 	docs, err := s.client.Collection(Subscriptions).Documents(ctx).GetAll()
 	if err != nil {

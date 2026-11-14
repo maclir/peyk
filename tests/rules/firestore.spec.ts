@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment, RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, Bytes, collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 
 let env: RulesTestEnvironment;
@@ -118,6 +118,55 @@ describe('tasks', () => {
 
   it('the owner cannot write projects', async () => {
     await assertFails(setDoc(doc(owner(), 'projects/new'), { name: 'new' }));
+  });
+});
+
+describe('attachments', () => {
+  const id = 'ab'.repeat(32);
+  const image = (over: Record<string, unknown> = {}) => ({
+    data: Bytes.fromUint8Array(new Uint8Array([137, 80, 78, 71])), type: 'image/png', created_at: serverTimestamp(), ...over,
+  });
+  const task = (images: unknown) => ({ project: 'knip', text: 'See the screenshot', created_at: serverTimestamp(), status: 'queued', images });
+
+  it('the owner adds a task with its images in one batch, reads and deletes them', async () => {
+    const db = owner();
+    const batch = writeBatch(db);
+    batch.set(doc(db, `attachments/${id}`), image());
+    batch.set(doc(collection(db, 'tasks')), task([id]));
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(getDoc(doc(db, `attachments/${id}`)));
+    await assertFails(getDocs(collection(db, 'attachments')));
+    await assertSucceeds(deleteDoc(doc(db, `attachments/${id}`)));
+  });
+
+  it('a task names only images that exist, at most four', async () => {
+    const tasks = collection(owner(), 'tasks');
+    await assertFails(addDoc(tasks, task([id])));
+    await assertFails(addDoc(tasks, task([])));
+    await assertFails(addDoc(tasks, task(id)));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      for (const c of 'abcde') await setDoc(doc(ctx.firestore(), `attachments/${c.repeat(64)}`), { type: 'image/png' });
+    });
+    await assertSucceeds(addDoc(tasks, task(['a', 'b', 'c', 'd'].map((c) => c.repeat(64)))));
+    await assertFails(addDoc(tasks, task(['a', 'b', 'c', 'd', 'e'].map((c) => c.repeat(64)))));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { images: ['a'.repeat(64)] }));
+  });
+
+  it('images are write-once, named by a hash, and bounded', async () => {
+    await assertSucceeds(setDoc(doc(owner(), `attachments/${id}`), image()));
+    await assertFails(setDoc(doc(owner(), `attachments/${id}`), image()));
+    await assertFails(setDoc(doc(owner(), 'attachments/not-a-hash'), image()));
+    await assertFails(setDoc(doc(owner(), `attachments/${'cd'.repeat(32)}`), image({ type: 'text/html' })));
+    await assertFails(setDoc(doc(owner(), `attachments/${'cd'.repeat(32)}`), image({ data: 'not bytes' })));
+    await assertFails(setDoc(doc(owner(), `attachments/${'cd'.repeat(32)}`), image({ data: Bytes.fromUint8Array(new Uint8Array(1000001)) })));
+    await assertFails(setDoc(doc(owner(), `attachments/${'cd'.repeat(32)}`), image({ extra: 1 })));
+  });
+
+  it('nobody else reads or adds images', async () => {
+    await assertFails(setDoc(doc(stranger(), `attachments/${id}`), image()));
+    await env.withSecurityRulesDisabled(async (ctx) => setDoc(doc(ctx.firestore(), `attachments/${id}`), { type: 'image/png' }));
+    await assertFails(getDoc(doc(stranger(), `attachments/${id}`)));
+    await assertFails(deleteDoc(doc(anonymous(), `attachments/${id}`)));
   });
 });
 

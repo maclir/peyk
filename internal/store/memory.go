@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -141,6 +142,16 @@ func (m *Memory) Writes() int {
 }
 
 func (m *Memory) Close() error { return nil }
+
+func (m *Memory) Attachment(_ context.Context, id string) (Attachment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.docs[Attachments][id].(Attachment)
+	if !ok {
+		return Attachment{}, fmt.Errorf("no attachment %s", id)
+	}
+	return a, nil
+}
 
 func (m *Memory) Subscriptions(context.Context) ([]notify.Subscription, error) {
 	m.mu.Lock()

@@ -30,6 +30,8 @@ type Commands struct {
 	Keys   func() ([]command.Key, error)
 	Origin string
 	RPID   string
+	// Attachments is the directory a dispatch's images are saved to.
+	Attachments string
 }
 
 // execute runs one command and records the outcome on its document. A
@@ -67,6 +69,10 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if !proj.Free {
 			return fmt.Errorf("%s is not free: %s", proj.Name, proj.Busy)
 		}
+		text, err := a.attach(ctx, p.Text, p.Images)
+		if err != nil {
+			return err
+		}
 		id := proj.SessionID
 		if id == "" {
 			if id, err = act.Create(ctx, proj.Path, proj.Name); err != nil {
@@ -78,7 +84,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			}
 		}
 		sentAt := a.Now()
-		if err := act.Send(ctx, id, p.Text); err != nil {
+		if err := act.Send(ctx, id, text); err != nil {
 			return err
 		}
 		return a.Store.Update(ctx, store.Tasks, p.Task, map[string]any{

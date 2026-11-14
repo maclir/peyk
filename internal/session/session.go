@@ -80,12 +80,24 @@ type Snapshot struct {
 	Prompt *Message `firestore:"prompt" json:"prompt,omitempty"`
 	// Cleared is true while the session's conversation is empty: just
 	// started, or just cleared with /clear.
-	Cleared   bool      `firestore:"cleared" json:"cleared"`
-	UpdatedAt time.Time `firestore:"updated_at" json:"updated_at"`
+	Cleared bool `firestore:"cleared" json:"cleared"`
+	// Prototypes are the pages the conversation published, newest first.
+	Prototypes []Prototype `firestore:"prototypes" json:"prototypes,omitempty"`
+	UpdatedAt  time.Time   `firestore:"updated_at" json:"updated_at"`
 	// Transcript is where the session's conversation is read from. It is
 	// the laptop's business and is not published.
 	Transcript Transcript `firestore:"-" json:"-"`
 }
+
+// Prototype is a page a session published with Claude Code's Artifact tool.
+type Prototype struct {
+	URL   string    `firestore:"url" json:"url"`
+	Title string    `firestore:"title" json:"title"`
+	At    time.Time `firestore:"at" json:"at"`
+}
+
+// MaxPrototypes bounds the pages a snapshot lists, newest kept.
+const MaxPrototypes = 10
 
 // SetExchange records the latest reply and prompt read from the transcript.
 // A conversation is known to be empty only when its own transcript, rather
