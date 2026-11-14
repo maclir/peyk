@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, currentTask, doneTasks, inboxGroups, laptopOnline, pushLabel, sortProjects, sortSessions } from "./board.js";
 import * as passkey from "./passkey.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
@@ -44,7 +44,7 @@ async function start(cfg) {
   const a = auth.getAuth(fb);
   const db = fs.getFirestore(fb);
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown" };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -240,16 +240,20 @@ async function start(cfg) {
 
     const { ready, waiting } = inboxGroups(state.tasks, state.projects);
     const now = Date.now();
-    const item = (t, why) =>
-      h("div", { class: "task" },
+    const item = (t, why) => {
+      if (state.editing === t.id) return editor(t, projects);
+      return h("div", { class: "task" },
         h("div", { class: "grow" },
           h("div", { class: "proj" }, `${t.project} · ${ago(t.created_at, now)}`),
           h("div", { class: "ttext" }, t.text),
           why ? h("div", { class: "meta" }, why) : null,
         ),
         why ? null : h("button", { type: "button", class: "primary", onclick: () => sendCommand("dispatch", { project: t.project, task: t.id, text: t.text }, `Send to ${t.project}`) }, "Send"),
-        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => fs.deleteDoc(fs.doc(db, "tasks", t.id)).catch((err) => alertLine(`Could not delete: ${err.message}`)) }, "×"),
+        h("button", { type: "button", class: "icon", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; render(); } }, "✎"),
+        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
       );
+    };
+    const finished = doneTasks(state.tasks);
     return h("div", { class: "inbox" },
       form,
       h("p", { class: "alert", id: "alert", role: "status" }),
@@ -257,6 +261,54 @@ async function start(cfg) {
       ready.length ? ready.map((t) => item(t)) : h("p", { class: "empty" }, "Nothing queued for a free project."),
       h("h2", { class: "group" }, "Waiting on its session"),
       waiting.length ? waiting.map((t) => item(t, t.why)) : h("p", { class: "empty" }, "Nothing waiting."),
+      finished.length ? h("h2", { class: "group" }, "Done") : null,
+      finished.map((t) =>
+        h("div", { class: "task done" },
+          h("div", { class: "grow" },
+            h("div", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),
+            h("div", { class: "ttext" }, t.text),
+          ),
+          h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, "×"),
+        ),
+      ),
+    );
+  }
+
+  function remove(t) {
+    fs.deleteDoc(fs.doc(db, "tasks", t.id)).catch((err) => alertLine(`Could not delete: ${err.message}`));
+  }
+
+  function editor(t, projects) {
+    // Snapshots re-render the editor; the chosen project survives in state.
+    const chosen = state.editProject ?? t.project;
+    const select = h("select", { "aria-label": "Project", onchange: (e) => { state.editProject = e.target.value; } },
+      projects.map((p) => {
+        const o = h("option", { value: p.name }, p.free ? p.name : `${p.name} (${p.busy})`);
+        if (p.name === chosen) o.selected = true;
+        return o;
+      }),
+    );
+    const text = h("textarea", { id: `edit-${t.id}`, rows: "3", "aria-label": "Task text" });
+    text.value = t.text;
+    const save = async (e) => {
+      e.preventDefault();
+      const value = text.value.trim();
+      if (!value) return;
+      try {
+        await fs.updateDoc(fs.doc(db, "tasks", t.id), { text: value, project: select.value });
+        state.editing = null;
+        state.editProject = undefined;
+        render();
+      } catch (err) {
+        alertLine(`Could not save: ${err.code === "permission-denied" ? "the task was already sent" : err.message}`);
+      }
+    };
+    return h("form", { class: "task editing", onsubmit: save },
+      h("div", { class: "grow" }, select, text),
+      h("div", { class: "btnrow" },
+        h("button", { type: "submit", class: "primary" }, "Save"),
+        h("button", { type: "button", onclick: () => { state.editing = null; state.editProject = undefined; render(); } }, "Cancel"),
+      ),
     );
   }
 
@@ -330,6 +382,7 @@ async function start(cfg) {
       out.push(
         h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
           h("div", { class: "top" }, h("span", { class: "name" }, s.title), chip(st)),
+          currentTask(state.tasks, s.id) ? h("p", { class: "curtask" }, `Task: ${oneLine(currentTask(state.tasks, s.id).text)}`) : null,
           s.message ? h("p", { class: "msg" }, oneLine(s.message.text)) : null,
           h("div", { class: "meta" },
             last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
@@ -347,6 +400,8 @@ async function start(cfg) {
     const st = STATES[s.state] || { label: s.state, tone: "idle" };
     const g = s.git;
     const rows = [["state", chip(st)], ["aoe", s.aoe_status], ["path", s.path]];
+    const task = currentTask(state.tasks, s.id);
+    if (task) rows.unshift(["task", `${task.text} (sent ${ago(task.dispatched_at, now)} ago)`]);
     if (g) {
       rows.push(["branch", g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached"]);
       if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);

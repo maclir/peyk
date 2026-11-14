@@ -16,7 +16,7 @@ func (a actions) Send(ctx context.Context, session, text string) error {
 	return a.aoe.Send(ctx, session, text)
 }
 
-func (a actions) Create(ctx context.Context, dir, title string) error {
+func (a actions) Create(ctx context.Context, dir, title string) (string, error) {
 	return a.aoe.Create(ctx, dir, title, a.group)
 }
 

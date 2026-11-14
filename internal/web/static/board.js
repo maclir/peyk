@@ -81,3 +81,18 @@ export function inboxGroups(tasks, projects) {
   }
   return { ready, waiting };
 }
+
+// The task a session is working on: the most recently dispatched one.
+export function currentTask(tasks, sessionId) {
+  return tasks
+    .filter((t) => t.status === "dispatched" && t.session_id === sessionId)
+    .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at))[0] || null;
+}
+
+// Finished tasks, newest first.
+export function doneTasks(tasks, limit = 10) {
+  return tasks
+    .filter((t) => t.status === "done")
+    .sort((a, b) => toDate(b.done_at) - toDate(a.done_at))
+    .slice(0, limit);
+}

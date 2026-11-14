@@ -29,9 +29,9 @@ func (f *fakeActions) Send(_ context.Context, s, text string) error {
 	f.calls = append(f.calls, "send "+s+": "+text)
 	return nil
 }
-func (f *fakeActions) Create(_ context.Context, dir, title string) error {
+func (f *fakeActions) Create(_ context.Context, dir, title string) (string, error) {
 	f.calls = append(f.calls, "create "+title+" in "+dir)
-	return nil
+	return "new-" + title, nil
 }
 func (f *fakeActions) Stop(_ context.Context, s string) error {
 	f.calls = append(f.calls, "stop "+s)
@@ -109,7 +109,7 @@ func TestExecuteCommands(t *testing.T) {
 		failure string
 	}{
 		{"dispatch to a free session", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json"}, "send k: Add --json", ""},
-		{"dispatch to a repository without a session", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login"}, "create sakku in /c/sakku|send sakku: Fix login", ""},
+		{"dispatch to a repository without a session", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login"}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
 		{"dispatch to a busy session", command.Payload{Type: command.Dispatch, Project: "hamta", Task: "t1", Text: "x"}, "", "hamta is not free: working"},
 		{"dispatch to a session with unpushed work", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x"}, "", "1 unpushed commit"},
 		{"dispatch to an unknown project", command.Payload{Type: command.Dispatch, Project: "nope", Task: "t1", Text: "x"}, "", "no project named nope"},
@@ -175,5 +175,38 @@ func TestRunExecutesIncomingCommands(t *testing.T) {
 	}
 	if strings.Join(acts.calls, "|") != "stop k" {
 		t.Fatalf("calls = %v", acts.calls)
+	}
+}
+
+func TestDispatchedTaskIsMarkedDoneWhenItsSessionFinishes(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	_ = mem.Put(ctx, store.Tasks, "t1", store.Task{Project: "knip", Text: "Add --json", Status: store.TaskQueued})
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1"); got["session_id"] != "k" {
+		t.Fatalf("task after dispatch = %v", got)
+	}
+	c := a.Collect.(*fakeCollector)
+	later := a.Now().Add(time.Hour)
+
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Working, Message: &session.Message{At: later}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1")["status"]; got != store.TaskDispatched {
+		t.Fatalf("working session finished the task: %v", got)
+	}
+
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Unpushed,
+		Message: &session.Message{At: later}, Git: &session.Git{Unpushed: 1, Last: &session.Commit{Hash: "3f2a1c4", At: later}}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := mem.Updated(store.Tasks, "t1")
+	if got["status"] != store.TaskDone || got["commit"] != "3f2a1c4" {
+		t.Fatalf("task = %v", got)
 	}
 }

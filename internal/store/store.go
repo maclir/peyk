@@ -59,11 +59,16 @@ type Task struct {
 	Status       string    `firestore:"status" json:"status"`
 	DispatchedAt time.Time `firestore:"dispatched_at,omitempty" json:"dispatched_at,omitempty"`
 	SessionID    string    `firestore:"session_id,omitempty" json:"session_id,omitempty"`
+	DoneAt       time.Time `firestore:"done_at,omitempty" json:"done_at,omitempty"`
+	// Commit is the session's last commit when the task finished, if it was
+	// made after the task was sent.
+	Commit string `firestore:"commit,omitempty" json:"commit,omitempty"`
 }
 
 const (
 	TaskQueued     = "queued"
 	TaskDispatched = "dispatched"
+	TaskDone       = "done"
 )
 
 type Store interface {
@@ -83,4 +88,9 @@ type Listener interface {
 	// Pairing waits for the phone to write the pairing with this code.
 	Pairing(ctx context.Context, code string) (Pairing, error)
 	Subscriptions(ctx context.Context) ([]notify.Subscription, error)
+}
+
+// TaskReader finds tasks the agent is waiting on.
+type TaskReader interface {
+	DispatchedTasks(ctx context.Context) (map[string]Task, error)
 }

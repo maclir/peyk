@@ -69,3 +69,32 @@ func TestProjectsFromSessionsAndRepositories(t *testing.T) {
 		}
 	}
 }
+
+func TestFinished(t *testing.T) {
+	sent := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	after, before := sent.Add(time.Minute), sent.Add(-time.Minute)
+	reply := func(at time.Time) *Message { return &Message{Text: "done", At: at} }
+	tests := []struct {
+		name   string
+		s      Snapshot
+		done   bool
+		commit string
+	}{
+		{"replied and committed", Snapshot{State: Unpushed, Message: reply(after), Git: &Git{Last: &Commit{Hash: "abc", At: after}}}, true, "abc"},
+		{"replied without committing", Snapshot{State: Idle, Message: reply(after), Git: &Git{Last: &Commit{Hash: "old", At: before}}}, true, ""},
+		{"stopped after replying", Snapshot{State: Stopped, Message: reply(after)}, true, ""},
+		{"still working", Snapshot{State: Working, Message: reply(after)}, false, ""},
+		{"asked a question", Snapshot{State: NeedsInput, Message: reply(after)}, false, ""},
+		{"left uncommitted work", Snapshot{State: Dirty, Message: reply(after)}, false, ""},
+		{"no reply since sending", Snapshot{State: Idle, Message: reply(before)}, false, ""},
+		{"no reply at all", Snapshot{State: Idle}, false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			done, commit := Finished(tt.s, sent)
+			if done != tt.done || commit != tt.commit {
+				t.Fatalf("Finished = %v %q, want %v %q", done, commit, tt.done, tt.commit)
+			}
+		})
+	}
+}

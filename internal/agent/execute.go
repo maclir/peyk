@@ -14,8 +14,8 @@ import (
 type Actions interface {
 	// Send delivers a prompt to a session, by id or title, starting it if stopped.
 	Send(ctx context.Context, session, text string) error
-	// Create adds a session for a repository that has none.
-	Create(ctx context.Context, dir, title string) error
+	// Create adds a session for a repository that has none and returns its id.
+	Create(ctx context.Context, dir, title string) (string, error)
 	Stop(ctx context.Context, session string) error
 	Push(ctx context.Context, dir string) error
 }
@@ -64,18 +64,18 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if !proj.Free {
 			return fmt.Errorf("%s is not free: %s", proj.Name, proj.Busy)
 		}
-		target := proj.SessionID
-		if target == "" {
-			if err := act.Create(ctx, proj.Path, proj.Name); err != nil {
+		id := proj.SessionID
+		if id == "" {
+			if id, err = act.Create(ctx, proj.Path, proj.Name); err != nil {
 				return err
 			}
-			target = proj.Name
 		}
-		if err := act.Send(ctx, target, p.Text); err != nil {
+		sentAt := a.Now()
+		if err := act.Send(ctx, id, p.Text); err != nil {
 			return err
 		}
 		return a.Store.Update(ctx, store.Tasks, p.Task, map[string]any{
-			"status": store.TaskDispatched, "dispatched_at": a.Now(), "session_id": proj.SessionID,
+			"status": store.TaskDispatched, "dispatched_at": sentAt, "session_id": id,
 		})
 	case command.Reply:
 		s, err := a.session(p.Session)

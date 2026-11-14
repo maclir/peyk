@@ -78,8 +78,15 @@ func (a Aoe) Stop(ctx context.Context, id string) error {
 	return err
 }
 
-// Create adds a stopped session for a directory; Send starts it.
-func (a Aoe) Create(ctx context.Context, dir, title, group string) error {
-	_, err := a.cmd(ctx, "add", dir, "-t", title, "-g", group)
-	return err
+// Create adds a stopped session for a directory and returns its id; Send
+// starts it.
+func (a Aoe) Create(ctx context.Context, dir, title, group string) (string, error) {
+	if _, err := a.cmd(ctx, "add", dir, "-t", title, "-g", group); err != nil {
+		return "", err
+	}
+	s, err := a.Show(ctx, title)
+	if err != nil {
+		return "", err
+	}
+	return s.ID, nil
 }

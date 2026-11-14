@@ -41,18 +41,28 @@ service cloud.firestore {
     }
 
     // A task names a project the laptop published. Only the agent marks it
-    // dispatched, so the phone can delete a task only while it is queued.
+    // dispatched or done. The phone edits a task's text or project while it is
+    // queued, and deletes it while queued or once done, never while a session
+    // is working on it.
+    function validTarget(data) {
+      return boundedString(data.project, 200)
+        && !data.project.matches('.*/.*')
+        && exists(/databases/$(database)/documents/projects/$(data.project))
+        && boundedString(data.text, 20000);
+    }
+
     match /tasks/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status'])
-        && boundedString(request.resource.data.project, 200)
-        && !request.resource.data.project.matches('.*/.*')
-        && exists(/databases/$(database)/documents/projects/$(request.resource.data.project))
-        && boundedString(request.resource.data.text, 20000)
+        && validTarget(request.resource.data)
         && request.resource.data.created_at == request.time
         && request.resource.data.status == 'queued';
-      allow delete: if isOwner() && resource.data.status == 'queued';
+      allow update: if isOwner()
+        && resource.data.status == 'queued'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text'])
+        && validTarget(request.resource.data);
+      allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
     }
 
     // The laptop checks every command's passkey signature against keys it

@@ -89,6 +89,22 @@ func (s *Firestore) Pairing(ctx context.Context, code string) (Pairing, error) {
 	}
 }
 
+func (s *Firestore) DispatchedTasks(ctx context.Context) (map[string]Task, error) {
+	docs, err := s.client.Collection(Tasks).Where("status", "==", TaskDispatched).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("list dispatched tasks: %w", err)
+	}
+	out := make(map[string]Task, len(docs))
+	for _, d := range docs {
+		var t Task
+		if err := d.DataTo(&t); err != nil {
+			return nil, fmt.Errorf("decode task %s: %w", d.Ref.ID, err)
+		}
+		out[d.Ref.ID] = t
+	}
+	return out, nil
+}
+
 func (s *Firestore) Subscriptions(ctx context.Context) ([]notify.Subscription, error) {
 	docs, err := s.client.Collection(Subscriptions).Documents(ctx).GetAll()
 	if err != nil {

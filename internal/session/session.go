@@ -155,3 +155,21 @@ func plural(n int, noun string) string {
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
 }
+
+// Finished says whether a session has finished work sent to it at sentAt: it
+// has replied since, and stopped working without anything needing you. It
+// returns the commit made for it, if any.
+func Finished(s Snapshot, sentAt time.Time) (bool, string) {
+	if s.Message == nil || !s.Message.At.After(sentAt) {
+		return false, ""
+	}
+	switch s.State {
+	case Idle, Unpushed, Stopped:
+	default:
+		return false, ""
+	}
+	if s.Git != nil && s.Git.Last != nil && s.Git.Last.At.After(sentAt) {
+		return true, s.Git.Last.Hash
+	}
+	return true, ""
+}

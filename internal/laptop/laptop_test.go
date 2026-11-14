@@ -151,7 +151,7 @@ func quote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
-func TestLastMessagePrefersLatestReplyAcrossTranscripts(t *testing.T) {
+func TestLastMessageUsesTheSessionsOwnTranscript(t *testing.T) {
 	claude := t.TempDir()
 	work := "/Users/me/code/knip"
 	now := time.Now()
@@ -168,7 +168,13 @@ func TestLastMessagePrefersLatestReplyAcrossTranscripts(t *testing.T) {
 	// Started by /clear: newest file, no reply yet.
 	writeTranscript(t, claude, work, "cleared", now, `{"type":"system"}`)
 
-	m := LastMessage(claude, work, "old")
+	if m := LastMessage(claude, work, "old"); m == nil || m.Text != "Old reply" {
+		t.Fatalf("a session's own transcript wins even when another is newer: %+v", m)
+	}
+	if m := LastMessage(claude, work, "cleared"); m != nil {
+		t.Fatalf("a session just cleared has no reply yet: %+v", m)
+	}
+	m := LastMessage(claude, work, "")
 	if m == nil {
 		t.Fatal("no message")
 	}

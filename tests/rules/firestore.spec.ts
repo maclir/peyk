@@ -24,6 +24,8 @@ beforeEach(async () => {
     await setDoc(doc(db, 'projects/knip'), { name: 'knip', free: true });
     await setDoc(doc(db, 'tasks/queued'), { project: 'knip', text: 'x', status: 'queued' });
     await setDoc(doc(db, 'tasks/sent'), { project: 'knip', text: 'y', status: 'dispatched' });
+    await setDoc(doc(db, 'tasks/finished'), { project: 'knip', text: 'z', status: 'done' });
+    await setDoc(doc(db, 'projects/hamta'), { name: 'hamta', free: false });
   });
 });
 
@@ -91,10 +93,21 @@ describe('tasks', () => {
     await assertFails(addDoc(tasks, task({ session_id: 'k' })));
   });
 
-  it('the owner deletes only queued tasks and edits none', async () => {
+  it('the owner deletes queued and done tasks, not ones being worked on', async () => {
     await assertSucceeds(deleteDoc(doc(owner(), 'tasks/queued')));
+    await assertSucceeds(deleteDoc(doc(owner(), 'tasks/finished')));
     await assertFails(deleteDoc(doc(owner(), 'tasks/sent')));
-    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { status: 'queued' }));
+  });
+
+  it('the owner edits a queued task\'s text and project only', async () => {
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { text: 'edited' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { project: 'hamta' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { project: 'unknown' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { text: '' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { status: 'dispatched' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { text: 'too late' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/finished'), { status: 'queued' }));
+    await assertFails(updateDoc(doc(stranger(), 'tasks/queued'), { text: 'x' }));
   });
 
   it('nobody else reads or adds tasks', async () => {

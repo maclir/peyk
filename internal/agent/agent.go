@@ -93,11 +93,45 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if err := a.sync(ctx, store.Projects, projects); err != nil {
 		return err
 	}
+	if err := a.finishTasks(ctx); err != nil {
+		return err
+	}
 	if a.Notify == nil || prev == nil {
 		return nil
 	}
 	if notes := notify.Changes(prev, a.sessions); len(notes) > 0 {
 		return a.Notify.Notify(ctx, notes)
+	}
+	return nil
+}
+
+// finishTasks marks dispatched tasks done once their session has finished
+// them. Tasks whose session is gone stay dispatched; deleting them is yours.
+func (a *Agent) finishTasks(ctx context.Context) error {
+	tr, ok := a.Store.(store.TaskReader)
+	if !ok {
+		return nil
+	}
+	tasks, err := tr.DispatchedTasks(ctx)
+	if err != nil {
+		return err
+	}
+	for id, t := range tasks {
+		s, ok := a.sessions[t.SessionID]
+		if !ok {
+			continue
+		}
+		done, commit := session.Finished(s, t.DispatchedAt)
+		if !done {
+			continue
+		}
+		fields := map[string]any{"status": store.TaskDone, "done_at": a.Now()}
+		if commit != "" {
+			fields["commit"] = commit
+		}
+		if err := a.Store.Update(ctx, store.Tasks, id, fields); err != nil {
+			return err
+		}
 	}
 	return nil
 }

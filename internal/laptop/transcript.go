@@ -26,22 +26,22 @@ func TranscriptDir(claudeDir, workdir string) string {
 	return filepath.Join(claudeDir, "projects", unsafePathChars.ReplaceAllString(workdir, "-"))
 }
 
-// recentTranscripts is how many of a directory's newest transcripts are read.
-// After /clear Claude Code starts a new transcript that aoe may not know yet,
-// and the transcript just started holds no reply yet, so the newest one alone
-// is not enough.
+// recentTranscripts is how many of a directory's newest transcripts are read
+// for a session whose own transcript aoe has not recorded.
 const recentTranscripts = 3
 
-// LastMessage returns the latest text reply among the session's own transcript
-// and the newest transcripts of its working directory.
+// LastMessage returns the agent's latest text reply. A session's own
+// transcript is authoritative: two sessions can share a directory, and a
+// transcript just started by /clear rightly has no reply yet. Only without a
+// recorded transcript does it fall back to the directory's newest ones.
 func LastMessage(claudeDir, workdir, agentSessionID string) *session.Message {
 	dir := TranscriptDir(claudeDir, workdir)
+	if agentSessionID != "" {
+		return lastInFile(filepath.Join(dir, agentSessionID+".jsonl"))
+	}
 	candidates := newestFirst(dir)
 	if len(candidates) > recentTranscripts {
 		candidates = candidates[:recentTranscripts]
-	}
-	if agentSessionID != "" {
-		candidates = append(candidates, filepath.Join(dir, agentSessionID+".jsonl"))
 	}
 	var best *session.Message
 	for _, path := range candidates {

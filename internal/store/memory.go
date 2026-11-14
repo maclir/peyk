@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/maclir/peyk/internal/notify"
 )
@@ -151,5 +152,29 @@ func (m *Memory) Subscriptions(context.Context) ([]notify.Subscription, error) {
 		out = append(out, sub)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// DispatchedTasks applies Update's changes to stored tasks, as Firestore would.
+func (m *Memory) DispatchedTasks(context.Context) (map[string]Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]Task{}
+	for id, v := range m.docs[Tasks] {
+		t := v.(Task)
+		u := m.updates[Tasks][id]
+		if st, ok := u["status"].(string); ok {
+			t.Status = st
+		}
+		if at, ok := u["dispatched_at"].(time.Time); ok {
+			t.DispatchedAt = at
+		}
+		if sid, ok := u["session_id"].(string); ok {
+			t.SessionID = sid
+		}
+		if t.Status == TaskDispatched {
+			out[id] = t
+		}
+	}
 	return out, nil
 }
