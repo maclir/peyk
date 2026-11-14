@@ -193,7 +193,7 @@ async function start(cfg) {
     const s = id && state.sessions.get(id);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
-      h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(state.sessions.size))),
+      h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(activeCount()))),
       h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", queuedCount() ? h("span", { class: "n" }, String(queuedCount())) : null),
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
@@ -334,6 +334,10 @@ async function start(cfg) {
       h("h2", {}, "Pair this device"),
       h("p", {}, "Commands to the laptop are signed with a passkey on this device. Create one, then confirm its fingerprint on the laptop."),
       button, out);
+  }
+
+  function activeCount() {
+    return [...state.sessions.values()].filter((s) => s.aoe_status !== "stopped").length;
   }
 
   function queuedCount() {

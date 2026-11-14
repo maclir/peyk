@@ -147,6 +147,12 @@ test.describe('signed in', () => {
   test('the board groups sessions and shows what each is doing', async () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
+    const workersTab = page.getByRole('link', { name: /^Workers/ });
+    await expect(workersTab).toHaveText('Workers2');
+    await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'stopped', state: 'idle', updated_at: new Date() });
+    await expect(page.locator('.card', { hasText: 'zzz' })).toBeVisible();
+    await expect(workersTab).toHaveText('Workers2');
+    await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
     const hamta = page.locator('.card', { hasText: 'hamta' });
     await expect(hamta.getByText('needs input')).toBeVisible();
     await expect(hamta.getByText('Task: Add CSV export')).toBeVisible();
