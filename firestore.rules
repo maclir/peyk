@@ -109,14 +109,22 @@ service cloud.firestore {
     match /commands/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
-        && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'status', 'created_at'])
+        && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'grant', 'status', 'created_at'])
         && request.resource.data.type in ['dispatch', 'reply', 'clear', 'stop', 'push']
         && boundedString(request.resource.data.payload, 30000)
         && request.resource.data.status == 'pending'
         && request.resource.data.created_at == request.time
-        && (!('assertion' in request.resource.data)
-          || (request.resource.data.assertion is map
-            && request.resource.data.assertion.keys().hasOnly(['credential_id', 'authenticator_data', 'client_data_json', 'signature'])));
+        && (!('assertion' in request.resource.data) || isAssertion(request.resource.data.assertion))
+        && (!('grant' in request.resource.data)
+          || (request.resource.data.grant is map
+            && request.resource.data.grant.keys().hasOnly(['statement', 'assertion', 'signature'])
+            && boundedString(request.resource.data.grant.statement, 1024)
+            && boundedString(request.resource.data.grant.signature, 256)
+            && isAssertion(request.resource.data.grant.assertion)));
+    }
+
+    function isAssertion(a) {
+      return a is map && a.keys().hasOnly(['credential_id', 'authenticator_data', 'client_data_json', 'signature']);
     }
 
     // A new passkey's public half, under the one-time code `peyk pair`

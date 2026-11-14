@@ -217,3 +217,18 @@ button.step { width: 40px; height: 40px; background: var(--paper); color: var(--
 
 .fp { display: block; font: 700 1.4rem var(--mono); letter-spacing: 0.08em; margin-top: 8px; color: var(--ink); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Progress: a spinner in whatever is waiting on the network or the laptop. */
+.spin { display: inline-block; flex: none; width: 0.9em; height: 0.9em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -0.12em; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
+button.busy { cursor: progress; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+button.busy:disabled { opacity: 0.75; }
+button.busy .ico { display: none; }
+.status .spin { margin-right: 6px; }
+.status .spin, .tfoot > .spin { color: var(--accent); }
+.when.saving { display: inline-flex; align-items: center; gap: 4px; }
+.notice.loading { display: flex; align-items: center; gap: 8px; }
+#notice::before { content: ""; display: inline-block; width: 0.9em; height: 0.9em; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -0.12em; }
+.thumb.loading { background: linear-gradient(90deg, var(--paper), var(--line), var(--paper)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }

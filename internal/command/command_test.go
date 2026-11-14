@@ -217,3 +217,90 @@ func TestFingerprintMatchesThePhone(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+type session struct {
+	priv  *ecdsa.PrivateKey
+	grant Grant
+}
+
+// newSession does what the phone does once per grant: make a key and have
+// the passkey sign a statement naming it.
+func newSession(t *testing.T, s signer, st GrantStatement) session {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Kind == "" {
+		st.Kind = GrantKind
+	}
+	if st.Key == "" {
+		der, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+		st.Key = base64.StdEncoding.EncodeToString(der)
+	}
+	if st.Expires == 0 {
+		st.Expires = now.Add(MaxGrant - time.Minute).UnixMilli()
+	}
+	b, _ := json.Marshal(st)
+	return session{priv: priv, grant: Grant{Statement: string(b), Assertion: s.assert(string(b), assertionOpts{})}}
+}
+
+// sign produces WebCrypto's raw r||s signature.
+func (ss session) sign(payload string) Grant {
+	d := sha256.Sum256([]byte(payload))
+	r, s, _ := ecdsa.Sign(rand.Reader, ss.priv, d[:])
+	sig := make([]byte, 64)
+	r.FillBytes(sig[:32])
+	s.FillBytes(sig[32:])
+	g := ss.grant
+	g.Signature = b64.EncodeToString(sig)
+	return g
+}
+
+func TestCheckAcceptsASessionSignature(t *testing.T) {
+	s := ecSigner(t, "pixel")
+	ss := newSession(t, s, GrantStatement{})
+	for _, id := range []string{"c1", "c2"} {
+		p := payload(id, Dispatch, now.Add(time.Minute))
+		if _, err := Check(id, Command{Type: Dispatch, Payload: p, Grant: ptr(ss.sign(p))}, []Key{s.key}, origin, rpID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCheckRejectsBadSessions(t *testing.T) {
+	s := ecSigner(t, "pixel")
+	other := ecSigner(t, "stranger")
+	good := payload("c1", Dispatch, now.Add(time.Minute))
+	tampered := strings.Replace(good, "Add --json output", "rm -rf ~", 1)
+	ss := newSession(t, s, GrantStatement{})
+	swapped := ss.sign(good)
+	swapped.Statement = newSession(t, s, GrantStatement{}).grant.Statement
+	rsaDER := func() string {
+		priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+		der, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+		return base64.StdEncoding.EncodeToString(der)
+	}()
+	tests := []struct {
+		name  string
+		grant Grant
+		want  string
+	}{
+		{"payload changed after signing", ss.sign(tampered), "bad session signature"},
+		{"granted by an unpaired passkey", newSession(t, other, GrantStatement{}).sign(good), "not paired"},
+		{"statement swapped after the passkey signed", swapped, "not over this payload"},
+		{"expired", newSession(t, s, GrantStatement{Expires: now.Add(-time.Second).UnixMilli()}).sign(good), "expired"},
+		{"too long", newSession(t, s, GrantStatement{Expires: now.Add(MaxGrant + time.Minute).UnixMilli()}).sign(good), "too long"},
+		{"another kind of statement", newSession(t, s, GrantStatement{Kind: "other"}).sign(good), "not a session"},
+		{"not a P-256 key", newSession(t, s, GrantStatement{Key: rsaDER}).sign(good), "not P-256"},
+		{"command payload signed by the passkey as a statement", Grant{Statement: good, Assertion: s.assert(good, assertionOpts{}), Signature: ss.sign(good).Signature}, "not a session"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Check("c1", Command{Type: Dispatch, Payload: good, Grant: &tt.grant}, []Key{s.key}, origin, rpID, now)
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.HasPrefix(err.Error(), grantRefused) {
+				t.Fatalf("err = %v, want it to start %q and mention %q", err, grantRefused, tt.want)
+			}
+		})
+	}
+}

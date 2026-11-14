@@ -190,6 +190,8 @@ describe('commands', () => {
     const { assertion, ...push } = cmd({ type: 'push' });
     await assertSucceeds(setDoc(doc(owner(), 'commands/c2'), push));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c3'), cmd({ type: 'clear' })));
+    const { assertion: a, ...bare } = cmd();
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c4'), { ...bare, grant: { statement: '{}', assertion: a, signature: 'e' } }));
     await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));
   });
 
@@ -206,6 +208,11 @@ describe('commands', () => {
     await assertFails(setDoc(doc(owner(), 'commands/x3'), cmd({ extra: 1 })));
     await assertFails(setDoc(doc(owner(), 'commands/x4'), cmd({ payload: '' })));
     await assertFails(setDoc(doc(owner(), 'commands/x5'), cmd({ assertion: { other: 1 } })));
+    const grant = { statement: '{}', assertion: cmd().assertion, signature: 'e' };
+    await assertFails(setDoc(doc(owner(), 'commands/x6'), cmd({ grant: { ...grant, extra: 1 } })));
+    await assertFails(setDoc(doc(owner(), 'commands/x7'), cmd({ grant: { ...grant, assertion: { other: 1 } } })));
+    await assertFails(setDoc(doc(owner(), 'commands/x8'), cmd({ grant: { ...grant, statement: 'x'.repeat(1025) } })));
+    await assertFails(setDoc(doc(owner(), 'commands/x9'), cmd({ grant: 'x' })));
   });
 
   it('nobody else creates or reads commands', async () => {

@@ -25,6 +25,8 @@ const h = (tag, attrs = {}, ...children) => {
   return el;
 };
 
+const spinner = () => h("span", { class: "spin", "aria-hidden": "true" });
+
 function notice(text, ...extra) {
   app.replaceChildren(h("p", { class: "notice" }, text), ...extra);
 }
@@ -51,7 +53,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), attaching: [], images: new Map(),
     filter: "all", only: null, arranging: false, menu: null, picking: false, pickQuery: "" };
   let unsubscribe = [];
 
@@ -65,14 +67,19 @@ async function start(cfg) {
     unsubscribe = [
       fs.onSnapshot(fs.collection(db, "sessions"), (snap) => {
         state.sessions = new Map(snap.docs.map((d) => [d.id, d.data()]));
+        state.loaded.add("sessions");
         render();
       }, failed),
       fs.onSnapshot(fs.collection(db, "projects"), (snap) => {
         state.projects = snap.docs.map((d) => d.data());
+        state.loaded.add("projects");
         render();
       }, failed),
-      fs.onSnapshot(fs.collection(db, "tasks"), (snap) => {
-        state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Metadata changes report when the server confirms a write, which
+      // ends a task's saving mark.
+      fs.onSnapshot(fs.collection(db, "tasks"), { includeMetadataChanges: true }, (snap) => {
+        state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data(), saving: d.metadata.hasPendingWrites }));
+        state.loaded.add("tasks");
         render();
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "status"), (snap) => {
@@ -166,7 +173,7 @@ async function start(cfg) {
       h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(state.sessions.size))),
       h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", queuedCount() ? h("span", { class: "n" }, String(queuedCount())) : null),
     );
-    const status = h("p", { class: "status", id: "status", role: "status" }, state.status);
+    const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
     else if (s) app.replaceChildren(tabs, status, detail(s));
     else if (view === "inbox") app.replaceChildren(tabs, status, inbox());
@@ -177,38 +184,80 @@ async function start(cfg) {
     if (focused) document.getElementById(focused)?.focus();
   }
 
-  function setStatus(text) {
+  function setStatus(text, busy = false) {
     state.status = text;
-    const el = document.getElementById("status");
-    if (el) el.textContent = text;
+    state.statusBusy = busy;
+    document.getElementById("status")?.replaceChildren(...(busy ? [spinner()] : []), text);
   }
 
-  // sendCommand signs the payload with the paired passkey (push needs none),
-  // stores it, and reports what the laptop made of it through report.
-  async function sendCommand(type, fields, label, report = setStatus) {
+  // track marks key busy while work runs; buttons drawn with busyButton show
+  // it, since a snapshot may redraw them meanwhile.
+  async function track(key, work) {
+    state.busy.add(key);
+    render();
+    try {
+      return await work();
+    } finally {
+      state.busy.delete(key);
+      render();
+    }
+  }
+
+  function busyButton(key, attrs, ...children) {
+    if (!state.busy.has(key)) return h("button", attrs, ...children);
+    return h("button", { ...attrs, class: `${attrs.class ?? ""} busy`, disabled: "", "aria-busy": "true" }, spinner(), ...children);
+  }
+
+  // sendCommand signs the payload with this device's session key (push needs
+  // none), stores it, and reports each step and what the laptop made of it
+  // through report. key stays busy until the laptop answers, so the same
+  // action cannot be sent twice meanwhile. Resolves once the command is
+  // stored, to whether it was.
+  async function sendCommand(type, fields, label, key, report = setStatus) {
+    if (state.busy.has(key)) return false;
     if (!laptopOnline(state.laptop, Date.now())) {
       report(`${label}: the laptop is offline, so nothing was sent.`);
       return false;
     }
+    state.busy.add(key);
+    const finish = (text) => {
+      state.busy.delete(key);
+      report(text, false);
+      render();
+    };
     const ref = fs.doc(fs.collection(db, "commands"));
     const payload = JSON.stringify({ id: ref.id, type, ...fields, expires: Date.now() + 60_000 });
     const data = { type, payload, status: "pending", created_at: fs.serverTimestamp() };
+    report(`${label}: signing…`, true);
+    render();
     try {
-      if (type !== "push") data.assertion = await passkey.sign(payload);
+      if (type !== "push") data.grant = await passkey.signCommand(payload, () => report(`${label}: approve with your passkey…`, true));
+      report(`${label}: sending…`, true);
       await fs.setDoc(ref, data);
     } catch (err) {
-      report(err.name === "NotAllowedError"
+      finish(err.name === "NotAllowedError"
         ? `${label}: not sent. The passkey prompt was cancelled, or this device has no paired passkey (run make pair on the laptop).`
         : `${label}: not sent. ${err.message}`);
       return false;
     }
-    report(`${label}: waiting for the laptop…`);
+    report(`${label}: waiting for the laptop…`, true);
+    // The payload expires after a minute, so a laptop that has not answered
+    // by then will refuse it.
+    const timer = setTimeout(() => {
+      unsub();
+      finish(`${label}: the laptop did not answer.`);
+    }, 75_000);
     const unsub = fs.onSnapshot(ref, (snap) => {
       const c = snap.data();
       if (!c || c.status === "pending") return;
+      clearTimeout(timer);
       unsub();
-      report(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
-    }, (err) => report(`${label}: cannot follow the result: ${err.message}`));
+      if (c.status === "failed" && String(c.error).startsWith("session approval:")) passkey.forgetGrant();
+      finish(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
+    }, (err) => {
+      clearTimeout(timer);
+      finish(`${label}: cannot follow the result: ${err.message}`);
+    });
     return true;
   }
 
@@ -217,6 +266,8 @@ async function start(cfg) {
     const button = h("button", { class: "primary", type: "button" }, "Create passkey");
     button.addEventListener("click", async () => {
       button.disabled = true;
+      button.classList.add("busy");
+      button.replaceChildren(spinner(), "Creating passkey…");
       try {
         const key = await passkey.createPasskey(state.user);
         await fs.setDoc(fs.doc(db, "pairings", code), { ...key, created_at: fs.serverTimestamp() });
@@ -225,6 +276,9 @@ async function start(cfg) {
       } catch (err) {
         button.disabled = false;
         out.textContent = `Pairing failed: ${err.message}`;
+      } finally {
+        button.classList.remove("busy");
+        button.replaceChildren("Create passkey");
       }
     });
     return h("article", { class: "detail" },
@@ -282,7 +336,7 @@ async function start(cfg) {
           onclick: () => { state.only = state.only === n ? null : n; render(); } }, face(projectNamed(n), n, "md"))))
       : null;
 
-    const items = list.length
+    const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
       ? list.map((t, i) => (state.editing === t.id ? editor(t, projects) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
       : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
     const finished = doneTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
@@ -310,13 +364,13 @@ async function start(cfg) {
   // A send's outcome stays on its task, which may have moved since, rather
   // than in a status line scrolled out of view.
   function send(t, clear) {
-    const report = (text) => {
-      state.sends.set(t.id, text);
+    const report = (text, busy = false) => {
+      state.sends.set(t.id, { text, busy });
       render();
     };
     state.menu = null;
     sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}) },
-      clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, report);
+      clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, `send:${t.id}`, report);
   }
 
   // A worker with a conversation is cleared first, so a task starts on its own
@@ -333,7 +387,7 @@ async function start(cfg) {
     const open = state.menu === t.id;
     const sent = state.sends.get(t.id);
     const status = sent
-      ? h("span", { class: "tstatus", role: "status" }, sent)
+      ? h("span", { class: "tstatus", role: "status" }, sent.text)
       : h("span", { class: "tstatus" }, t.ready
         ? (projectNamed(t.project)?.session_id ? (clears ? "Free · clears the conversation first" : "Free") : "Starts a new worker")
         : `Waiting · ${t.why}`);
@@ -341,22 +395,22 @@ async function start(cfg) {
       h("div", { class: "thead" },
         face(projectNamed(t.project), t.project, "sm"),
         h("span", { class: "proj" }, t.project),
-        h("span", { class: "when" }, ago(t.created_at, now)),
+        t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         h("span", { class: "grow" }),
         h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
           onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more"))),
       h("div", { class: "ttext" }, t.text),
       taskImages(t),
       open ? h("div", { class: "menu" },
-        clears ? h("button", { type: "button", onclick: () => send(t, false) }, "Send without clearing") : null,
+        clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => send(t, false) }, "Send without clearing") : null,
         h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
         h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => { state.editing = t.id; state.editProject = undefined; state.menu = null; render(); } }, "Edit"),
         h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
       ) : null,
       h("div", { class: "tfoot" },
-        h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
+        sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
-        t.ready ? h("button", { type: "button", class: "primary send", onclick: () => send(t, clears) }, "Send", icon("arrow")) : null,
+        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => send(t, clears) }, "Send", icon("arrow")) : null,
       ),
     );
   }
@@ -392,9 +446,8 @@ async function start(cfg) {
       const attaching = state.attaching;
       text.value = "";
       state.attaching = [];
-      render();
       try {
-        await addTask(state.picked, value, attaching);
+        await track("add", () => addTask(state.picked, value, attaching));
       } catch (err) {
         const box = document.getElementById("task-text");
         if (box && !box.value) box.value = value;
@@ -417,7 +470,7 @@ async function start(cfg) {
           state.picked ? face(p, state.picked, "xs") : null, h("span", {}, state.picked ?? "No project"), icon("chevron")),
         h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: state.attaching.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
         h("span", { class: "grow" }),
-        h("button", { type: "submit", class: "round go", "aria-label": "Add task" }, icon("up")),
+        busyButton("add", { type: "submit", class: "round go", "aria-label": "Add task" }, icon("up")),
       ),
       files,
     );
@@ -523,7 +576,7 @@ async function start(cfg) {
     return h("div", { class: "thumbs" }, t.images.map((id, i) => {
       const url = state.images.get(id);
       if (url === undefined) loadImage(id);
-      if (!url) return h("span", { class: "thumb empty", title: url === null ? "Image is gone" : "Loading…" });
+      if (!url) return h("span", { class: `thumb empty${url === null ? "" : " loading"}`, title: url === null ? "Image is gone" : "Loading…" });
       const img = h("img", { src: url, alt: `Image ${i + 1} of task` });
       return h("button", { type: "button", class: "thumb", "aria-label": `Enlarge image ${i + 1}`, onclick: (e) => e.currentTarget.classList.toggle("big") }, img);
     }));
@@ -558,7 +611,7 @@ async function start(cfg) {
       const value = text.value.trim();
       if (!value) return;
       try {
-        await fs.updateDoc(fs.doc(db, "tasks", t.id), { text: value, project: select.value });
+        await track(`edit:${t.id}`, () => fs.updateDoc(fs.doc(db, "tasks", t.id), { text: value, project: select.value }));
         state.editing = null;
         state.editProject = undefined;
         render();
@@ -569,7 +622,7 @@ async function start(cfg) {
     return h("form", { class: "task editing", onsubmit: save },
       h("div", { class: "grow" }, select, text),
       h("div", { class: "btnrow" },
-        h("button", { type: "submit", class: "primary" }, "Save"),
+        busyButton(`edit:${t.id}`, { type: "submit", class: "primary" }, "Save"),
         h("button", { type: "button", onclick: () => { state.editing = null; state.editProject = undefined; render(); } }, "Cancel"),
       ),
     );
@@ -630,8 +683,9 @@ async function start(cfg) {
     const now = Date.now();
     const list = sortSessions([...state.sessions.values()]);
     const pushRow = state.push === "off"
-      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), h("button", { type: "button", onclick: turnOnPush }, "Turn on notifications"))
+      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), busyButton("notify", { type: "button", onclick: () => track("notify", turnOnPush) }, "Turn on notifications"))
       : null;
+    if (!state.loaded.has("sessions")) return loading("Loading workers…");
     if (!list.length) return h("div", {}, pushRow, h("p", { class: "notice" }, "No workers published yet. Start the agent on the laptop with make serve."));
     const out = [pushRow];
     let group = "";
@@ -685,8 +739,8 @@ async function start(cfg) {
         h("div", { class: "dtitle" },
           h("h2", {}, s.title, flagRow(s)),
           h("span", { class: "branch" }, g ? (g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached") : "no repository")),
-        s.cleared || busy ? null : h("button", { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`) }, icon("trash")),
-        s.aoe_status !== "stopped" ? h("button", { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`) }, icon("stop")) : null,
+        s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
+        s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
@@ -710,7 +764,7 @@ async function start(cfg) {
       h("div", { class: "phead" },
         h("h3", {}, `Unpushed commits · ${g.unpushed}`),
         h("span", { class: "grow" }),
-        h("button", { type: "button", class: "primary ok", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`) }, `Push ${g.unpushed}`)),
+        busyButton(`push:${s.id}`, { type: "button", class: "primary ok", onclick: () => sendCommand("push", { session: s.id }, `Push ${s.title}`, `push:${s.id}`) }, `Push ${g.unpushed}`)),
       g.pending?.length ? h("ul", { class: "pending" },
         g.pending.map((c) => h("li", {}, h("code", {}, c.hash), ` ${c.subject}`, h("span", { class: "when" }, ago(c.at, now)))),
         more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,
@@ -723,10 +777,14 @@ async function start(cfg) {
     const reply = async (e) => {
       e.preventDefault();
       const v = text.value.trim();
-      if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`))) text.value = "";
+      // A redraw while sending replaces this textarea, so clear the one on screen.
+      if (v && (await sendCommand("reply", { session: s.id, text: v }, `Reply to ${s.title}`, `reply:${s.id}`))) {
+        const box = document.getElementById(`reply-${s.id}`);
+        if (box) box.value = "";
+      }
     };
     return h("form", { class: "composer inline", onsubmit: reply },
-      text, h("button", { type: "submit", class: "round go", "aria-label": "Send reply" }, icon("up")));
+      text, busyButton(`reply:${s.id}`, { type: "submit", class: "round go", "aria-label": "Send reply" }, icon("up")));
   }
 }
 
@@ -737,6 +795,10 @@ function prototypes(list, now) {
       h("span", { class: "when" }, ago(p.at, now)),
     )),
   );
+}
+
+function loading(text) {
+  return h("p", { class: "notice loading", role: "status" }, spinner(), text);
 }
 
 function flagRow(s) {

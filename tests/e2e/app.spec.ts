@@ -70,16 +70,23 @@ async function makeOwner(page: Page) {
 }
 
 // Passkeys need a real domain, and the test server is reached by IP, so the
-// browser's assertion is stubbed; Go tests verify real signatures.
+// browser's assertion is stubbed; Go tests verify real signatures. The stub
+// counts its prompts in window.prompts.
 async function passkeyOn(page: Page) {
   await page.evaluate(() => {
     const bytes = () => new Uint8Array([1, 2, 3]).buffer;
+    (window as any).prompts = 0;
     Object.defineProperty(navigator.credentials, 'get', {
       configurable: true,
-      value: async () => ({ rawId: bytes(), response: { authenticatorData: bytes(), clientDataJSON: bytes(), signature: bytes() } }),
+      value: async () => {
+        (window as any).prompts++;
+        return { rawId: bytes(), response: { authenticatorData: bytes(), clientDataJSON: bytes(), signature: bytes() } };
+      },
     });
   });
 }
+
+const prompts = (page: Page) => page.evaluate(() => (window as any).prompts as number);
 
 async function seed(page: Page) {
   const now = new Date();
@@ -202,9 +209,26 @@ test.describe('signed in', () => {
     await expect(task).toContainText('Free · clears the conversation first');
     await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
+    await expect(task.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-busy', 'true');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'ctx', clear: true });
+    expect(cmd.fields.assertion).toBeUndefined();
+    expect(Object.keys(cmd.fields.grant.mapValue.fields).sort()).toEqual(['assertion', 'signature', 'statement']);
+    expect(JSON.parse(cmd.fields.grant.mapValue.fields.statement.stringValue)).toMatchObject({ kind: 'peyk-session' });
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(task.getByRole('status')).toHaveText('Clear knip and send: done.');
+    await expect(task.getByRole('button', { name: 'Send', exact: true })).not.toHaveAttribute('aria-busy', 'true');
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+
+    // The approval outlives a reload, so the next send asks for no passkey.
+    await page.reload();
+    await passkeyOn(page);
+    await task.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
+    expect(await prompts(page)).toBe(0);
+    const again = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(again.fields.grant.mapValue.fields.statement.stringValue).toBe(cmd.fields.grant.mapValue.fields.statement.stringValue);
+    await page.request.delete(`${FIRESTORE}/${again.name.split('/documents/')[1]}`, { headers: admin });
 
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
     await task.getByRole('button', { name: /More actions/ }).click();

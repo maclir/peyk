@@ -1,5 +1,5 @@
-// Passkeys sign commands; the laptop verifies them against keys it was given
-// at pairing. The challenge is SHA-256 of the exact payload string stored with
+// Passkeys sign commands, directly or by approving a session key; the laptop
+// verifies them against keys it was given at pairing. The challenge is SHA-256 of the exact payload string stored with
 // the command, so the signature covers what the laptop will act on.
 
 export const b64url = (buf) =>
@@ -33,6 +33,69 @@ export async function createPasskey(user) {
   const res = cred.response;
   if (typeof res.getPublicKey !== "function") throw new Error("This browser cannot export the passkey's public key.");
   return { credential_id: b64url(cred.rawId), public_key: b64(res.getPublicKey()), alg: res.getPublicKeyAlgorithm() };
+}
+
+// One passkey approval lasts this long; the laptop refuses longer (MaxGrant).
+const GRANT_MS = 12 * 60 * 60 * 1000;
+// A grant this close to expiry is renewed first, so a command signed with it
+// cannot reach the laptop after it ran out.
+const GRANT_MARGIN_MS = 5 * 60 * 1000;
+
+let grant = null;
+let granting = null;
+
+// signCommand signs a payload with this browser's session key, asking the
+// passkey to approve a new session key when there is none or it is about to
+// run out. The private key is generated non-extractable and kept in
+// IndexedDB, so a reload keeps the session without the key leaving WebCrypto.
+// onApprove runs before the passkey prompt, when there is one. Concurrent
+// commands share one prompt.
+export async function signCommand(payload, onApprove = () => {}) {
+  grant ??= await loadGrant();
+  if (!grant || grant.expires - Date.now() < GRANT_MARGIN_MS) {
+    onApprove();
+    if (!granting) {
+      granting = newGrant().finally(() => { granting = null; });
+    }
+    grant = await granting;
+  }
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, grant.privateKey, new TextEncoder().encode(payload));
+  return { statement: grant.statement, assertion: grant.assertion, signature: b64url(sig) };
+}
+
+// forgetGrant drops a grant the laptop refused, so the next command asks the
+// passkey again.
+export async function forgetGrant() {
+  grant = null;
+  await withStore("readwrite", (s) => s.delete("current")).catch(() => {});
+}
+
+async function newGrant() {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const expires = Date.now() + GRANT_MS;
+  const key = b64(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const statement = JSON.stringify({ kind: "peyk-session", key, expires });
+  const g = { privateKey: pair.privateKey, statement, assertion: await sign(statement), expires };
+  await withStore("readwrite", (s) => s.put(g, "current")).catch(() => {});
+  return g;
+}
+
+async function loadGrant() {
+  return (await withStore("readonly", (s) => s.get("current")).catch(() => null)) ?? null;
+}
+
+function withStore(mode, op) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("peyk", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("grant");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const req = op(db.transaction("grant", mode).objectStore("grant"));
+      req.onsuccess = () => { db.close(); resolve(req.result); };
+      req.onerror = () => { db.close(); reject(req.error); };
+    };
+  });
 }
 
 export async function sign(payload) {

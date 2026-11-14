@@ -1,5 +1,5 @@
 // Package command defines what the phone asks the laptop to do and checks
-// that the phone's passkey signed it.
+// that the phone's passkey signed it, directly or through a Grant.
 //
 // The phone signs the exact payload string it stores: the WebAuthn challenge
 // is SHA-256 of that string. The laptop verifies the assertion against public
@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 )
 
@@ -48,6 +49,7 @@ type Command struct {
 	Type       string     `firestore:"type"`
 	Payload    string     `firestore:"payload"`
 	Assertion  *Assertion `firestore:"assertion,omitempty"`
+	Grant      *Grant     `firestore:"grant,omitempty"`
 	Status     string     `firestore:"status"`
 	Error      string     `firestore:"error,omitempty"`
 	CreatedAt  time.Time  `firestore:"created_at"`
@@ -105,13 +107,81 @@ func Check(id string, c Command, keys []Key, origin, rpID string, now time.Time)
 	if !Signed(c.Type) {
 		return p, nil
 	}
-	if c.Assertion == nil {
-		return p, errors.New("command is not signed")
+	switch {
+	case c.Assertion != nil:
+		return p, Verify(keys, c.Payload, *c.Assertion, origin, rpID)
+	case c.Grant != nil:
+		return p, c.Grant.verify(keys, c.Payload, origin, rpID, now)
 	}
-	if err := Verify(keys, c.Payload, *c.Assertion, origin, rpID); err != nil {
-		return p, err
+	return p, errors.New("command is not signed")
+}
+
+// A Grant lets one browser sign commands for a while without a passkey
+// prompt each time. The passkey signs a statement naming a P-256 key that the
+// browser generated and cannot export, and that key signs each payload.
+// Unpairing the passkey voids every grant it signed.
+type Grant struct {
+	// Statement is the JSON the passkey signed, kept as the exact string.
+	Statement string    `firestore:"statement"`
+	Assertion Assertion `firestore:"assertion"`
+	// Signature is the session key's raw r||s ECDSA signature over the
+	// payload, base64url without padding, as WebCrypto produces it.
+	Signature string `firestore:"signature"`
+}
+
+// GrantKind marks a statement as a grant, so a passkey signature over a
+// command payload cannot be passed off as one, or the reverse.
+const GrantKind = "peyk-session"
+
+// MaxGrant bounds how long one passkey approval lasts.
+const MaxGrant = 12 * time.Hour
+
+// GrantStatement is what the passkey signs.
+type GrantStatement struct {
+	Kind string `json:"kind"`
+	// Key is the session key's SubjectPublicKeyInfo DER, base64.
+	Key string `json:"key"`
+	// Expires is Unix milliseconds.
+	Expires int64 `json:"expires"`
+}
+
+// Grant errors share this prefix so the phone knows to ask for a new grant.
+const grantRefused = "session approval: "
+
+func (g Grant) verify(keys []Key, payload, origin, rpID string, now time.Time) error {
+	if err := Verify(keys, g.Statement, g.Assertion, origin, rpID); err != nil {
+		return errors.New(grantRefused + err.Error())
 	}
-	return p, nil
+	var st GrantStatement
+	if err := json.Unmarshal([]byte(g.Statement), &st); err != nil || st.Kind != GrantKind {
+		return errors.New(grantRefused + "not a session statement")
+	}
+	exp := time.UnixMilli(st.Expires)
+	if !now.Before(exp) {
+		return errors.New(grantRefused + "expired")
+	}
+	if exp.Sub(now) > MaxGrant {
+		return errors.New(grantRefused + "lasts too long")
+	}
+	der, err := base64.StdEncoding.DecodeString(st.Key)
+	if err != nil {
+		return errors.New(grantRefused + "unreadable session key")
+	}
+	pub, err := x509.ParsePKIXPublicKey(der)
+	ec, ok := pub.(*ecdsa.PublicKey)
+	if err != nil || !ok || ec.Curve.Params().Name != "P-256" {
+		return errors.New(grantRefused + "session key is not P-256")
+	}
+	sig, err := b64.DecodeString(g.Signature)
+	if err != nil || len(sig) != 64 {
+		return errors.New(grantRefused + "bad session signature")
+	}
+	digest := sha256.Sum256([]byte(payload))
+	r, s := new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])
+	if !ecdsa.Verify(ec, digest[:], r, s) {
+		return errors.New(grantRefused + "bad session signature")
+	}
+	return nil
 }
 
 var b64 = base64.RawURLEncoding
