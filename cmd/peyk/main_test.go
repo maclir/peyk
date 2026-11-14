@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -58,3 +59,22 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 		t.Fatalf("usage: %v %q", err, out.String())
 	}
 }
+
+func TestBillToNamesTheProject(t *testing.T) {
+	var got string
+	rt := billTo{project: "p", next: roundTrip(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Get("X-Goog-User-Project")
+		return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+	})}
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if _, err := rt.RoundTrip(req); err != nil || got != "p" {
+		t.Fatalf("header = %q, %v", got, err)
+	}
+	if req.Header.Get("X-Goog-User-Project") != "" {
+		t.Fatal("the caller's request was modified")
+	}
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

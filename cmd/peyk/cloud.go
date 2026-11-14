@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -69,6 +70,20 @@ func runAgent(ctx context.Context) error {
 	return err
 }
 
+// billTo names the project that pays for a call made with your own login.
+// golang.org/x/oauth2 ignores GOOGLE_CLOUD_QUOTA_PROJECT, and Identity
+// Toolkit refuses user credentials that name no project.
+type billTo struct {
+	project string
+	next    http.RoundTripper
+}
+
+func (b billTo) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("X-Goog-User-Project", b.project)
+	return b.next.RoundTrip(r)
+}
+
 func grantOwner(ctx context.Context, email string) error {
 	p, err := project()
 	if err != nil {
@@ -78,6 +93,7 @@ func grantOwner(ctx context.Context, email string) error {
 	if err != nil {
 		return err
 	}
+	client.Transport = billTo{project: p, next: client.Transport}
 	uid, err := owner.Grant(ctx, client, "https://identitytoolkit.googleapis.com", p, email)
 	if err != nil {
 		return err
