@@ -218,15 +218,16 @@ async function start(cfg) {
   }
 
   // Scrolling down reads further into the list, so the composer gets out of
-  // the way; scrolling up brings it back. The clamp ignores overscroll bounce,
-  // which would otherwise read as scrolling up at either end.
+  // the way; scrolling up or reaching the end brings it back. The clamp ignores
+  // overscroll bounce, which would otherwise read as scrolling up at either end.
   function tuckComposerOnScroll() {
     let last = window.scrollY;
     window.addEventListener("scroll", () => {
       const root = document.documentElement;
       const y = Math.min(Math.max(0, window.scrollY), root.scrollHeight - window.innerHeight);
       const typing = document.activeElement?.closest?.(".composer");
-      if (typing || y < last - 4) root.classList.remove("tuck");
+      const atEnd = window.innerHeight + y >= root.scrollHeight - 24;
+      if (typing || atEnd || y < last - 4) root.classList.remove("tuck");
       else if (y > last + 4) root.classList.add("tuck");
       last = y;
     }, { passive: true });
