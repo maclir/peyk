@@ -44,7 +44,7 @@ async function start(cfg) {
   const a = auth.getAuth(fb);
   const db = fs.getFirestore(fb);
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "" };
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, user: null, picked: null, status: "", push: "unknown" };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -109,6 +109,7 @@ async function start(cfg) {
     }
     state.user = user;
     listen();
+    checkPush().then(render, (err) => setStatus(`Cannot check notifications: ${err.message}`));
   });
 
   function renderLaptop() {
@@ -264,11 +265,60 @@ async function start(cfg) {
     if (el) el.textContent = text;
   }
 
+  // Whether this browser already receives notifications, checked once per
+  // load; the subscription itself lives in the browser and in Firestore.
+  async function checkPush() {
+    if (!("PushManager" in window) || !("serviceWorker" in navigator)) return (state.push = "unsupported");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub || Notification.permission !== "granted") return (state.push = "off");
+    const id = await subscriptionID(sub);
+    const known = await fs.getDoc(fs.doc(db, "subscriptions", id));
+    state.push = known.exists() ? "on" : "off";
+  }
+
+  async function subscriptionID(sub) {
+    return passkey.b64url(await passkey.sha256(sub.endpoint));
+  }
+
+  async function turnOnPush() {
+    try {
+      if ((await Notification.requestPermission()) !== "granted") {
+        setStatus("Notifications are blocked for this site in the browser settings.");
+        return;
+      }
+      const key = await fs.getDoc(fs.doc(db, "laptop", "push"));
+      if (!key.exists()) throw new Error("the laptop has not published its push key; start make serve");
+      const reg = await navigator.serviceWorker.ready;
+      const appKey = passkey.urlB64ToBytes(key.data().vapid_public_key);
+      let sub = await reg.pushManager.getSubscription();
+      // A subscription made with another key cannot receive this laptop's pushes.
+      const current = sub && sub.options.applicationServerKey && new Uint8Array(sub.options.applicationServerKey);
+      if (sub && (!current || current.length !== appKey.length || current.some((b, i) => b !== appKey[i]))) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+      const json = sub.toJSON();
+      await fs.setDoc(fs.doc(db, "subscriptions", await subscriptionID(sub)), {
+        endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, created_at: fs.serverTimestamp(),
+      });
+      state.push = "on";
+      setStatus("Notifications are on for this device.");
+      render();
+    } catch (err) {
+      setStatus(`Could not turn on notifications: ${err.message}`);
+    }
+  }
+
   function board() {
     const now = Date.now();
     const list = sortSessions([...state.sessions.values()]);
-    if (!list.length) return h("p", { class: "notice" }, "No sessions published yet. Start the agent on the laptop with make serve.");
-    const out = [];
+    const pushRow = state.push === "off"
+      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a session finishes or needs you."), h("button", { type: "button", onclick: turnOnPush }, "Turn on notifications"))
+      : null;
+    if (!list.length) return h("div", {}, pushRow, h("p", { class: "notice" }, "No sessions published yet. Start the agent on the laptop with make serve."));
+    const out = [pushRow];
     let group = "";
     for (const s of list) {
       const st = STATES[s.state] || { label: s.state, tone: "idle", group: "Other" };

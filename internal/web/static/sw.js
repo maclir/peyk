@@ -56,3 +56,36 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((hit) => hit || fetch(event.request)),
   );
 });
+
+// Notifications from the laptop. The payload is encrypted to this browser's
+// subscription key; only here is it readable.
+self.addEventListener("push", (event) => {
+  let note = { title: "peyk", body: "", url: "/", session: "" };
+  try {
+    note = { ...note, ...event.data.json() };
+  } catch {
+    note.body = event.data ? event.data.text() : "";
+  }
+  event.waitUntil(
+    self.registration.showNotification(note.title, {
+      body: note.body,
+      tag: note.session || undefined,
+      renotify: Boolean(note.session),
+      icon: "/static/icon-192.png",
+      badge: "/static/icon-192.png",
+      data: { url: note.url },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
+      if (win) return win.navigate(url).then((w) => (w || win).focus());
+      return self.clients.openWindow(url);
+    }),
+  );
+});

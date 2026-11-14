@@ -9,6 +9,8 @@
 //	tasks/{id}                 Task                 phone creates, agent updates
 //	commands/{id}              command.Command      phone creates, agent updates
 //	pairings/{code}            Pairing              phone creates, agent deletes
+//	subscriptions/{id}         notify.Subscription  phone creates, agent deletes when gone
+//	laptop/push                {vapid_public_key}   agent writes
 package store
 
 import (
@@ -16,14 +18,16 @@ import (
 	"time"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/notify"
 )
 
 const (
-	Sessions = "sessions"
-	Projects = "projects"
-	Tasks    = "tasks"
-	Commands = "commands"
-	Pairings = "pairings"
+	Sessions      = "sessions"
+	Projects      = "projects"
+	Tasks         = "tasks"
+	Commands      = "commands"
+	Pairings      = "pairings"
+	Subscriptions = "subscriptions"
 )
 
 // Pairing is the public half of a passkey the phone just created.
@@ -78,4 +82,5 @@ type Listener interface {
 	Commands(ctx context.Context, out chan<- Incoming) error
 	// Pairing waits for the phone to write the pairing with this code.
 	Pairing(ctx context.Context, code string) (Pairing, error)
+	Subscriptions(ctx context.Context) ([]notify.Subscription, error)
 }

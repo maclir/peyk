@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
 )
@@ -259,5 +260,36 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("condition not met")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+type recordingNotifier struct{ titles []string }
+
+func (r *recordingNotifier) Notify(_ context.Context, notes []notify.Note) error {
+	for _, n := range notes {
+		r.titles = append(r.titles, n.Title)
+	}
+	return nil
+}
+
+func TestRefreshNotifiesOnTransitionsButNotAtStart(t *testing.T) {
+	ctx := context.Background()
+	c := &fakeCollector{}
+	n := &recordingNotifier{}
+	a := newAgent(c, store.NewMemory())
+	a.Notify = n
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.NeedsInput})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.titles) != 0 {
+		t.Fatalf("notified at start: %v", n.titles)
+	}
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Working})
+	_ = a.Refresh(ctx)
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle})
+	_ = a.Refresh(ctx)
+	if strings.Join(n.titles, "|") != "knip finished" {
+		t.Fatalf("notes = %v", n.titles)
 	}
 }

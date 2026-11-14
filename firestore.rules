@@ -22,8 +22,22 @@ service cloud.firestore {
       allow read: if isOwner();
     }
 
-    match /laptop/status {
-      allow get: if isOwner();
+    match /laptop/{doc} {
+      allow get: if isOwner() && doc in ['status', 'push'];
+    }
+
+    // A phone's Web Push endpoint. The id is a hash of the endpoint, so a
+    // phone that subscribes again replaces nothing and adds nothing.
+    match /subscriptions/{id} {
+      allow create: if isOwner()
+        && id.size() >= 20 && id.size() <= 128
+        && request.resource.data.keys().hasOnly(['endpoint', 'p256dh', 'auth', 'created_at'])
+        && boundedString(request.resource.data.endpoint, 2048)
+        && request.resource.data.endpoint.matches('https://.*')
+        && boundedString(request.resource.data.p256dh, 200)
+        && boundedString(request.resource.data.auth, 100)
+        && request.resource.data.created_at == request.time;
+      allow get, delete: if isOwner();
     }
 
     // A task names a project the laptop published. Only the agent marks it

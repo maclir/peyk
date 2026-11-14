@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 	"sync"
+
+	"github.com/maclir/peyk/internal/notify"
 )
 
 // Memory is the store for tests and local runs.
@@ -138,3 +140,16 @@ func (m *Memory) Writes() int {
 }
 
 func (m *Memory) Close() error { return nil }
+
+func (m *Memory) Subscriptions(context.Context) ([]notify.Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []notify.Subscription
+	for id, v := range m.docs[Subscriptions] {
+		sub := v.(notify.Subscription)
+		sub.ID = id
+		out = append(out, sub)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}

@@ -52,3 +52,9 @@ export async function sign(payload) {
     signature: b64url(r.signature),
   };
 }
+
+// urlB64ToBytes decodes the VAPID public key for pushManager.subscribe.
+export function urlB64ToBytes(s) {
+  const b = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4);
+  return Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
 )
@@ -19,6 +20,10 @@ type Collector interface {
 }
 
 // Watcher follows the working directories of the published sessions.
+type Notifier interface {
+	Notify(context.Context, []notify.Note) error
+}
+
 type Watcher interface {
 	Set(ctx context.Context, workdirs []string) error
 }
@@ -39,6 +44,9 @@ type Agent struct {
 
 	// Commands, when set, lets the phone make the laptop act.
 	Commands *Commands
+	// Notify, when set, is told about sessions that start needing you or
+	// finish a turn.
+	Notify Notifier
 
 	published map[string]map[string]string
 	// The last published state, which commands act on.
@@ -66,6 +74,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
+	prev := a.sessions
 	sessions := map[string]any{}
 	a.sessions = map[string]session.Snapshot{}
 	for _, s := range snaps {
@@ -81,7 +90,16 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if err := a.sync(ctx, store.Sessions, sessions); err != nil {
 		return err
 	}
-	return a.sync(ctx, store.Projects, projects)
+	if err := a.sync(ctx, store.Projects, projects); err != nil {
+		return err
+	}
+	if a.Notify == nil || prev == nil {
+		return nil
+	}
+	if notes := notify.Changes(prev, a.sessions); len(notes) > 0 {
+		return a.Notify.Notify(ctx, notes)
+	}
+	return nil
 }
 
 // ProjectID is a project's document id: its name, which Firestore accepts

@@ -8,6 +8,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/notify"
 )
 
 type Firestore struct{ client *firestore.Client }
@@ -86,6 +87,23 @@ func (s *Firestore) Pairing(ctx context.Context, code string) (Pairing, error) {
 		}
 		return p, nil
 	}
+}
+
+func (s *Firestore) Subscriptions(ctx context.Context) ([]notify.Subscription, error) {
+	docs, err := s.client.Collection(Subscriptions).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions: %w", err)
+	}
+	out := make([]notify.Subscription, 0, len(docs))
+	for _, d := range docs {
+		var sub notify.Subscription
+		if err := d.DataTo(&sub); err != nil {
+			return nil, fmt.Errorf("decode subscription %s: %w", d.Ref.ID, err)
+		}
+		sub.ID = d.Ref.ID
+		out = append(out, sub)
+	}
+	return out, nil
 }
 
 func (s *Firestore) Delete(ctx context.Context, collection, id string) error {

@@ -18,6 +18,8 @@ beforeEach(async () => {
     const db = ctx.firestore();
     await setDoc(doc(db, 'sessions/knip'), { title: 'knip', state: 'idle' });
     await setDoc(doc(db, 'laptop/status'), { online: true });
+    await setDoc(doc(db, 'laptop/push'), { vapid_public_key: 'k' });
+    await setDoc(doc(db, 'laptop/secret'), { x: 1 });
     await setDoc(doc(db, 'other/thing'), { secret: true });
     await setDoc(doc(db, 'projects/knip'), { name: 'knip', free: true });
     await setDoc(doc(db, 'tasks/queued'), { project: 'knip', text: 'x', status: 'queued' });
@@ -157,5 +159,29 @@ describe('pairings', () => {
     await assertFails(setDoc(doc(owner(), 'pairings/short'), pairing()));
     await assertFails(setDoc(doc(owner(), `pairings/${code}x`), pairing({ label: 'x' })));
     await assertFails(setDoc(doc(stranger(), `pairings/${code}y`), pairing()));
+  });
+});
+
+describe('push', () => {
+  const id = 'a'.repeat(40);
+  const sub = (over: Record<string, unknown> = {}) => ({
+    endpoint: 'https://fcm.googleapis.com/fcm/send/abc', p256dh: 'key', auth: 'auth', created_at: serverTimestamp(), ...over,
+  });
+
+  it('the owner reads the push key and subscribes, unsubscribes', async () => {
+    await assertSucceeds(getDoc(doc(owner(), 'laptop/push')));
+    await assertFails(getDoc(doc(owner(), 'laptop/secret')));
+    await assertSucceeds(setDoc(doc(owner(), `subscriptions/${id}`), sub()));
+    await assertSucceeds(getDoc(doc(owner(), `subscriptions/${id}`)));
+    await assertSucceeds(deleteDoc(doc(owner(), `subscriptions/${id}`)));
+  });
+
+  it('rejects odd subscriptions and strangers', async () => {
+    await assertFails(setDoc(doc(owner(), `subscriptions/${id}`), sub({ endpoint: 'http://evil' })));
+    await assertFails(setDoc(doc(owner(), 'subscriptions/short'), sub()));
+    await assertFails(setDoc(doc(owner(), `subscriptions/${id}`), sub({ extra: 1 })));
+    await assertFails(getDocs(collection(owner(), 'subscriptions')));
+    await assertFails(setDoc(doc(stranger(), `subscriptions/${id}`), sub()));
+    await assertFails(getDoc(doc(stranger(), 'laptop/push')));
   });
 });

@@ -17,6 +17,7 @@ import (
 	"github.com/maclir/peyk/internal/agent"
 	"github.com/maclir/peyk/internal/inbox"
 	"github.com/maclir/peyk/internal/laptop"
+	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/owner"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
@@ -94,8 +95,16 @@ func runAgent(ctx context.Context) error {
 
 	logger := log.New(os.Stderr, "peyk: ", log.LstdFlags)
 	logger.Printf("publishing to %s; Ctrl-C to go offline", p)
+	keys, err := vapidKeys()
+	if err != nil {
+		return err
+	}
+	if err := fs.Put(ctx, "laptop", "push", map[string]string{"vapid_public_key": keys.Public}); err != nil {
+		return err
+	}
 	c := collector()
 	a := &agent.Agent{
+		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
 		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 		Commands: &agent.Commands{
