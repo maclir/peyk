@@ -50,7 +50,9 @@ func (w *EditWatcher) Set(_ context.Context, dirs []string) error {
 	go func(events chan []fsevents.Event) {
 		for batch := range events {
 			for _, ev := range batch {
-				if inGitDir(ev.Path) {
+				// A file edit has its own event; a directory event alone,
+				// such as FSEvents replaying a tree's creation, is not one.
+				if inGitDir(ev.Path) || ev.Flags&fsevents.ItemIsDir != 0 {
 					continue
 				}
 				select {
