@@ -19,6 +19,8 @@ type Collector interface {
 	Repos() ([]string, error)
 	// Exchange rereads a session's latest reply and prompt.
 	Exchange(session.Transcript) (reply, prompt *session.Message)
+	// Transcribe fills in everything a snapshot reads from its transcript.
+	Transcribe(*session.Snapshot)
 }
 
 // logoFinder is a Collector that can also find a project's mark.
@@ -88,6 +90,10 @@ type Agent struct {
 	UsageChanged <-chan struct{}
 	usageKey     string
 
+	// clears follows sessions cleared from the phone until aoe reports
+	// their new conversation, keyed by session id.
+	clears map[string]clearedTo
+
 	published map[string]map[string]string
 	// The last published state, which commands act on.
 	sessions map[string]session.Snapshot
@@ -101,6 +107,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	a.followClears(snaps)
 	repos, err := a.Collect.Repos()
 	if err != nil {
 		return err
@@ -170,6 +177,60 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		return a.Notify.Notify(ctx, notes)
 	}
 	return nil
+}
+
+// clearedTo is a cleared session's new conversation and the one aoe still
+// reports in its place.
+type clearedTo struct {
+	stale, id string
+}
+
+// followClears points cleared sessions at their new conversation while aoe
+// still reports the old one, which it keeps doing for up to minutes after a
+// /clear. Without this the phone shows the old conversation, as if the clear
+// had not happened.
+func (a *Agent) followClears(snaps []session.Snapshot) {
+	live := map[string]bool{}
+	for i := range snaps {
+		s := &snaps[i]
+		live[s.ID] = true
+		c, ok := a.clears[s.ID]
+		if !ok {
+			continue
+		}
+		if s.Transcript.ID != c.stale {
+			delete(a.clears, s.ID)
+			continue
+		}
+		s.Transcript.ID = c.id
+		a.Collect.Transcribe(s)
+	}
+	for id := range a.clears {
+		if !live[id] {
+			delete(a.clears, id)
+		}
+	}
+}
+
+// cleared records a session's new conversation and publishes it at once.
+func (a *Agent) cleared(ctx context.Context, id, transcript string) error {
+	s := a.sessions[id]
+	stale := s.Transcript.ID
+	if c, ok := a.clears[id]; ok {
+		stale = c.stale
+	}
+	if a.clears == nil {
+		a.clears = map[string]clearedTo{}
+	}
+	a.clears[id] = clearedTo{stale: stale, id: transcript}
+	s.Transcript.ID = transcript
+	a.Collect.Transcribe(&s)
+	a.sessions[id] = s
+	docs := make(map[string]any, len(a.sessions))
+	for id, s := range a.sessions {
+		docs[id] = s
+	}
+	return a.sync(ctx, store.Sessions, docs)
 }
 
 // ciRun is what the agent knows about one pushed commit's workflow runs.

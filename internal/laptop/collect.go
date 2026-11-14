@@ -48,14 +48,21 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		Transcript: t,
 		UpdatedAt:  c.Now(),
 	}
-	snap.SetExchange(LastExchange(t))
-	if snap.State == session.NeedsInput {
-		snap.Question = PendingQuestion(t)
-	}
-	if c.Prototypes != nil {
-		snap.Prototypes = c.Prototypes.Find(t)
-	}
+	c.Transcribe(&snap)
 	return snap
+}
+
+// Transcribe fills in what a snapshot reads from its transcript.
+func (c Collector) Transcribe(s *session.Snapshot) {
+	s.SetExchange(LastExchange(s.Transcript))
+	s.Question = nil
+	if s.State == session.NeedsInput {
+		s.Question = PendingQuestion(s.Transcript)
+	}
+	s.Prototypes = nil
+	if c.Prototypes != nil {
+		s.Prototypes = c.Prototypes.Find(s.Transcript)
+	}
 }
 
 // Exchange rereads a session's latest reply and prompt from its transcript.

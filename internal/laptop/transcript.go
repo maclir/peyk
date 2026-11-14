@@ -164,12 +164,12 @@ var clearMarker = []byte(`<command-name>/clear</command-name>`)
 // that opened it, which follows a few small bookkeeping entries.
 const headBytes = 64 << 10
 
-// ClearedSince reports whether a transcript in dir was opened by a /clear
-// recorded at or after since.
-func ClearedSince(dir string, since time.Time) bool {
+// ClearedSince returns the id of a transcript in dir that was opened by a
+// /clear recorded at or after since, or "" when there is none.
+func ClearedSince(dir string, since time.Time) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return false
+		return ""
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
@@ -179,10 +179,10 @@ func ClearedSince(dir string, since time.Time) bool {
 			continue
 		}
 		if at, ok := openingClear(filepath.Join(dir, e.Name())); ok && !at.Before(since) {
-			return true
+			return strings.TrimSuffix(e.Name(), ".jsonl")
 		}
 	}
-	return false
+	return ""
 }
 
 // openingClear returns when the /clear that opened a transcript was recorded.

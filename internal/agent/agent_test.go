@@ -32,6 +32,10 @@ func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *sessi
 	return f.replies[t.ID], nil
 }
 
+func (f *fakeCollector) Transcribe(s *session.Snapshot) {
+	s.SetExchange(f.Exchange(s.Transcript))
+}
+
 func (f *fakeCollector) All(context.Context) ([]session.Snapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

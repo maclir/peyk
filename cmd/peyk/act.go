@@ -26,7 +26,7 @@ func (a actions) Create(ctx context.Context, dir, title string) (string, error) 
 // Claude Code starts in well under a second.
 const clearWithin = 20 * time.Second
 
-func (a actions) Clear(ctx context.Context, session string, t session.Transcript) error {
+func (a actions) Clear(ctx context.Context, session string, t session.Transcript) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, clearWithin)
 	defer cancel()
 	return a.aoe.Clear(ctx, session, t.Dir, 250*time.Millisecond)

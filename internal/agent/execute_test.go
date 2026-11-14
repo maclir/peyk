@@ -33,9 +33,9 @@ func (f *fakeActions) Create(_ context.Context, dir, title string) (string, erro
 	f.calls = append(f.calls, "create "+title+" in "+dir)
 	return "new-" + title, nil
 }
-func (f *fakeActions) Clear(_ context.Context, s string, _ session.Transcript) error {
+func (f *fakeActions) Clear(_ context.Context, s string, _ session.Transcript) (string, error) {
 	f.calls = append(f.calls, "clear "+s)
-	return nil
+	return "cleared-" + s, nil
 }
 func (f *fakeActions) Stop(_ context.Context, s string) error {
 	f.calls = append(f.calls, "stop "+s)
@@ -166,6 +166,80 @@ func TestExecuteCommands(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClearedSessionShowsItsNewConversationBeforeAoeReportsIt(t *testing.T) {
+	ph := newPhone(t)
+	c := &fakeCollector{replies: map[string]*session.Message{"old": {Text: "Done with the last task"}}}
+	stale := session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, Transcript: session.Transcript{ID: "old"}}
+	stale.SetExchange(c.Exchange(stale.Transcript))
+	c.set(stale)
+	mem := store.NewMemory()
+	acts := &fakeActions{}
+	a := newAgent(c, mem)
+	a.Commands = &Commands{Act: acts, Keys: func() ([]command.Key, error) { return []command.Key{ph.key}, nil }, Origin: testOrigin, RPID: testRP}
+	ctx := context.Background()
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	published := func() session.Snapshot {
+		t.Helper()
+		v, _ := mem.Get(store.Sessions, "k")
+		return v.(session.Snapshot)
+	}
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Clear, Session: "k"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if s := published(); s.Message != nil || !s.Cleared {
+		t.Fatalf("after /clear the phone shows %+v", s)
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := published(); s.Message != nil || !s.Cleared {
+		t.Fatalf("a refresh while aoe reports the old conversation shows %+v", s)
+	}
+	if err := a.execute(ctx, ph.command("c2", command.Payload{Type: command.Clear, Session: "k"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(acts.calls, "|"); got != "clear k" {
+		t.Fatalf("calls = %q, want a second clear to do nothing", got)
+	}
+
+	c.mu.Lock()
+	c.replies["cleared-k"] = &session.Message{Text: "Started the new task"}
+	c.mu.Unlock()
+	caught := stale
+	caught.Transcript.ID = "cleared-k"
+	caught.SetExchange(c.Exchange(caught.Transcript))
+	c.set(caught)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := published(); s.Message == nil || s.Message.Text != "Started the new task" {
+		t.Fatalf("once aoe reports the new conversation the phone shows %+v", s)
+	}
+	c.set(stale)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := published(); s.Message == nil || s.Message.Text != "Done with the last task" {
+		t.Fatalf("a clear followed after aoe caught up still overrides it: %+v", s)
+	}
+}
+
+func TestDispatchWithClearPublishesTheNewConversation(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x", Clear: true}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if a.sessions["k"].Transcript.ID != "cleared-k" {
+		t.Fatalf("transcript = %+v", a.sessions["k"].Transcript)
+	}
+	if v, _ := mem.Get(store.Sessions, "k"); !v.(session.Snapshot).Cleared {
+		t.Fatalf("published %+v", v)
 	}
 }
 

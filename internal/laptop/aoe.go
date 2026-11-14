@@ -74,24 +74,27 @@ func (a Aoe) Send(ctx context.Context, id, text string) error {
 }
 
 // Clear sends /clear and waits, checking every poll, until Claude Code opens
-// the new conversation for it in dir, the session's transcript directory.
-// Text sent before then could reach the old conversation or be typed into the
-// clear itself. aoe's agent session id is not waited on: aoe records the new
-// id anywhere from seconds to minutes later.
-func (a Aoe) Clear(ctx context.Context, id, dir string, poll time.Duration) error {
+// the new conversation for it in dir, the session's transcript directory, and
+// returns that conversation's transcript id. Text sent before then could
+// reach the old conversation or be typed into the clear itself. aoe's agent
+// session id is not waited on: aoe records the new id anywhere from seconds
+// to minutes later.
+func (a Aoe) Clear(ctx context.Context, id, dir string, poll time.Duration) (string, error) {
 	// Transcript timestamps have millisecond precision.
 	since := time.Now().Truncate(time.Millisecond)
 	if err := a.Send(ctx, id, "/clear"); err != nil {
-		return err
+		return "", err
 	}
-	for !ClearedSince(dir, since) {
+	for {
+		if t := ClearedSince(dir, since); t != "" {
+			return t, nil
+		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("no new conversation after /clear: %w", ctx.Err())
+			return "", fmt.Errorf("no new conversation after /clear: %w", ctx.Err())
 		case <-time.After(poll):
 		}
 	}
-	return nil
 }
 
 // Stop stops a session's agent process.

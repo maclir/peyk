@@ -17,9 +17,9 @@ type Actions interface {
 	// Create adds a session for a repository that has none and returns its id.
 	Create(ctx context.Context, dir, title string) (string, error)
 	// Clear starts a session on a fresh conversation, which Claude Code
-	// records in t's directory, and returns once it has one, so a prompt
-	// sent next lands in it.
-	Clear(ctx context.Context, session string, t session.Transcript) error
+	// records in t's directory, and returns its transcript id once it has
+	// one, so a prompt sent next lands in it.
+	Clear(ctx context.Context, session string, t session.Transcript) (string, error)
 	Stop(ctx context.Context, session string) error
 	Push(ctx context.Context, dir string) error
 	// Answer closes a session's open dialog for question and sends text as
@@ -83,8 +83,12 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 				return err
 			}
 		} else if p.Clear && !a.sessions[id].Cleared {
-			if err := act.Clear(ctx, id, a.sessions[id].Transcript); err != nil {
+			t, err := act.Clear(ctx, id, a.sessions[id].Transcript)
+			if err != nil {
 				return fmt.Errorf("clear %s: %w", proj.Name, err)
+			}
+			if err := a.cleared(ctx, id, t); err != nil {
+				return err
 			}
 		}
 		sentAt := a.Now()
@@ -131,7 +135,11 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if s.Cleared {
 			return nil
 		}
-		return act.Clear(ctx, s.ID, s.Transcript)
+		t, err := act.Clear(ctx, s.ID, s.Transcript)
+		if err != nil {
+			return err
+		}
+		return a.cleared(ctx, s.ID, t)
 	case command.Stop:
 		s, err := a.session(p.Session)
 		if err != nil {
