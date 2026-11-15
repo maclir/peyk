@@ -215,6 +215,34 @@ func TestRunFailsAtStartWithoutGoingOnline(t *testing.T) {
 	}
 }
 
+func TestRunGoesOfflineForSleepAndStaysOfflineUntilAFullWake(t *testing.T) {
+	mem := store.NewMemory()
+	a := newAgent(&fakeCollector{}, mem)
+	a.Presence = 5 * time.Millisecond
+	power := make(chan PowerEvent)
+	a.Power = power
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, nil, nil)
+	waitFor(t, func() bool { return mem.Laptop().Online })
+
+	acked := make(chan struct{})
+	power <- PowerEvent{Asleep: true, Done: func() {
+		if mem.Laptop().Online {
+			t.Error("sleep allowed before the laptop was marked offline")
+		}
+		close(acked)
+	}}
+	<-acked
+	time.Sleep(30 * time.Millisecond)
+	if mem.Laptop().Online {
+		t.Fatal("presence marked a sleeping laptop online")
+	}
+
+	power <- PowerEvent{}
+	waitFor(t, func() bool { return mem.Laptop().Online })
+}
+
 type recordingWatcher struct{ dirs []string }
 
 func (r *recordingWatcher) Set(_ context.Context, dirs []string) error {

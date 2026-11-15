@@ -129,8 +129,13 @@ func runAgent(ctx context.Context) error {
 	if err := usageWatch.Set(ctx, []string{filepath.Dir(usagePath())}); err != nil {
 		return err
 	}
+	power, err := agent.WatchPower()
+	if err != nil {
+		return err
+	}
 	c := collector()
 	a := &agent.Agent{
+		Power:       power,
 		Edits:       edits,
 		Transcripts: transcripts, Replies: replies,
 		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},

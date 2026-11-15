@@ -38,6 +38,17 @@ type CIRuns interface {
 	Runs(ctx context.Context, repo, sha string) (*session.CI, error)
 }
 
+// PowerEvent is the laptop going to sleep, or waking fully.
+type PowerEvent struct {
+	Asleep bool
+	// Done, on a sleep, lets the sleep proceed.
+	Done func()
+}
+
+// powerRetry spaces attempts to go online after a wake, which can come before
+// the network is back.
+const powerRetry = 15 * time.Second
+
 type Watcher interface {
 	Set(ctx context.Context, workdirs []string) error
 }
@@ -66,7 +77,10 @@ type Agent struct {
 	// this is how the phone tells a sleeping laptop from a running one. It
 	// never refreshes sessions: a change nothing reported is a bug to fix.
 	Presence time.Duration
-	Log      *log.Logger
+	// Power, when set, reports sleep and wake, so the phone shows a closed
+	// lid at once rather than after a missed presence.
+	Power <-chan PowerEvent
+	Log   *log.Logger
 
 	// Commands, when set, lets the phone make the laptop act.
 	Commands *Commands
@@ -465,6 +479,27 @@ func contentKey(v any) string {
 	return string(b)
 }
 
+// sleep marks the laptop offline. A failure only logs: the network may already
+// be going, and the stale seen_at then tells the phone instead.
+func (a *Agent) sleep(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: false, SeenAt: a.Now()}); err != nil {
+		a.Log.Printf("mark offline for sleep: %v", err)
+	}
+}
+
+// wake marks the laptop online and reports whether that was written.
+func (a *Agent) wake(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
+		a.Log.Printf("mark online after wake: %v", err)
+		return false
+	}
+	return true
+}
+
 // Run publishes until ctx ends or something fails. Either way it marks the
 // laptop offline before returning, so the phone never shows stale state as live.
 func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan store.Incoming) (err error) {
@@ -487,7 +522,8 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	}
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
-	var debounce, replies, ci <-chan time.Time
+	var debounce, replies, ci, wake <-chan time.Time
+	asleep := false
 	for {
 		if ci == nil && a.ciPending() {
 			ci = time.After(a.CIPoll)
@@ -529,7 +565,24 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			if err := a.execute(ctx, in); err != nil {
 				return err
 			}
+		case p := <-a.Power:
+			asleep, wake = p.Asleep, nil
+			if p.Asleep {
+				a.sleep(ctx)
+				p.Done()
+			} else if !a.wake(ctx) {
+				wake = time.After(powerRetry)
+			}
+		case <-wake:
+			wake = nil
+			if !a.wake(ctx) {
+				wake = time.After(powerRetry)
+			}
 		case <-presence.C:
+			// A dark wake runs this loop, but the laptop is still asleep.
+			if asleep {
+				continue
+			}
 			if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
 				return err
 			}
