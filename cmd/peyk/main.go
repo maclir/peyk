@@ -109,6 +109,16 @@ func claudeDir() string {
 	return filepath.Join(home, ".claude")
 }
 
+// claudeConfig is Claude Code's global config file: inside CLAUDE_CONFIG_DIR
+// when that is set, otherwise beside the home directory's .claude.
+func claudeConfig() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, ".claude.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude.json")
+}
+
 // projectsRoot is where repositories without a session live, offered in the
 // phone's project picker.
 func projectsRoot() string {

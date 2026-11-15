@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/maclir/peyk/internal/laptop"
@@ -12,6 +13,8 @@ import (
 type actions struct {
 	aoe   laptop.Aoe
 	group string
+	// claudeConfig is Claude Code's global config, where folder trust is kept.
+	claudeConfig string
 }
 
 func (a actions) Send(ctx context.Context, session, text string) error {
@@ -19,6 +22,9 @@ func (a actions) Send(ctx context.Context, session, text string) error {
 }
 
 func (a actions) Create(ctx context.Context, dir, title string) (string, error) {
+	if err := laptop.Trust(a.claudeConfig, dir); err != nil {
+		return "", fmt.Errorf("trust %s for Claude Code: %w", dir, err)
+	}
 	return a.aoe.Create(ctx, dir, title, a.group)
 }
 

@@ -139,7 +139,7 @@ func runAgent(ctx context.Context) error {
 		Usage:        func() (*session.Usage, error) { return laptop.LoadUsage(usagePath()) },
 		UsageChanged: usage,
 		Commands: &agent.Commands{
-			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal")},
+			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
 			Keys:        keyring().Load,
 			Origin:      o.String(),
 			RPID:        o.Hostname(),
