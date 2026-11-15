@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -73,39 +74,70 @@ func sameFailure(a, b *session.CI) bool {
 	return a != nil && a.State == session.CIFailure && a.SHA == b.SHA
 }
 
+// ciBody names the failed commit by its subject; the hash only when the
+// subject is unknown or belongs to a later, unpushed commit.
 func ciBody(s session.Snapshot) string {
 	if g := s.Git; g.Last != nil && g.Unpushed == 0 {
-		return g.Last.Hash + " " + oneLine(g.Last.Subject)
+		return summary(g.Last.Subject)
 	}
 	return s.Git.CI.SHA[:min(7, len(s.Git.CI.SHA))]
 }
 
+// body is one plain line: the question asked, or the opening of the last
+// message. Git counts stay on the card; a lock screen has room for one thought.
 func body(s session.Snapshot) string {
-	var parts []string
-	if g := s.Git; g != nil {
-		switch {
-		case g.Dirty > 0:
-			parts = append(parts, fmt.Sprintf("%d uncommitted files", g.Dirty))
-		case g.Unpushed > 0 && g.Last != nil:
-			parts = append(parts, fmt.Sprintf("%s · %d unpushed", g.Last.Hash, g.Unpushed))
+	if q := s.Question; q != nil && len(q.Items) > 0 {
+		line := summary(q.Items[0].Question)
+		if more := len(q.Items) - 1; more > 0 {
+			line += fmt.Sprintf(" (+%d more)", more)
 		}
+		return line
 	}
-	if s.Question != nil {
-		for _, q := range s.Question.Items {
-			parts = append(parts, oneLine(q.Question))
-		}
-	} else if s.Message != nil {
-		parts = append(parts, oneLine(s.Message.Text))
+	if s.Message != nil {
+		return summary(s.Message.Text)
 	}
-	return strings.Join(parts, "\n")
+	return ""
 }
 
-func oneLine(text string) string {
-	line := strings.Join(strings.Fields(strings.NewReplacer("`", "", "*", "", "#", "").Replace(text)), " ")
-	if r := []rune(line); len(r) > 160 {
-		line = string(r[:159]) + "…"
+const maxBody = 120
+
+var (
+	mdLink   = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	mdMarker = regexp.MustCompile(`^\s*(?:[-*+>]|\d+[.)])\s+`)
+	sentence = regexp.MustCompile(`[.!?](?:\s|$)`)
+)
+
+// summary reduces markdown to the first paragraph that is not a heading, as
+// plain text, cut at the last sentence or word that fits maxBody.
+func summary(text string) string {
+	var para []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") {
+			if len(para) > 0 {
+				break
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "#") {
+			para = append(para, mdMarker.ReplaceAllString(line, ""))
+		}
 	}
-	return line
+	plain := mdLink.ReplaceAllString(strings.Join(para, " "), "$1")
+	plain = strings.NewReplacer("`", "", "*", "", "__", "").Replace(plain)
+	plain = strings.Join(strings.Fields(plain), " ")
+	r := []rune(plain)
+	if len(r) <= maxBody {
+		return plain
+	}
+	head := string(r[:maxBody])
+	if ends := sentence.FindAllStringIndex(head, -1); len(ends) > 0 {
+		return head[:ends[len(ends)-1][0]+1]
+	}
+	if i := strings.LastIndexByte(head, ' '); i > 0 {
+		head = head[:i]
+	}
+	return strings.TrimRight(head, " ,;:") + "…"
 }
 
 // Subscription is one phone's push endpoint.

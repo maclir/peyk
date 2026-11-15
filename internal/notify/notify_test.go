@@ -45,11 +45,26 @@ func TestChanges(t *testing.T) {
 	if got[0].Session != "h" || got[0].Title != "hamta needs you" || got[0].Body != "Include archived rows?" || got[0].URL != "/#s-h" {
 		t.Errorf("hamta note = %+v", got[0])
 	}
-	if got[1].Title != "knip finished" || got[1].Body != "3f2a1c4 · 2 unpushed\nCommitted 3f2a1c4. All tests pass." {
+	if got[1].Title != "knip finished" || got[1].Body != "Committed 3f2a1c4." {
 		t.Errorf("knip note = %+v", got[1])
 	}
-	if got[2].Title != "quiz needs you" || got[2].Body != "Which colour?\nWhich pets?" {
+	if got[2].Title != "quiz needs you" || got[2].Body != "Which colour? (+1 more)" {
 		t.Errorf("quiz note = %+v", got[2])
+	}
+}
+
+func TestSummary(t *testing.T) {
+	long := strings.Repeat("word ", 30)
+	for _, c := range []struct{ in, want string }{
+		{"## Done\n\nFixed the **login** bug in [app.go](internal/app.go:12).\n\n- detail", "Fixed the login bug in app.go."},
+		{"- First item\n- Second item", "First item Second item"},
+		{"Short one. " + long, "Short one."},
+		{long, strings.TrimSpace(strings.Repeat("word ", 24)) + "…"},
+		{"```\ncode\n```", "code"},
+	} {
+		if got := summary(c.in); got != c.want {
+			t.Errorf("summary(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -61,7 +76,7 @@ func TestChangesNotesAFailedRunOnce(t *testing.T) {
 	running := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIRunning)}}
 	failed := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIFailure)}}
 	got := Changes(running, failed)
-	if len(got) != 1 || got[0].Title != "knip: Test and deploy failed" || got[0].Body != "3f2a1c4 Ship it" || got[0].URL != "/#s-k" {
+	if len(got) != 1 || got[0].Title != "knip: Test and deploy failed" || got[0].Body != "Ship it" || got[0].URL != "/#s-k" {
 		t.Fatalf("notes = %+v", got)
 	}
 	if got := Changes(failed, failed); len(got) != 0 {
