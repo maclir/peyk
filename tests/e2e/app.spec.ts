@@ -282,7 +282,13 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Project: hamta' }).click();
     const sheet = page.getByRole('dialog', { name: 'Choose a project' });
     await expect(sheet.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
-    await sheet.getByLabel('Search projects').fill('kn');
+    // Keys typed one at a time land in the same input.
+    const search = sheet.getByLabel('Search projects');
+    await search.evaluate((el) => { (el as HTMLInputElement & { kept?: boolean }).kept = true; });
+    await search.pressSequentially('kn');
+    await expect(search).toHaveValue('kn');
+    await expect(search).toBeFocused();
+    expect(await search.evaluate((el) => (el as HTMLInputElement & { kept?: boolean }).kept)).toBe(true);
     await expect(sheet.getByRole('radio')).toHaveCount(1);
     await sheet.getByRole('radio', { name: /knip/ }).click();
     await expect(sheet).toHaveCount(0);
@@ -333,7 +339,10 @@ test.describe('signed in', () => {
     const waiting = page.locator('.task', { hasText: 'Wait for hamta' });
     await expect(waiting).toContainText('Waiting · needs input');
     expect((await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'dispatch')).toHaveLength(0);
-    await page.request.delete(`${FIRESTORE}/${(await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Wait for hamta')!.name.split('/documents/')[1]}`, { headers: admin });
+    // The page shows the task before the server has committed it.
+    const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Wait for hamta');
+    await expect.poll(stored).toBeTruthy();
+    await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
 
     await page.getByRole('button', { name: /^Project:/ }).click();
     await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();

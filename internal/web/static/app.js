@@ -614,9 +614,6 @@ async function start(cfg) {
     };
     const queued = new Map();
     for (const t of state.tasks) if (t.status === "queued") queued.set(t.project, (queued.get(t.project) || 0) + 1);
-    const q = state.pickQuery || "";
-    const matches = searchProjects(projects, q);
-    const recent = q ? [] : projects.filter((p) => p.active).slice(0, 4);
     const row = (p) => {
       const st = projectStatus(p);
       const on = p.name === current;
@@ -628,25 +625,34 @@ async function start(cfg) {
         queued.get(p.name) ? h("span", { class: "badge" }, `${queued.get(p.name)} queued`) : null,
         on ? icon("check") : null);
     };
+    const results = () => {
+      const q = state.pickQuery || "";
+      const matches = searchProjects(projects, q);
+      const recent = q ? [] : projects.filter((p) => p.active).slice(0, 4);
+      return [
+        recent.length ? [
+          h("h3", { class: "group" }, "Recent"),
+          h("div", { class: "recent" }, recent.map((p) =>
+            h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === current), onclick: () => pick(p.name) },
+              face(p, p.name, "xl"), h("span", {}, p.name), h("span", { class: `dot ${projectStatus(p).tone}` })))),
+        ] : null,
+        h("h3", { class: "group" }, q ? `Matches · ${matches.length}` : "All projects"),
+        matches.length
+          ? h("div", { class: "plist", role: "radiogroup", "aria-label": "Project" }, matches.map(row))
+          : h("p", { class: "empty" }, "No project matches."),
+      ].flat().filter(Boolean);
+    };
+    // Typing redraws only the results: replacing the input under the caret
+    // drops keystrokes and breaks the phone keyboard's composition.
+    const body = h("div", { class: "sheetbody" }, results());
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Choose a project", onkeydown: (e) => e.key === "Escape" && close() },
         h("div", { class: "grabber" }),
         h("div", { class: "sheethead" }, h("h2", {}, "Send to"), h("button", { type: "button", class: "link", onclick: close }, "Cancel")),
         h("label", { class: "search" }, icon("search"),
-          h("input", { type: "search", id: "pick-search", placeholder: `Search ${projects.length} projects`, "aria-label": "Search projects", value: q,
-            oninput: (e) => { state.pickQuery = e.target.value; render(); } })),
-        h("div", { class: "sheetbody" },
-          recent.length ? [
-            h("h3", { class: "group" }, "Recent"),
-            h("div", { class: "recent" }, recent.map((p) =>
-              h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === current), onclick: () => pick(p.name) },
-                face(p, p.name, "xl"), h("span", {}, p.name), h("span", { class: `dot ${projectStatus(p).tone}` })))),
-          ] : null,
-          h("h3", { class: "group" }, q ? `Matches · ${matches.length}` : "All projects"),
-          matches.length
-            ? h("div", { class: "plist", role: "radiogroup", "aria-label": "Project" }, matches.map(row))
-            : h("p", { class: "empty" }, "No project matches."),
-        ),
+          h("input", { type: "search", id: "pick-search", placeholder: `Search ${projects.length} projects`, "aria-label": "Search projects", value: state.pickQuery || "",
+            oninput: (e) => { state.pickQuery = e.target.value; body.replaceChildren(...results()); } })),
+        body,
       ),
     );
   }
