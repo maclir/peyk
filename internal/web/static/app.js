@@ -383,7 +383,7 @@ async function start(cfg) {
           icon("sort"), state.arranging ? "Done" : "Reorder")
         : null);
     const names = [...new Set(all.map((t) => t.project))];
-    const strip = names.length > 1
+    const strip = names.length > 1 || state.only
       ? h("div", { class: "strip", role: "group", "aria-label": "Filter by project" }, names.map((n) =>
         h("button", { type: "button", class: "sface", title: n, "aria-label": n, "aria-pressed": String(state.only === n),
           onclick: () => { state.only = state.only === n ? null : n; render(); } }, face(projectNamed(n), n, "md"))))
@@ -945,6 +945,7 @@ async function start(cfg) {
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
+      nextTasks(s),
       g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       h("div", { class: "convo" },
@@ -958,6 +959,17 @@ async function start(cfg) {
         h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
       replyBox(s),
     );
+  }
+
+  // A free worker links to the inbox, narrowed to its project, to pick what
+  // it does next.
+  function nextTasks(s) {
+    const p = projectOf(s);
+    if (!p?.free) return null;
+    const n = state.tasks.filter((t) => t.status === "queued" && t.project === p.name).length;
+    if (!n) return null;
+    return h("a", { class: "nextlink", href: "#inbox", onclick: () => { state.only = p.name; state.filter = "ready"; } },
+      h("span", { class: "dot free" }), h("span", { class: "grow" }, `${n} ${n === 1 ? "task" : "tasks"} in inbox`), icon("arrow"));
   }
 
   function pushCard(s, now) {

@@ -130,6 +130,8 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .pending code { background: none; padding: 0; color: var(--accent); }
 .pending .when { margin-left: 6px; }
 .when { color: var(--muted); font-weight: 400; }
+.nextlink { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); font-weight: 600; text-decoration: none; }
+.nextlink .ico svg { width: 14px; height: 14px; color: var(--muted); }
 .protos { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .protos li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .protos a { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }

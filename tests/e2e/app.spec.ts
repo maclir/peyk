@@ -464,6 +464,27 @@ test.describe('signed in', () => {
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
 
+  test("a free worker links to its project's tasks in the inbox", async () => {
+    await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
+    await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });
+    await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
+    await page.goto('/#s-h');
+    await expect(page.locator('.detail')).toBeVisible();
+    await expect(page.getByRole('link', { name: /in inbox/ })).toHaveCount(0);
+
+    await page.goto('/#inbox');
+    await page.getByRole('button', { name: /^All/ }).click();
+    await page.evaluate(() => { location.hash = '#s-k'; });
+    await page.getByRole('link', { name: '2 tasks in inbox' }).click();
+    await expect(page).toHaveURL(/#inbox$/);
+    await expect(page.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.tasks .ttext')).toHaveText(['First thing', 'Second thing']);
+    await page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' }).click();
+
+    for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
   test('the composer tucks while scrolling down and returns at the end without changing the page length', async () => {
     const ids = Array.from({ length: 30 }, (_, i) => `long${i}`);
     for (const [i, id] of ids.entries()) {
