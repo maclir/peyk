@@ -75,7 +75,13 @@ self.addEventListener("push", (event) => {
       icon: "/static/icon-192.png",
       badge: "/static/notification-badge.png",
       data: { url: note.url },
-    }),
+    })
+      // The page dismisses a worker's notes when it renders that worker, but
+      // the push for a change can land after the snapshot that rendered it.
+      // Safari revokes push for a subscription that receives a push without
+      // showing a notification, so the note is shown first and the page closes it.
+      .then(() => self.clients.matchAll({ type: "window" }))
+      .then((wins) => wins.forEach((w) => w.postMessage({ type: "notified", session: note.session }))),
   );
 });
 

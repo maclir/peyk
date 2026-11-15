@@ -216,6 +216,10 @@ async function start(cfg) {
       .then((reg) => reg.getNotifications({ tag: id }))
       .then((notes) => notes.forEach((n) => n.close()), () => {});
   }
+  navigator.serviceWorker?.addEventListener("message", (e) => {
+    if (e.data?.type !== "notified" || !e.data.session || document.hidden) return;
+    if (location.hash.startsWith("#s-") && decodeURIComponent(location.hash.slice(3)) === e.data.session) dismissNotes(e.data.session);
+  });
 
   // Scrolling down reads further into the list, so the composer gets out of
   // the way; scrolling up or reaching the end brings it back. The clamp ignores

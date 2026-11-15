@@ -200,6 +200,22 @@ test.describe('signed in', () => {
     await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
   });
 
+  test("a notification that arrives for the open worker is dismissed", async () => {
+    await page.goto('/#s-k');
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+    await page.evaluate(() => {
+      const open = new Set<string>();
+      (window as any).open_notes = open;
+      ServiceWorkerRegistration.prototype.getNotifications = async (filter?: { tag?: string }) =>
+        [...open].filter((t) => !filter?.tag || t === filter.tag).map((tag) => ({ tag, close: () => open.delete(tag) }) as any);
+      for (const session of ['k', 'h']) {
+        open.add(session);
+        navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'notified', session } }));
+      }
+    });
+    await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
+  });
+
   // A phone that freezes the app leaves its Firestore connection dead without
   // an offline event, and the SDK's next retry can be a minute away. Held
   // requests stand in for that dead connection.
