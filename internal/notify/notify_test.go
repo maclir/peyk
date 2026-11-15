@@ -42,13 +42,13 @@ func TestChanges(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("notes = %+v", got)
 	}
-	if got[0].Session != "h" || got[0].Title != "hamta needs you" || got[0].Body != "Include archived rows?" || got[0].URL != "/#s-h" {
+	if got[0].Session != "h" || got[0].Title != "hamta" || got[0].Body != "Needs you · Include archived rows?" || got[0].URL != "/#s-h" {
 		t.Errorf("hamta note = %+v", got[0])
 	}
-	if got[1].Title != "knip finished" || got[1].Body != "Committed 3f2a1c4." {
+	if got[1].Title != "knip" || got[1].Body != "Finished · Committed 3f2a1c4." {
 		t.Errorf("knip note = %+v", got[1])
 	}
-	if got[2].Title != "quiz needs you" || got[2].Body != "Which colour? (+1 more)" {
+	if got[2].Title != "quiz" || got[2].Body != "Needs you · Which colour? (+1 more)" {
 		t.Errorf("quiz note = %+v", got[2])
 	}
 }
@@ -76,7 +76,7 @@ func TestChangesNotesAFailedRunOnce(t *testing.T) {
 	running := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIRunning)}}
 	failed := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIFailure)}}
 	got := Changes(running, failed)
-	if len(got) != 1 || got[0].Title != "knip: Test and deploy failed" || got[0].Body != "Ship it" || got[0].URL != "/#s-k" {
+	if len(got) != 1 || got[0].Title != "knip" || got[0].Body != "Test and deploy failed · Ship it" || got[0].URL != "/#s-k" {
 		t.Fatalf("notes = %+v", got)
 	}
 	if got := Changes(failed, failed); len(got) != 0 {

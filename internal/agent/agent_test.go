@@ -300,11 +300,11 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 }
 
-type recordingNotifier struct{ titles []string }
+type recordingNotifier struct{ notes []string }
 
 func (r *recordingNotifier) Notify(_ context.Context, notes []notify.Note) error {
 	for _, n := range notes {
-		r.titles = append(r.titles, n.Title)
+		r.notes = append(r.notes, n.Title+": "+n.Body)
 	}
 	return nil
 }
@@ -319,15 +319,15 @@ func TestRefreshNotifiesOnTransitionsButNotAtStart(t *testing.T) {
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(n.titles) != 0 {
-		t.Fatalf("notified at start: %v", n.titles)
+	if len(n.notes) != 0 {
+		t.Fatalf("notified at start: %v", n.notes)
 	}
 	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Working})
 	_ = a.Refresh(ctx)
 	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle})
 	_ = a.Refresh(ctx)
-	if strings.Join(n.titles, "|") != "knip finished" {
-		t.Fatalf("notes = %v", n.titles)
+	if strings.Join(n.notes, "|") != "knip: Finished" {
+		t.Fatalf("notes = %v", n.notes)
 	}
 }
 
@@ -496,8 +496,8 @@ func TestCIIsFollowedUntilTheRunFinishes(t *testing.T) {
 	if a.ciPending() {
 		t.Fatal("still following a finished run")
 	}
-	if strings.Join(n.titles, "|") != "knip: deploy failed" {
-		t.Fatalf("notes = %v", n.titles)
+	if strings.Join(n.notes, "|") != "knip: deploy failed · abc" {
+		t.Fatalf("notes = %v", n.notes)
 	}
 	if v, _ := mem.Get(store.Sessions, "k"); v.(session.Snapshot).Git.CI.URL != "https://github.com/run/1" {
 		t.Fatalf("published %+v", v.(session.Snapshot).Git.CI)

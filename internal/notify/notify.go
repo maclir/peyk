@@ -33,6 +33,9 @@ type Note struct {
 // finished a turn, or whose pushed commit's workflow failed between two
 // refreshes. A session absent from prev is new to the agent, not changed, so
 // it gets none.
+//
+// The title is only the worker's name, so a long name never truncates the
+// event; the body leads with the event and follows with its detail.
 func Changes(prev, next map[string]session.Snapshot) []Note {
 	var notes []Note
 	for id, n := range next {
@@ -41,26 +44,33 @@ func Changes(prev, next map[string]session.Snapshot) []Note {
 			continue
 		}
 		if ci := ciOf(n); ci != nil && ci.State == session.CIFailure && !sameFailure(ciOf(p), ci) {
-			notes = append(notes, Note{Session: id, Title: n.Title + ": " + ci.Workflow + " failed", Body: ciBody(n), URL: "/#s-" + id})
+			notes = append(notes, Note{Session: id, Title: n.Title, Body: line(ci.Workflow+" failed", ciBody(n)), URL: "/#s-" + id})
 		}
 		if p.State == n.State {
 			continue
 		}
-		var title string
+		var event string
 		switch {
 		case n.State == session.NeedsInput:
-			title = n.Title + " needs you"
+			event = "Needs you"
 		case n.State == session.Error:
-			title = n.Title + " hit an error"
+			event = "Hit an error"
 		case p.State == session.Working && n.State != session.Working:
-			title = n.Title + " finished"
+			event = "Finished"
 		default:
 			continue
 		}
-		notes = append(notes, Note{Session: id, Title: title, Body: body(n), URL: "/#s-" + id})
+		notes = append(notes, Note{Session: id, Title: n.Title, Body: line(event, body(n)), URL: "/#s-" + id})
 	}
 	sort.Slice(notes, func(i, j int) bool { return notes[i].Session < notes[j].Session })
 	return notes
+}
+
+func line(event, detail string) string {
+	if detail == "" {
+		return event
+	}
+	return event + " · " + detail
 }
 
 func ciOf(s session.Snapshot) *session.CI {
