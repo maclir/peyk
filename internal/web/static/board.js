@@ -170,6 +170,13 @@ export function currentTask(tasks, sessionId) {
     .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at))[0] || null;
 }
 
+// Tasks sent to a worker and not yet finished, newest first.
+export function sentTasks(tasks) {
+  return tasks
+    .filter((t) => t.status === "dispatched")
+    .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at));
+}
+
 // Finished tasks, newest first.
 export function doneTasks(tasks, limit = 10) {
   return tasks

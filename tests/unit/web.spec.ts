@@ -161,7 +161,7 @@ describe('passkey helpers', () => {
 describe('task lifecycle', () => {
   it('finds the task a session is on and lists finished tasks newest first', async () => {
     // @ts-expect-error plain browser module
-    const { currentTask, doneTasks } = await import('../../internal/web/static/board.js');
+    const { currentTask, doneTasks, sentTasks } = await import('../../internal/web/static/board.js');
     const tasks = [
       { id: 'a', status: 'dispatched', session_id: 'k', dispatched_at: new Date(2026, 0, 1), text: 'old' },
       { id: 'b', status: 'dispatched', session_id: 'k', dispatched_at: new Date(2026, 0, 2), text: 'new' },
@@ -171,6 +171,7 @@ describe('task lifecycle', () => {
     expect(currentTask(tasks, 'k').id).toBe('b');
     expect(currentTask(tasks, 'h')).toBe(null);
     expect(doneTasks(tasks).map((t: any) => t.id)).toEqual(['d', 'c']);
+    expect(sentTasks(tasks).map((t: any) => t.id)).toEqual(['b', 'a']);
   });
 });
 

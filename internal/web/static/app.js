@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sentTasks, sortProjects, sortSessions } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -392,11 +392,16 @@ async function start(cfg) {
     const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
       ? list.map((t, i) => (state.editing === t.id ? editor(t) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
       : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
+    const sent = sentTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
     const finished = doneTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
     return h("div", { class: "inbox" },
       filters, strip,
       h("p", { class: "alert", id: "alert", role: "status" }),
       h("div", { class: "tasks" }, items),
+      sent.length && state.filter !== "waiting" && !state.arranging ? [
+        h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
+        ...sent.map((t) => sentCard(t, now)),
+      ] : null,
       finished.length && state.filter !== "waiting" && !state.arranging ? [
         h("h2", { class: "group" },
           h("button", { type: "button", class: "fold", "aria-expanded": String(state.showDone), onclick: () => { state.showDone = !state.showDone; render(); } },
@@ -413,6 +418,27 @@ async function start(cfg) {
       ] : null,
       composer(),
       state.picking ? picker(projects) : null,
+    );
+  }
+
+  // A sent task stays in the inbox until it is done. A new worker is only
+  // published once the laptop sees it start, so until then the task has no
+  // worker to link to.
+  function sentCard(t, now) {
+    const s = state.sessions.get(t.session_id);
+    const st = s && (STATES[s.state] || { label: s.state, tone: "idle" });
+    return h("article", { class: "task sent" },
+      h("div", { class: "thead" }, face(projectNamed(t.project), t.project, "sm"),
+        h("span", { class: "proj" }, t.project),
+        h("span", { class: "when" }, `sent ${ago(t.dispatched_at, now)} ago`),
+        h("span", { class: "grow" }),
+        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
+      h("div", { class: "ttext" }, t.text),
+      taskImages(t),
+      h("div", { class: "tfoot" },
+        s ? h("span", { class: `dot ${st.tone}` }) : spinner(),
+        s ? h("a", { class: "tstatus", href: `#s-${encodeURIComponent(s.id)}` }, `${s.title} · ${st.label}`)
+          : h("span", { class: "tstatus" }, "Starting the worker…")),
     );
   }
 

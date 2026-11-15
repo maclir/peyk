@@ -316,6 +316,17 @@ test.describe('signed in', () => {
     await expect(edited).toHaveCount(0);
   });
 
+  test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
+    await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
+    await page.goto('/#inbox');
+    await expect(page.getByRole('heading', { name: 'Sent 2' })).toBeVisible();
+    const starting = page.locator('.task.sent', { hasText: 'Set up the repo' });
+    await expect(starting).toContainText('Starting the worker…');
+    await page.locator('.task.sent', { hasText: 'Add CSV export' }).getByRole('link', { name: 'hamta · needs input' }).click();
+    await expect(page).toHaveURL(/#s-h$/);
+    await page.request.delete(`${FIRESTORE}/tasks/starting`, { headers: admin });
+  });
+
   test('a task carries a screenshot to its worker and drops it when deleted', async () => {
     await page.goto('/#inbox');
     await passkeyOn(page);
