@@ -200,20 +200,24 @@ test.describe('signed in', () => {
     await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
   });
 
-  test("a notification that arrives for the open worker is dismissed", async () => {
-    await page.goto('/#s-k');
+  test("a push for the worker on screen is shown silently and closed, others with sound", async () => {
+    await page.goto('/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await page.evaluate(() => { location.hash = '#s-k'; });
     await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
-    await page.evaluate(() => {
-      const open = new Set<string>();
-      (window as any).open_notes = open;
-      ServiceWorkerRegistration.prototype.getNotifications = async (filter?: { tag?: string }) =>
-        [...open].filter((t) => !filter?.tag || t === filter.tag).map((tag) => ({ tag, close: () => open.delete(tag) }) as any);
-      for (const session of ['k', 'h']) {
-        open.add(session);
-        navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'notified', session } }));
-      }
+    const [worker] = page.context().serviceWorkers();
+    const shown = await worker.evaluate(async () => {
+      const reg = (self as any).registration;
+      const out: Record<string, { silent: boolean; renotify: boolean; closed: boolean }> = {};
+      reg.showNotification = async (_: string, o: any) => { out[o.tag] = { silent: o.silent, renotify: o.renotify, closed: false }; };
+      reg.getNotifications = async ({ tag }: { tag: string }) => [{ close: () => { out[tag].closed = true; } }];
+      for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/#s-${session}`, session });
+      return out;
     });
-    await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
+    expect(shown).toEqual({
+      k: { silent: true, renotify: false, closed: true },
+      h: { silent: false, renotify: true, closed: false },
+    });
   });
 
   // A phone that freezes the app leaves its Firestore connection dead without

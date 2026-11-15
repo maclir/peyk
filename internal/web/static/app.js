@@ -189,7 +189,7 @@ async function start(cfg) {
     const drafts = new Map([...app.querySelectorAll(typed)].map((t) => [t.id, t.value]));
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
-    const id = location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
+    const id = shownSession();
     const s = id && state.sessions.get(id);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
@@ -216,10 +216,16 @@ async function start(cfg) {
       .then((reg) => reg.getNotifications({ tag: id }))
       .then((notes) => notes.forEach((n) => n.close()), () => {});
   }
+  // The service worker asks before showing a note whether its worker is on
+  // screen; a window's url as the worker sees it lacks the hash.
   navigator.serviceWorker?.addEventListener("message", (e) => {
-    if (e.data?.type !== "notified" || !e.data.session || document.hidden) return;
-    if (location.hash.startsWith("#s-") && decodeURIComponent(location.hash.slice(3)) === e.data.session) dismissNotes(e.data.session);
+    if (e.data?.type !== "showing") return;
+    e.ports[0]?.postMessage(!document.hidden && shownSession() === e.data.session);
   });
+
+  function shownSession() {
+    return location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
+  }
 
   // Scrolling down reads further into the list, so the composer gets out of
   // the way; scrolling up or reaching the end brings it back. The clamp ignores

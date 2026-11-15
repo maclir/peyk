@@ -67,23 +67,38 @@ self.addEventListener("push", (event) => {
   } catch {
     note.body = event.data ? event.data.text() : "";
   }
-  event.waitUntil(
-    self.registration.showNotification(note.title, {
-      body: note.body,
-      tag: note.session || undefined,
-      renotify: Boolean(note.session),
-      icon: "/static/icon-192.png",
-      badge: "/static/notification-badge.png",
-      data: { url: note.url },
-    })
-      // The page dismisses a worker's notes when it renders that worker, but
-      // the push for a change can land after the snapshot that rendered it.
-      // Safari revokes push for a subscription that receives a push without
-      // showing a notification, so the note is shown first and the page closes it.
-      .then(() => self.clients.matchAll({ type: "window" }))
-      .then((wins) => wins.forEach((w) => w.postMessage({ type: "notified", session: note.session }))),
-  );
+  event.waitUntil(notify(note));
 });
+
+// Browsers require every push to show a notification: Safari revokes the
+// subscription otherwise, and Chrome shows a generic one in its place. A note
+// for the worker already on screen is shown silently and closed at once.
+async function notify(note) {
+  const watched = Boolean(note.session) && (await watching(note.session));
+  await self.registration.showNotification(note.title, {
+    body: note.body,
+    tag: note.session || undefined,
+    renotify: Boolean(note.session) && !watched,
+    silent: watched,
+    icon: "/static/icon-192.png",
+    badge: "/static/notification-badge.png",
+    data: { url: note.url },
+  });
+  if (watched) (await self.registration.getNotifications({ tag: note.session })).forEach((n) => n.close());
+}
+
+// A window's url here does not follow its hash, so only the page knows which
+// worker it shows. A frozen page never answers.
+async function watching(session) {
+  const wins = (await self.clients.matchAll({ type: "window" })).filter((w) => w.visibilityState === "visible");
+  const answers = wins.map((w) => new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = (e) => resolve(e.data === true);
+    setTimeout(() => resolve(false), 500);
+    w.postMessage({ type: "showing", session }, [port2]);
+  }));
+  return (await Promise.all(answers)).some(Boolean);
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
