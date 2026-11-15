@@ -142,6 +142,7 @@ test.describe('signed in', () => {
     const usage = page.getByRole('link', { name: 'Claude usage: 5h 77% left, 7d 5% left' });
     await expect(usage).toHaveAttribute('href', 'https://claude.ai/settings/usage');
     await expect(usage.locator('.meter.low')).toHaveCount(1);
+    await expect(usage.locator('.meter i').first()).toHaveAttribute('style', 'width: 23%;');
   });
 
   test('the board groups sessions and shows what each is doing', async () => {

@@ -175,7 +175,7 @@ async function start(cfg) {
     if (!left) return;
     usageEl.querySelectorAll(".meter").forEach((m, i) => {
       m.classList.toggle("low", left[i].left < 10);
-      m.firstElementChild.style.width = `${left[i].left}%`;
+      m.firstElementChild.style.width = `${100 - left[i].left}%`;
     });
     usageEl.setAttribute("aria-label", `Claude usage: ${left.map((w) => `${w.label} ${w.left}% left`).join(", ")}`);
     usageEl.title = left.map((w) => `${w.label} ${w.left}% left` + (w.resetsAt ? `, resets in ${ago(now, w.resetsAt.getTime())}` : "")).join("\n");
