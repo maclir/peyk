@@ -316,6 +316,39 @@ test.describe('signed in', () => {
     await expect(edited).toHaveCount(0);
   });
 
+  test('a long press on Add task sends the task when its worker is free', async () => {
+    await page.goto('/#inbox');
+    await passkeyOn(page);
+    const press = async () => {
+      await page.getByRole('button', { name: 'Add task' }).hover();
+      await page.mouse.down();
+      await page.waitForTimeout(700);
+      await page.mouse.up();
+    };
+
+    await page.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog').getByRole('radio', { name: /hamta/ }).click();
+    await page.getByLabel('New task').fill('Wait for hamta');
+    await press();
+    const waiting = page.locator('.task', { hasText: 'Wait for hamta' });
+    await expect(waiting).toContainText('Waiting · needs input');
+    expect((await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'dispatch')).toHaveLength(0);
+    await page.request.delete(`${FIRESTORE}/${(await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Wait for hamta')!.name.split('/documents/')[1]}`, { headers: admin });
+
+    await page.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();
+    await page.getByLabel('New task').fill('Ship it now');
+    await press();
+    await expect(page.getByLabel('New task')).toHaveValue('');
+    const task = page.locator('.task', { hasText: 'Ship it now' });
+    await expect(task.getByRole('status')).toHaveText('Send to knip: waiting for the laptop…');
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    const payload = JSON.parse(cmd.fields.payload.stringValue);
+    expect(payload).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Ship it now', clear: false });
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/tasks/${payload.task}`, { headers: admin });
+  });
+
   test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
     await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
     await page.goto('/#inbox');

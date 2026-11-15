@@ -181,7 +181,7 @@ button.pill { display: inline-flex; align-items: center; gap: 6px; height: 34px;
 button.pill > span:not(.ico):not(.face) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.pill .ico svg { width: 14px; height: 14px; color: var(--muted); }
 button.round { width: 36px; height: 36px; padding: 0; border-radius: 999px; border: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-button.go { background: var(--ink); color: var(--bg); }
+button.go { background: var(--ink); color: var(--bg); -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 
 /* Inbox */
 .inbox { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 0; }

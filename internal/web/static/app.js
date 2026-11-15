@@ -517,7 +517,9 @@ async function start(cfg) {
   // New tasks, edits and replies share one composer, so each takes text,
   // pasted screenshots and attached images the same way. key names both its
   // busy state and its draft images.
-  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon = "up", send, lead = null, tail = null }) {
+  // hold, when given, answers a long press on the submit button; it returns
+  // false to let the press submit as a tap would.
+  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon = "up", send, hold = null, lead = null, tail = null }) {
     const imgs = draft(key);
     const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
@@ -529,10 +531,38 @@ async function start(cfg) {
         h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: imgs.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
         h("span", { class: "grow" }),
         tail,
-        busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel }, icon(submitIcon)),
+        busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel, ...(hold ? longPress(() => hold(text)) : {}) }, icon(submitIcon)),
       ),
       files,
     );
+  }
+
+  // The click that ends a long press is swallowed, so the press does not
+  // also submit.
+  function longPress(fire, ms = 500) {
+    let timer = null;
+    let held = false;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    return {
+      onpointerdown: (e) => {
+        if (e.button !== 0) return;
+        held = false;
+        cancel();
+        timer = setTimeout(() => {
+          timer = null;
+          if (fire() === false) return;
+          held = true;
+          navigator.vibrate?.(10);
+        }, ms);
+      },
+      onpointerup: cancel, onpointerleave: cancel, onpointercancel: cancel,
+      oncontextmenu: (e) => e.preventDefault(),
+      onclick: (e) => {
+        if (!held) return;
+        held = false;
+        e.preventDefault();
+      },
+    };
   }
 
   function projectPill(name, task = null) {
@@ -545,15 +575,16 @@ async function start(cfg) {
     // The draft is cleared as soon as the task is accepted: a local write
     // re-renders the inbox before the server confirms it, and the re-render
     // would otherwise restore the text it found in the box.
-    const add = async (text) => {
+    const add = async (text, andSend = false) => {
       const value = text.value.trim();
       if (!value || !state.picked) return;
       const attaching = draft("add");
       text.value = "";
       state.drafts.delete("add");
       try {
-        await track("add", () => addTask(state.picked, value, attaching));
+        const t = await track("add", () => addTask(state.picked, value, attaching));
         forgetImages(attaching);
+        if (andSend) send(t, hasConversation(t));
       } catch (err) {
         const box = document.getElementById("task-text");
         if (box && !box.value) box.value = value;
@@ -562,8 +593,14 @@ async function start(cfg) {
         alertLine(`Could not add the task: ${err.message}`);
       }
     };
+    // A long press sends the task straight away, as its Send button would,
+    // when the project's worker is free to take it.
+    const hold = (text) => {
+      if (!text.value.trim() || !projectNamed(state.picked)?.free || state.busy.has("add")) return false;
+      add(text, true);
+    };
     return composerForm({ key: "add", id: "task-text", label: "New task", placeholder: state.picked ? "Describe a task…" : "No projects published yet",
-      cls: "add", submitLabel: "Add task", send: add, lead: projectPill(state.picked) });
+      cls: "add", submitLabel: "Add task", send: add, hold, lead: projectPill(state.picked) });
   }
 
   function picker(projects) {
@@ -636,8 +673,10 @@ async function start(cfg) {
     // has confirmed it, which would sort the new task to the top meanwhile.
     const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: Date.now() };
     if (ids.length) task.images = ids;
-    batch.set(fs.doc(fs.collection(db, "tasks")), task);
+    const ref = fs.doc(fs.collection(db, "tasks"));
+    batch.set(ref, task);
     await batch.commit();
+    return { ...task, id: ref.id };
   }
 
   // Images an edit drops go with it, unless another task shares one.
