@@ -140,6 +140,9 @@ async function start(cfg) {
   window.addEventListener("pageshow", (e) => {
     if (e.persisted && state.user) reconnect();
   });
+  document.addEventListener("click", (e) => {
+    if (String(state.menu).startsWith("worker:") && !e.target.closest(".wmenu")) { state.menu = null; render(); }
+  });
   window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
   tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
@@ -984,18 +987,16 @@ async function start(cfg) {
     else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     return h("article", { class: "detail" },
       h("div", { class: "dhead" },
-        h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
-        face(projectOf(s), s.title, "lg"),
-        h("div", { class: "dtitle" },
-          h("h2", {}, s.title, chip(st), flagRow(s)),
+        h("div", { class: "drow" },
+          h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
+          face(projectOf(s), s.title, "md"),
+          h("h2", {}, s.title, chip(st)),
+          inboxButton(s),
+          workerMenu(s, busy)),
+        h("div", { class: "dsub" },
+          flagRow(s),
           g && !onDefaultBranch(g) ? h("span", { class: "branch" }, g.branch || "detached") : null,
           ciLink(g)),
-        inboxButton(s),
-        s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
-        s.aoe_status === "stopped"
-          ? busyButton(`start:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Start", title: "Start the worker", onclick: () => sendCommand("start", { session: s.id }, `Start ${s.title}`, `start:${s.id}`) }, icon("play"))
-          : busyButton(`restart:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Restart", title: "Restart the worker on its conversation", onclick: () => sendCommand("restart", { session: s.id }, `Restart ${s.title}`, `restart:${s.id}`) }, icon("restart")),
-        s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
@@ -1011,6 +1012,26 @@ async function start(cfg) {
         h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
       replyBox(s),
     );
+  }
+
+  // Clear, start, restart and stop share a menu so the worker's name and
+  // state keep the header's width on a phone.
+  function workerMenu(s, busy) {
+    const key = `worker:${s.id}`;
+    const open = state.menu === key;
+    const item = (cmd, ico, label, cls) => busyButton(`${cmd}:${s.id}`, { type: "button", role: "menuitem", class: cls,
+      onclick: () => { state.menu = null; sendCommand(cmd, { session: s.id }, `${cmd[0].toUpperCase()}${cmd.slice(1)} ${s.title}`, `${cmd}:${s.id}`); } },
+    icon(ico), label);
+    const stopped = s.aoe_status === "stopped";
+    const pending = ["clear", "start", "restart", "stop"].some((c) => state.busy.has(`${c}:${s.id}`));
+    return h("div", { class: "wmenu" },
+      h("button", { type: "button", class: "icon tool", "aria-label": "Worker actions", "aria-haspopup": "menu", "aria-expanded": String(open),
+        onclick: () => { state.menu = open ? null : key; render(); } }, pending ? spinner() : icon("more")),
+      open ? h("div", { class: "pop", role: "menu", onkeydown: (e) => { if (e.key === "Escape") { state.menu = null; render(); } } },
+        s.cleared || busy ? null : item("clear", "trash", "Clear conversation"),
+        stopped ? item("start", "play", "Start worker") : item("restart", "restart", "Restart worker"),
+        stopped ? null : item("stop", "stop", "Stop worker", "danger"),
+      ) : null);
   }
 
   function queuedFor(project) {
