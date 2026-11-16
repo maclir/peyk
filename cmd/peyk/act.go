@@ -49,6 +49,12 @@ func (a actions) Answer(ctx context.Context, session string, t session.Transcrip
 
 func (a actions) Stop(ctx context.Context, session string) error { return a.aoe.Stop(ctx, session) }
 
+func (a actions) Start(ctx context.Context, session string) error { return a.aoe.Start(ctx, session) }
+
+func (a actions) Restart(ctx context.Context, session string) error {
+	return a.aoe.Restart(ctx, session)
+}
+
 func (a actions) Push(ctx context.Context, dir string) error {
 	return laptop.Push(ctx, laptop.Exec, dir)
 }

@@ -117,6 +117,18 @@ func (a Aoe) Stop(ctx context.Context, id string) error {
 	return err
 }
 
+// Start launches a stopped session's agent process.
+func (a Aoe) Start(ctx context.Context, id string) error {
+	_, err := a.cmd(ctx, "session", "start", id)
+	return err
+}
+
+// Restart relaunches a session's agent process on its conversation.
+func (a Aoe) Restart(ctx context.Context, id string) error {
+	_, err := a.cmd(ctx, "session", "restart", id)
+	return err
+}
+
 // Create adds a stopped session for a directory and returns its id; Send
 // starts it.
 func (a Aoe) Create(ctx context.Context, dir, title, group string) (string, error) {

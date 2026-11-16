@@ -21,6 +21,8 @@ type Actions interface {
 	// one, so a prompt sent next lands in it.
 	Clear(ctx context.Context, session string, t session.Transcript) (string, error)
 	Stop(ctx context.Context, session string) error
+	Start(ctx context.Context, session string) error
+	Restart(ctx context.Context, session string) error
 	Push(ctx context.Context, dir string) error
 	// Answer closes a session's open dialog for question and sends text as
 	// the answer.
@@ -146,6 +148,24 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return err
 		}
 		return act.Stop(ctx, s.ID)
+	case command.Start:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		if s.AoeStatus != "stopped" {
+			return fmt.Errorf("%s is already running", s.Title)
+		}
+		return act.Start(ctx, s.ID)
+	case command.Restart:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		if s.AoeStatus == "stopped" {
+			return fmt.Errorf("%s is stopped; start it instead", s.Title)
+		}
+		return act.Restart(ctx, s.ID)
 	case command.Push:
 		s, err := a.session(p.Session)
 		if err != nil {

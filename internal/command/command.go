@@ -27,7 +27,11 @@ const (
 	Reply    = "reply"
 	Stop     = "stop"
 	Clear    = "clear"
-	Push     = "push"
+	// Start launches a stopped session; Restart relaunches a running one on
+	// the same conversation, as aoe's restart does.
+	Start   = "start"
+	Restart = "restart"
+	Push    = "push"
 	// Answer replies to a session's open multiple-choice dialog.
 	Answer = "answer"
 	// CheckUpdate fetches the laptop's checkout so the phone can see whether

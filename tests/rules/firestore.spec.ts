@@ -207,6 +207,8 @@ describe('commands', () => {
     const { assertion: unsigned, ...check } = cmd({ type: 'check' });
     await assertSucceeds(setDoc(doc(owner(), 'commands/c6'), check));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c7'), cmd({ type: 'update' })));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c8'), cmd({ type: 'start' })));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c9'), cmd({ type: 'restart' })));
     const { assertion: a, ...bare } = cmd();
     await assertSucceeds(setDoc(doc(owner(), 'commands/c4'), { ...bare, grant: { statement: '{}', assertion: a, signature: 'e' } }));
     await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));

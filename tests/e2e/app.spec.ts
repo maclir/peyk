@@ -247,6 +247,30 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply.pending')).toHaveText('Working…');
   });
 
+  test('a stopped worker can be started and a running one restarted, each signed', async () => {
+    await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'stopped', state: 'idle', updated_at: new Date() });
+    await page.goto('/#s-z');
+    await passkeyOn(page);
+    await expect(page.getByRole('button', { name: 'Restart', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+    await expect(page.getByText('Start zzz: waiting for the laptop…')).toBeVisible();
+    const start = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'start')!;
+    expect(JSON.parse(start.fields.payload.stringValue)).toMatchObject({ type: 'start', session: 'z' });
+    expect(start.fields.grant).toBeDefined();
+    await put(page, `commands/${start.name.split('/').pop()}`, { ...plain(start.fields), status: 'done' });
+    await expect(page.getByText('Start zzz: done.')).toBeVisible();
+    await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'idle', state: 'idle', updated_at: new Date() });
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Restart', exact: true }).click();
+    await expect(page.getByText('Restart zzz: waiting for the laptop…')).toBeVisible();
+    const restart = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'restart')!;
+    expect(JSON.parse(restart.fields.payload.stringValue)).toMatchObject({ type: 'restart', session: 'z' });
+    await put(page, `commands/${restart.name.split('/').pop()}`, { ...plain(restart.fields), status: 'done' });
+    await expect(page.getByText('Restart zzz: done.')).toBeVisible();
+    await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
+  });
+
   test('tapping the laptop checks for updates, and Update is signed', async () => {
     await page.goto('/');
     await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();

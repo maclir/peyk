@@ -41,6 +41,14 @@ func (f *fakeActions) Stop(_ context.Context, s string) error {
 	f.calls = append(f.calls, "stop "+s)
 	return nil
 }
+func (f *fakeActions) Start(_ context.Context, s string) error {
+	f.calls = append(f.calls, "start "+s)
+	return nil
+}
+func (f *fakeActions) Restart(_ context.Context, s string) error {
+	f.calls = append(f.calls, "restart "+s)
+	return nil
+}
 func (f *fakeActions) Push(_ context.Context, dir string) error {
 	f.calls = append(f.calls, "push "+dir)
 	return nil
@@ -99,6 +107,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 		session.Snapshot{ID: "z", Title: "zynk", Path: "/c/zynk", State: session.Unpushed, Git: &session.Git{Unpushed: 1}},
 		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
 		session.Snapshot{ID: "f", Title: "fresh", Path: "/c/fresh", State: session.Idle, Cleared: true},
+		session.Snapshot{ID: "s", Title: "sleepy", Path: "/c/sleepy", State: session.Stopped, AoeStatus: "stopped"},
 		session.Snapshot{ID: "q", Title: "quiz", Path: "/c/quiz", State: session.NeedsInput,
 			Transcript: session.Transcript{ID: "conv"}, Question: &session.Question{ID: "toolu_1"}},
 	)
@@ -136,6 +145,10 @@ func TestExecuteCommands(t *testing.T) {
 		{"clearing a cleared session does nothing", command.Payload{Type: command.Clear, Session: "f"}, "", ""},
 		{"clear a working session", command.Payload{Type: command.Clear, Session: "h"}, "", "hamta is working"},
 		{"stop", command.Payload{Type: command.Stop, Session: "h"}, "stop h", ""},
+		{"start a stopped session", command.Payload{Type: command.Start, Session: "s"}, "start s", ""},
+		{"start a running session", command.Payload{Type: command.Start, Session: "h"}, "", "hamta is already running"},
+		{"restart a running session", command.Payload{Type: command.Restart, Session: "h"}, "restart h", ""},
+		{"restart a stopped session", command.Payload{Type: command.Restart, Session: "s"}, "", "sleepy is stopped; start it instead"},
 		{"push without a signature", command.Payload{Type: command.Push, Session: "z"}, "push /c/zynk", ""},
 		{"push to an unknown session", command.Payload{Type: command.Push, Session: "nope"}, "", "no session nope"},
 		{"answer the open question", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1", Text: "Colour: Blue"}, "answer q in conv to toolu_1: Colour: Blue", ""},

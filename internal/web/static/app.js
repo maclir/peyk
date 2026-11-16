@@ -991,6 +991,9 @@ async function start(cfg) {
           ciLink(g)),
         inboxButton(s),
         s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
+        s.aoe_status === "stopped"
+          ? busyButton(`start:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Start", title: "Start the worker", onclick: () => sendCommand("start", { session: s.id }, `Start ${s.title}`, `start:${s.id}`) }, icon("play"))
+          : busyButton(`restart:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Restart", title: "Restart the worker on its conversation", onclick: () => sendCommand("restart", { session: s.id }, `Restart ${s.title}`, `restart:${s.id}`) }, icon("restart")),
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
@@ -1318,6 +1321,8 @@ const ICONS = {
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  restart: '<path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
   frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
   grip: '<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
 };
