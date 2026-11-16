@@ -197,7 +197,7 @@ async function start(cfg) {
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
       h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(activeCount()))),
-      h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", queuedCount() ? h("span", { class: "n" }, String(queuedCount())) : null),
+      h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", readyCount() ? h("span", { class: "n" }, String(readyCount())) : null),
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
@@ -355,8 +355,8 @@ async function start(cfg) {
     return [...state.sessions.values()].filter((s) => s.aoe_status !== "stopped").length;
   }
 
-  function queuedCount() {
-    return state.tasks.filter((t) => t.status === "queued").length;
+  function readyCount() {
+    return queueCounts(queue(state.tasks, state.projects)).ready;
   }
 
   function projectNamed(name) {

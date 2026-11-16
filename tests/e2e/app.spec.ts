@@ -470,6 +470,7 @@ test.describe('signed in', () => {
     const texts = page.locator('.tasks .ttext');
     await page.getByRole('button', { name: /^Ready/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing']);
+    await expect(page.locator('a[href="#inbox"] .n')).toHaveText('2');
     await page.getByRole('button', { name: /^All/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing', 'Waits on hamta']);
 
