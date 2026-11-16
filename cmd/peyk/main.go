@@ -28,6 +28,8 @@ const usage = `usage: peyk <command>
   pair <label>   trust a new passkey for signing commands
   unpair <label> stop trusting a passkey
   keys           list trusted passkeys
+  install        run the agent and its menu bar app under launchd
+  uninstall      stop both and remove them from launchd
 `
 
 func main() {
@@ -75,6 +77,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return keyring().Remove(args[1])
 	case "keys":
 		return listKeys(out)
+	case "install":
+		return installJobs(ctx, out)
+	case "uninstall":
+		return uninstallJobs(ctx, out)
 	case "import-tasks":
 		return importTasks(ctx, os.Stdin, out)
 	case "owner":

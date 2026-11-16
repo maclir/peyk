@@ -8,7 +8,7 @@
 
 ## Laptop agent
 
-- The `peykServer` aoe session runs `make serve`, which builds and runs the laptop agent. When a change affects the agent, restart it without asking: `aoe -p personal session restart peykServer`.
+- The `com.peyk.agent` launchd job runs `make serve`, which builds and runs the laptop agent. When a change affects the agent, restart it without asking: `make restart-agent`. When a change affects the menu bar app (`menubar/`), rebuild and relaunch both jobs: `make install-agent`.
 
 ## Invariants
 

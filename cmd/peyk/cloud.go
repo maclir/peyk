@@ -36,6 +36,29 @@ func usagePath() string {
 	return filepath.Join(home, ".peyk", "usage", "claude.json")
 }
 
+// healthPath is where the agent says it is publishing, for the menu bar app.
+func healthPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "agent.json")
+}
+
+// reportHealth tells the menu bar app how many sessions are live. Failing to
+// is logged, not fatal: the phone still gets everything.
+func reportHealth(path string, started time.Time, logger *log.Logger) func(time.Time, []session.Snapshot) {
+	return func(at time.Time, snaps []session.Snapshot) {
+		live := 0
+		for _, s := range snaps {
+			if s.State != session.Stopped {
+				live++
+			}
+		}
+		h := agent.Health{PID: os.Getpid(), StartedAt: started, RefreshedAt: at, Workers: live}
+		if err := agent.WriteHealth(path, h); err != nil {
+			logger.Printf("health: %v", err)
+		}
+	}
+}
+
 func attachmentsDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".peyk", "attachments")
@@ -133,8 +156,10 @@ func runAgent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer agent.RemoveHealth(healthPath())
 	c := collector()
 	a := &agent.Agent{
+		Refreshed:   reportHealth(healthPath(), time.Now(), logger),
 		Power:       power,
 		Edits:       edits,
 		Transcripts: transcripts, Replies: replies,

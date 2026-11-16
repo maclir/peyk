@@ -87,6 +87,9 @@ type Agent struct {
 	// Notify, when set, is told about sessions that start needing you or
 	// finish a turn.
 	Notify Notifier
+	// Refreshed, when set, is told the sessions after every refresh that
+	// published them.
+	Refreshed func(at time.Time, snaps []session.Snapshot)
 	// CI, when set, follows the workflow runs of each session's pushed
 	// commit. GitHub cannot tell the laptop a run moved on, so the agent
 	// asks every CIPoll, and only while a run is unfinished or, for CIWait
@@ -183,6 +186,9 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	if err := a.finishTasks(ctx); err != nil {
 		return err
+	}
+	if a.Refreshed != nil {
+		a.Refreshed(a.Now(), snaps)
 	}
 	if a.Notify == nil || prev == nil {
 		return nil

@@ -4,8 +4,9 @@ Follow your aoe coding sessions from your phone: what each agent last said, whet
 
 ## Use
 
-    make status    # print the board in the terminal
-    make serve     # publish to the phone until Ctrl-C; run it in the relayServer aoe session
+    make status           # print the board in the terminal
+    make install-agent    # run the agent under launchd, with a menu bar icon to start, stop and restart it
+    make restart-agent    # rebuild and restart it after a change
 
 The phone app is the Cloud Run service. Sign in with Google once, then admit that account on the laptop:
 

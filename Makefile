@@ -57,7 +57,7 @@ export TEST_PORT
 
 .PHONY: help run build vendor status icons clean tidy verify test test-unit test-js test-integration test-rules \
 	test-e2e test-e2e-ui test-server docker-build gcp-bootstrap deploy deploy-rules \
-	smoke new gcp-guard adc-guard domain serve owner pair unpair keys harden
+	smoke new gcp-guard adc-guard domain serve menu install-agent uninstall-agent restart-agent owner pair unpair keys harden
 
 help:
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "%-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -90,16 +90,37 @@ vendor: node_modules ## Copy Firebase's browser modules into the embedded static
 status: ## Print every live aoe session: state, last commit, push state, last reply.
 	go run ./cmd/peyk status
 
-# serve is what the peykServer aoe session runs. It builds first so the
-# process that stays up is the small binary, not the Go toolchain.
-# caffeinate holds the Mac awake (idle sleep; system sleep on AC) only while
-# the agent runs, so the phone keeps receiving state.
-CAFFEINATE := $(if $(shell command -v caffeinate),caffeinate -is)
-serve: ## Publish session state for the phone until Ctrl-C (run in the relayServer aoe session).
+# serve is what the com.peyk.agent launchd job runs (make install-agent). It
+# builds first so the process that stays up is the small binary, not the Go
+# toolchain, and execs it so the agent is make's direct child: launchd stops
+# the job with SIGTERM to make, which passes it on, and the agent then marks
+# the laptop offline. caffeinate holds the Mac awake (idle sleep; system sleep
+# on AC) only while that process lives.
+CAFFEINATE := $(if $(shell command -v caffeinate),caffeinate -is -w $$$$ &)
+serve: ## Publish session state for the phone until stopped (launchd runs this).
 	@test -n "$(GOOGLE_CLOUD_PROJECT)" || { echo "GOOGLE_CLOUD_PROJECT is required; set it in .env"; exit 1; }
 	@mkdir -p bin
 	@go build -trimpath -o bin/peyk ./cmd/peyk
-	@$(CAFFEINATE) bin/peyk agent
+	@$(CAFFEINATE) exec bin/peyk agent
+
+menu: ## Build the menu bar app into bin/Peyk.app (macOS).
+	@mkdir -p bin/Peyk.app/Contents/MacOS
+	@cp menubar/Info.plist bin/Peyk.app/Contents/Info.plist
+	@swiftc -O -swift-version 5 -parse-as-library -o bin/Peyk.app/Contents/MacOS/Peyk menubar/Peyk.swift
+	@codesign --force --sign - bin/Peyk.app
+
+# The jobs inherit PATH, the Claude Code profile and the Google login from the
+# shell that runs this; rerun it after changing any of them.
+install-agent: menu ## Run the agent and the menu bar app under launchd, now and at every login.
+	@mkdir -p bin
+	@go build -trimpath -o bin/peyk ./cmd/peyk
+	@bin/peyk install
+
+uninstall-agent: ## Stop the agent and the menu bar app and remove them from launchd.
+	@go run ./cmd/peyk uninstall
+
+restart-agent: ## Rebuild and restart the launchd agent.
+	@launchctl kickstart -k gui/$$(id -u)/com.peyk.agent
 
 pair: ## Trust this device's passkey for signing commands: make pair LABEL=pixel
 	@test -n "$(LABEL)" || { echo "LABEL is required"; exit 1; }

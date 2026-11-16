@@ -617,3 +617,23 @@ func TestPublishUsageWritesOnlyWhenItChanged(t *testing.T) {
 		t.Fatalf("published %+v, want the latest usage", got)
 	}
 }
+
+func TestRefreshReportsThePublishedSessions(t *testing.T) {
+	c := &fakeCollector{}
+	a := newAgent(c, store.NewMemory())
+	var got []string
+	var at time.Time
+	a.Refreshed = func(t time.Time, snaps []session.Snapshot) {
+		at = t
+		for _, s := range snaps {
+			got = append(got, s.ID)
+		}
+	}
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle})
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "k" || at.IsZero() {
+		t.Fatalf("reported %v at %v", got, at)
+	}
+}

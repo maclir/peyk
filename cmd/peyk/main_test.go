@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maclir/peyk/internal/launchd"
 	"github.com/maclir/peyk/internal/session"
 )
 
@@ -78,3 +79,21 @@ func TestBillToNamesTheProject(t *testing.T) {
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestJobsRunTheAgentThroughMakeAndGiveTheMenuTheOrigin(t *testing.T) {
+	env := map[string]string{"PATH": "/bin", "PEYK_ORIGIN": "https://peyk.example", "GOOGLE_CLOUD_PROJECT": "p"}
+	js := jobs("/code/peyk", "/h", func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	agent, menu := js[0], js[1]
+	if agent.Label != launchd.Agent || strings.Join(agent.Program, " ") != "/usr/bin/make -s serve" || agent.Dir != "/code/peyk" || !agent.KeepAlive {
+		t.Fatalf("agent job = %+v", agent)
+	}
+	if len(agent.Env) != 1 || agent.Env["PATH"] != "/bin" {
+		t.Fatalf("agent env = %v; the project's settings come from .env", agent.Env)
+	}
+	if menu.Label != launchd.Menu || menu.Program[0] != "/code/peyk/bin/Peyk.app/Contents/MacOS/Peyk" || menu.KeepAlive {
+		t.Fatalf("menu job = %+v", menu)
+	}
+	if menu.Env["PEYK_ORIGIN"] != "https://peyk.example" || len(menu.Env) != 1 {
+		t.Fatalf("menu env = %v", menu.Env)
+	}
+}
