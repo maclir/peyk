@@ -29,7 +29,7 @@ rsync -a \
   "$source_dir/" "$target_dir/"
 
 find "$target_dir" -type f -not -path '*/.git/*' -print0 | xargs -0 perl -pi -e \
-  "s/github.com\/maclir\/peyk/github.com\/maclir\/$name/g; s/peyk-test/${name}-test/g; s/peyk/$name/g; s/peyk/$name/g"
+  "s/github\.com\/maclir\/peyk/github.com\/maclir\/$name/g; s/peyk-test/${name}-test/g; s/peyk/$name/g; s/peyk/$name/g"
 
 perl -0pi -e "s/# $name\n/# $name\n\n$description\n/" "$target_dir/README.md"
 git -C "$target_dir" init -b main

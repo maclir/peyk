@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PROJECT_ID: peyk-relay
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: europe-west1
   SERVICE: peyk
 

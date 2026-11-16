@@ -49,6 +49,7 @@ copy() {
 }
 
 open_url() {
+  [[ -n "$1" ]] || return 0
   info "$1"
   interactive || return 0
   if command -v open >/dev/null 2>&1; then open "$1" >/dev/null 2>&1 || true
@@ -160,13 +161,12 @@ step "Step 3 of 4 — publish DNS records for $DOMAIN"
 if [[ -z "$(missing_records)" ]]; then
   ok "records are already live"
 else
-  info "First delete the whole 'Squarespace Defaults' preset with its trash"
-  info "icon. Its A records, www CNAME and HTTPS record all point at"
-  info "Squarespace and would fight the ones you are about to add."
-  info "Leave Email Security and Domain Connect alone."
+  info "First delete any A, AAAA, www CNAME or HTTPS records your DNS host"
+  info "added by default. They point at the host's own servers and would"
+  info "fight the ones you are about to add. Leave mail records alone."
   pause "Press enter to open your DNS settings."
   open_url "$(dns_url)"
-  pause "Press enter once that preset is gone."
+  pause "Press enter once those records are gone."
 
   total=$(records | wc -l | tr -d ' ')
   n=0

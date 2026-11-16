@@ -16,10 +16,10 @@ GCLOUD_ACCOUNT ?=
 QUOTA_PROJECT ?= $(GOOGLE_CLOUD_PROJECT)
 # The custom domain, for `make domain`, and where its DNS is edited. {domain}
 # is substituted, so the walkthrough opens the record editor for the domain in
-# hand rather than a dashboard you then have to navigate. Blank it out to be
-# left alone.
+# hand rather than a dashboard you then have to navigate. Left blank, the
+# walkthrough prints the records and opens nothing.
 DOMAIN ?=
-DNS_CONSOLE_URL ?= https://account.squarespace.com/domains/managed/{domain}/dns/dns-settings
+DNS_CONSOLE_URL ?=
 GOOGLE_CLOUD_REGION ?= europe-west1
 FIRESTORE_LOCATION ?= eur3
 SERVICE_NAME ?= $(APP_NAME)

@@ -126,13 +126,14 @@ func claudeConfig() string {
 }
 
 // projectsRoot is where repositories without a session live, offered in the
-// phone's project picker.
+// phone's project picker: by default the directory that holds this checkout,
+// which launchd and make run from.
 func projectsRoot() string {
 	if d := os.Getenv("PEYK_PROJECTS_ROOT"); d != "" {
 		return d
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "code")
+	wd, _ := os.Getwd()
+	return filepath.Dir(wd)
 }
 
 func env(key, fallback string) string {

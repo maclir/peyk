@@ -128,13 +128,13 @@ func TestRepoStateNamesTheGitHubRepositoryOnlyWithWorkflows(t *testing.T) {
 
 func TestGitHubRepo(t *testing.T) {
 	for url, want := range map[string]string{
-		"git@github.com:maclir/peyk.git":        "maclir/peyk",
-		"https://github.com/maclir/relay.git":   "maclir/relay",
-		"https://github.com/maclir/relay":       "maclir/relay",
-		"ssh://git@github.com/maclir/peyk.git":  "maclir/peyk",
-		"git@gitlab.com:unbounds/dekode/x.git":  "",
-		"git@ghe.example.com:me/peyk.git": "",
-		"https://github.com/maclir":             "",
+		"git@github.com:maclir/peyk.git":       "maclir/peyk",
+		"https://github.com/maclir/relay.git":  "maclir/relay",
+		"https://github.com/maclir/relay":      "maclir/relay",
+		"ssh://git@github.com/maclir/peyk.git": "maclir/peyk",
+		"git@gitlab.com:unbounds/dekode/x.git": "",
+		"git@ghe.example.com:me/peyk.git":      "",
+		"https://github.com/maclir":            "",
 	} {
 		if got := GitHubRepo(url); got != want {
 			t.Errorf("GitHubRepo(%q) = %q, want %q", url, got, want)
