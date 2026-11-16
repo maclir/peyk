@@ -50,7 +50,12 @@ func manifest(w http.ResponseWriter, _ *http.Request) {
 		StartURL:  "/",
 		Scope:     "/",
 		Display:   "standalone",
-		// The splash, drawn before there is a stylesheet to ask.
+		// The splash, drawn before there is a stylesheet to ask, and the strip
+		// Android shows under the page while the keyboard opens, before the
+		// page resizes into the space above it. A manifest names one colour for
+		// both modes; the dark one is chosen because a light strip flashing
+		// across a dark page shows, and a dark strip under a light page lasts
+		// only that one frame.
 		//
 		// A theme colour is left out on purpose, and leaving it out is the whole
 		// of how the status bar follows the phone into the evening. Installed on
@@ -61,7 +66,7 @@ func manifest(w http.ResponseWriter, _ *http.Request) {
 		// light one is choosing white at midnight. Named nothing, the strip
 		// falls to the browser's own default, which is the only value in this
 		// business that already knows which mode the phone is in.
-		BackgroundColor: "#f5f6f8",
+		BackgroundColor: "#131516",
 		Lang:            "en",
 		Icons: []manifestIcon{
 			{Src: "/static/icon.svg", Sizes: "any", Type: "image/svg+xml"},
