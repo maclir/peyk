@@ -501,7 +501,9 @@ async function start(cfg) {
     return Boolean(worker && !worker.cleared);
   }
 
-  function taskCard(t, now) {
+  // In a project's own sheet the project goes without saying, and a send
+  // goes through the sheet so that it can close once the task leaves.
+  function taskCard(t, now, { inProject = false, sendWith = send } = {}) {
     const clears = t.ready && hasConversation(t);
     const open = state.menu === t.id;
     const sent = state.sends.get(t.id);
@@ -512,19 +514,18 @@ async function start(cfg) {
         : `Waiting · ${t.why}`);
     return h("article", { class: `task${t.ready ? "" : " waiting"}` },
       h("div", { class: "thead" },
-        face(projectNamed(t.project), t.project, "sm"),
-        h("span", { class: "proj" }, t.project),
+        inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         h("span", { class: "grow" }),
         h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
           onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more"))),
       h("div", { class: "ttext" }, t.text),
       taskImages(t),
-      open ? taskMenu(t, clears, send) : null,
+      open ? taskMenu(t, clears, sendWith) : null,
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
-        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => send(t, clears) }, "Send", icon("arrow")) : null,
+        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, "Send", icon("arrow")) : null,
       ),
     );
   }
@@ -1083,7 +1084,7 @@ async function start(cfg) {
     };
     const form = composerForm({ key, id: "sheet-text", label: `New task for ${project}`, placeholder: "Add a task", cls: "add", submitLabel: "Add task", send: add, hold });
     const head = h("div", { class: "sheethead" });
-    const list = h("div", { class: "sheetbody tlist" });
+    const list = h("div", { class: "sheetbody tlist tasks" });
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && closeSheet() },
       h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": `${project} inbox`, onkeydown: (e) => e.key === "Escape" && closeSheet() },
         h("div", { class: "grabber" }),
@@ -1110,11 +1111,14 @@ async function start(cfg) {
       if (!sheet.text.value.trim() && !draft(sheet.key).length) return closeSheet();
     }
     const p = projectNamed(sheet.project);
+    const now = Date.now();
     sheet.head.replaceChildren(
       face(p, sheet.project, "sm"),
       h("h2", { class: "grow" }, "Inbox", h("span", { class: `dot ${p?.free ? "free" : "busy"}`, title: p?.free ? "Free" : p?.busy || "Busy" })),
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: closeSheet }, icon("x")));
-    sheet.list.replaceChildren(...(tasks.length ? tasks.map(sheetRow) : [h("p", { class: "empty" }, "Nothing queued.")]));
+    sheet.list.replaceChildren(...(tasks.length
+      ? tasks.map((t) => (state.editing === t.id ? editor(t, false) : taskCard(t, now, { inProject: true, sendWith: sheetSend })))
+      : [h("p", { class: "empty" }, "Nothing queued.")]));
     syncThumbs(sheet.form, sheet.key);
   }
 
@@ -1124,23 +1128,6 @@ async function start(cfg) {
     form.querySelector(":scope > .thumbs")?.remove();
     if (imgs.length) form.prepend(h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))));
     form.querySelector('[aria-label="Attach image"]').disabled = imgs.length >= MAX_IMAGES;
-  }
-
-  function sheetRow(t) {
-    if (state.editing === t.id) return editor(t, false);
-    const clears = t.ready && hasConversation(t);
-    const open = state.menu === t.id;
-    const sent = state.sends.get(t.id);
-    return h("article", { class: "srow" },
-      h("div", { class: "smain" },
-        h("div", { class: "ttext" }, t.text),
-        taskImages(t),
-        sent ? h("span", { class: "tstatus", role: "status" }, sent.text) : null,
-        open ? taskMenu(t, clears, sheetSend) : null),
-      t.saving ? h("span", { class: "saving" }, spinner()) : h("div", { class: "sacts" },
-        h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
-          onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more")),
-        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sheetSend(t, clears) }, "Send") : null));
   }
 
   function pushCard(s, now) {

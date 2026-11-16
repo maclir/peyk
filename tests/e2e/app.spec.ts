@@ -584,8 +584,8 @@ test.describe('signed in', () => {
     await expect.poll(stored).toBeTruthy();
     expect((await stored())!.fields.project.stringValue).toBe('knip');
 
-    await sheet.locator('.srow', { hasText: 'First thing' }).getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(sheet.locator('.srow', { hasText: 'First thing' }).getByRole('status')).toHaveText(/knip.*: waiting for the laptop…/);
+    await sheet.locator('.task', { hasText: 'First thing' }).getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(sheet.locator('.task', { hasText: 'First thing' }).getByRole('status')).toHaveText(/knip.*: waiting for the laptop…/);
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch' && JSON.parse(c.fields.payload.stringValue).task === 'one')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'one' });
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'dispatched', session_id: 'k', created_at: new Date(Date.now() - 3000), dispatched_at: new Date() });
