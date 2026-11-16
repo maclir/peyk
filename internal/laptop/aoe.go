@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,6 +15,7 @@ type AoeSession struct {
 	Title          string `json:"title"`
 	Path           string `json:"path"`
 	Tool           string `json:"tool"`
+	Command        string `json:"command"`
 	State          string `json:"state"`
 	Status         string `json:"status"`
 	AgentSessionID string `json:"agent_session_id"`
@@ -42,7 +45,7 @@ func (a Aoe) Sessions(ctx context.Context) ([]AoeSession, error) {
 	}
 	var live []AoeSession
 	for _, s := range all {
-		if s.State != "live" || s.Tool != "claude" {
+		if s.State != "live" || !s.runsClaude() {
 			continue
 		}
 		shown, err := a.Show(ctx, s.ID)
@@ -52,6 +55,17 @@ func (a Aoe) Sessions(ctx context.Context) ([]AoeSession, error) {
 		live = append(live, shown)
 	}
 	return live, nil
+}
+
+// runsClaude reports whether the session runs Claude Code. aoe can report a
+// custom-command session's tool as claude after recovering it, so a command
+// that does not start claude rules it out.
+func (s AoeSession) runsClaude() bool {
+	if s.Tool != "claude" {
+		return false
+	}
+	fields := strings.Fields(s.Command)
+	return len(fields) == 0 || filepath.Base(fields[0]) == "claude"
 }
 
 // Show returns one session including its status and agent session id.

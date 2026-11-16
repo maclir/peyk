@@ -321,15 +321,18 @@ func TestSessionsKeepsLiveClaudeSessions(t *testing.T) {
 	run := fakeAoe(`[
 	  {"id":"a","title":"knip","tool":"claude","state":"live","path":"/k"},
 	  {"id":"b","title":"old","tool":"claude","state":"trashed","path":"/o"},
-	  {"id":"c","title":"relayServer","tool":"peyk","state":"live","path":"/r"}
+	  {"id":"c","title":"relayServer","tool":"peyk","state":"live","path":"/r"},
+	  {"id":"d","title":"peykServer","tool":"claude","command":"zsh -lc 'make serve'","state":"live","path":"/k"},
+	  {"id":"e","title":"pinned","tool":"claude","command":"/opt/bin/claude --model x","state":"live","path":"/p"}
 	]`, map[string]string{
 		"a": `{"id":"a","title":"knip","tool":"claude","state":"live","path":"/k","status":"waiting","agent_session_id":"s1"}`,
+		"e": `{"id":"e","title":"pinned","tool":"claude","state":"live","path":"/p"}`,
 	})
 	got, err := Aoe{Profile: "personal", Run: run}.Sessions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ID != "a" || got[0].Status != "waiting" || got[0].AgentSessionID != "s1" {
+	if len(got) != 2 || got[1].ID != "e" || got[0].ID != "a" || got[0].Status != "waiting" || got[0].AgentSessionID != "s1" {
 		t.Fatalf("got %+v", got)
 	}
 }
