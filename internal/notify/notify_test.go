@@ -42,14 +42,22 @@ func TestChanges(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("notes = %+v", got)
 	}
-	if got[0].Session != "h" || got[0].Title != "hamta" || got[0].Body != "Needs you · Include archived rows?" || got[0].URL != "/#s-h" {
+	if got[0].Session != "h" || got[0].Title != "hamta" || got[0].Body != "Needs you · Include archived rows?" || got[0].URL != "/#s-h" || got[0].Icon != IconNeeds {
 		t.Errorf("hamta note = %+v", got[0])
 	}
-	if got[1].Title != "knip" || got[1].Body != "Finished · Committed 3f2a1c4." {
+	if got[1].Title != "knip" || got[1].Body != "Finished · Committed 3f2a1c4." || got[1].Icon != IconDone {
 		t.Errorf("knip note = %+v", got[1])
 	}
 	if got[2].Title != "quiz" || got[2].Body != "Needs you · Which colour? (+1 more)" {
 		t.Errorf("quiz note = %+v", got[2])
+	}
+}
+
+func TestChangesMarksAnError(t *testing.T) {
+	prev := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Working}}
+	next := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Error}}
+	if got := Changes(prev, next); len(got) != 1 || got[0].Icon != IconError {
+		t.Fatalf("notes = %+v", got)
 	}
 }
 
@@ -76,7 +84,7 @@ func TestChangesNotesAFailedRunOnce(t *testing.T) {
 	running := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIRunning)}}
 	failed := map[string]session.Snapshot{"k": {ID: "k", Title: "knip", State: session.Idle, Git: git(session.CIFailure)}}
 	got := Changes(running, failed)
-	if len(got) != 1 || got[0].Title != "knip" || got[0].Body != "Test and deploy failed · Ship it" || got[0].URL != "/#s-k" {
+	if len(got) != 1 || got[0].Title != "knip" || got[0].Body != "Test and deploy failed · Ship it" || got[0].URL != "/#s-k" || got[0].Icon != IconCI {
 		t.Fatalf("notes = %+v", got)
 	}
 	if got := Changes(failed, failed); len(got) != 0 {

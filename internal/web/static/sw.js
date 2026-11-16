@@ -81,6 +81,7 @@ async function notify(note) {
     renotify: Boolean(note.session) && !watched,
     silent: watched,
     badge: "/static/notification-badge.png",
+    icon: note.icon || undefined,
     data: { url: note.url },
   });
   if (watched) (await self.registration.getNotifications({ tag: note.session })).forEach((n) => n.close());

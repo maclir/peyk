@@ -5,7 +5,10 @@ import (
 	_ "image/png"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/maclir/peyk/internal/notify"
 )
 
 // Android renders the notification badge from its alpha channel only, so an
@@ -45,5 +48,25 @@ func TestNotificationBadgeIsAlphaMask(t *testing.T) {
 	}
 	if total := b.Dx() * b.Dy(); transparent < total/4 || opaque == 0 {
 		t.Fatalf("badge has %d transparent and %d opaque of %d pixels; want a glyph on a transparent background", transparent, opaque, total)
+	}
+}
+
+// Every event icon a note names must be served, and stay transparent at its
+// edge so the shade, not a square, shows behind the mark.
+func TestNotificationIconsAreServedMarks(t *testing.T) {
+	for _, path := range []string{notify.IconNeeds, notify.IconDone, notify.IconError, notify.IconCI} {
+		f, err := staticFS.Open(strings.TrimPrefix(path, "/"))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		img, _, err := image.Decode(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		b := img.Bounds()
+		if _, _, _, a := img.At(b.Min.X, b.Min.Y).RGBA(); a != 0 {
+			t.Errorf("%s has an opaque corner", path)
+		}
 	}
 }

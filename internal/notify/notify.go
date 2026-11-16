@@ -27,7 +27,16 @@ type Note struct {
 	Title   string `json:"title"`
 	Body    string `json:"body"`
 	URL     string `json:"url"`
+	Icon    string `json:"icon"`
 }
+
+// Icons are the event marks under /static, drawn by cmd/icon.
+const (
+	IconNeeds = "/static/notify-needs.png"
+	IconDone  = "/static/notify-done.png"
+	IconError = "/static/notify-error.png"
+	IconCI    = "/static/notify-ci.png"
+)
 
 // Changes returns a note for each session that started needing you,
 // finished a turn, or whose pushed commit's workflow failed between two
@@ -44,23 +53,23 @@ func Changes(prev, next map[string]session.Snapshot) []Note {
 			continue
 		}
 		if ci := ciOf(n); ci != nil && ci.State == session.CIFailure && !sameFailure(ciOf(p), ci) {
-			notes = append(notes, Note{Session: id, Title: n.Title, Body: line(ci.Workflow+" failed", ciBody(n)), URL: "/#s-" + id})
+			notes = append(notes, Note{Session: id, Title: n.Title, Body: line(ci.Workflow+" failed", ciBody(n)), URL: "/#s-" + id, Icon: IconCI})
 		}
 		if p.State == n.State {
 			continue
 		}
-		var event string
+		var event, icon string
 		switch {
 		case n.State == session.NeedsInput:
-			event = "Needs you"
+			event, icon = "Needs you", IconNeeds
 		case n.State == session.Error:
-			event = "Hit an error"
+			event, icon = "Hit an error", IconError
 		case p.State == session.Working && n.State != session.Working:
-			event = "Finished"
+			event, icon = "Finished", IconDone
 		default:
 			continue
 		}
-		notes = append(notes, Note{Session: id, Title: n.Title, Body: line(event, body(n)), URL: "/#s-" + id})
+		notes = append(notes, Note{Session: id, Title: n.Title, Body: line(event, body(n)), URL: "/#s-" + id, Icon: icon})
 	}
 	sort.Slice(notes, func(i, j int) bool { return notes[i].Session < notes[j].Session })
 	return notes

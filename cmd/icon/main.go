@@ -45,10 +45,16 @@ const (
 )
 
 var (
-	ink         = color.NRGBA{0x18, 0x21, 0x2e, 0xff} // the page's text colour
-	inkDark     = color.NRGBA{0xe4, 0xe9, 0xf1, 0xff} // its dark-mode text, for a dark tab strip
-	accent      = color.NRGBA{0x2f, 0x54, 0xc8, 0xff} // the page's accent, the launcher tile
-	white       = color.NRGBA{0xff, 0xff, 0xff, 0xff}
+	ink     = color.NRGBA{0x18, 0x21, 0x2e, 0xff} // the page's text colour
+	inkDark = color.NRGBA{0xe4, 0xe9, 0xf1, 0xff} // its dark-mode text, for a dark tab strip
+	accent  = color.NRGBA{0x2f, 0x54, 0xc8, 0xff} // the page's accent, the launcher tile
+	white   = color.NRGBA{0xff, 0xff, 0xff, 0xff}
+
+	// Event marks sit on whatever the phone's notification shade is, light or
+	// dark, so each colour keeps 3:1 contrast against white and #2a3038.
+	amber       = color.NRGBA{0xd0, 0x84, 0x00, 0xff}
+	green       = color.NRGBA{0x2e, 0x9e, 0x5e, 0xff}
+	red         = color.NRGBA{0xe0, 0x46, 0x3a, 0xff}
 	transparent = color.NRGBA{}
 )
 
@@ -74,6 +80,68 @@ func main() {
 	// Android draws a notification's status-bar badge from its alpha channel
 	// alone, so an opaque tile there is a solid white square.
 	write(filepath.Join(*out, "notification-badge.png"), encode(draw(96, nothing(), transparent, white, asDrawn)))
+	// Android always fills a web notification's large-icon slot, with a letter
+	// of the origin when no icon is given. A small mark on a transparent ground
+	// names the event and keeps the slot light.
+	for _, e := range events() {
+		write(filepath.Join(*out, "notify-"+e.name+".png"), encode(paint(192, e.shape, e.color)))
+	}
+}
+
+type event struct {
+	name  string
+	shape shape
+	color color.NRGBA
+}
+
+// events draws each mark across the middle half of the grid.
+func events() []event {
+	const w, ciW = 2.1, 1.76
+	return []event{
+		{"needs", union(segment(16, 10.8, 16, 17.2, w), disc(16, 20.8, 1.5)), amber},
+		{"done", union(segment(11.2, 16.4, 14.4, 19.6, w), segment(14.4, 19.6, 20.8, 12.4, w)), green},
+		{"error", union(segment(12, 12, 20, 20, w), segment(20, 12, 12, 20, w)), red},
+		{"ci", union(union(ring(12.8, 12, 1.6, ciW), ring(12.8, 20, 1.6, ciW)),
+			union(segment(12.8, 13.6, 12.8, 18.4, ciW),
+				union(segment(17.6, 16.8, 21.6, 20.8, ciW), segment(21.6, 16.8, 17.6, 20.8, ciW)))), red},
+	}
+}
+
+// paint renders a shape in one colour on a transparent ground.
+func paint(size int, s shape, c color.NRGBA) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	unit := grid / float64(size)
+	for py := 0; py < size; py++ {
+		for px := 0; px < size; px++ {
+			var hits int
+			for sy := 0; sy < samples; sy++ {
+				for sx := 0; sx < samples; sx++ {
+					if s((float64(px)+(float64(sx)+0.5)/samples)*unit, (float64(py)+(float64(sy)+0.5)/samples)*unit) {
+						hits++
+					}
+				}
+			}
+			img.SetNRGBA(px, py, over(c, float64(hits)/(samples*samples), transparent, 0))
+		}
+	}
+	return img
+}
+
+// segment is a stroke of width w with round caps.
+func segment(ax, ay, bx, by, w float64) shape {
+	return func(x, y float64) bool {
+		dx, dy := bx-ax, by-ay
+		t := clamp(((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy), 0, 1)
+		return math.Hypot(x-ax-t*dx, y-ay-t*dy) <= w/2
+	}
+}
+
+func disc(cx, cy, r float64) shape {
+	return func(x, y float64) bool { return math.Hypot(x-cx, y-cy) <= r }
+}
+
+func ring(cx, cy, r, w float64) shape {
+	return func(x, y float64) bool { return math.Abs(math.Hypot(x-cx, y-cy)-r) <= w/2 }
 }
 
 // A placement draws the mark's point (cx, cy) at the centre of the grid,
