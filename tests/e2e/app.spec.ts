@@ -571,6 +571,14 @@ test.describe('signed in', () => {
     await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing']);
     await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
 
+    await sheet.getByRole('button', { name: 'Reorder' }).click();
+    await sheet.getByRole('button', { name: 'Move down: First thing' }).click();
+    await expect(sheet.locator('.ttext')).toHaveText(['Second thing', 'First thing']);
+    await sheet.getByRole('button', { name: 'Move up: First thing' }).click();
+    await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing']);
+    await sheet.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
+
     // The worker turning busy mid-sentence leaves the same box, text and focus.
     const box = sheet.getByLabel('New task for knip');
     await box.evaluate((el) => { (el as HTMLTextAreaElement & { kept?: boolean }).kept = true; });

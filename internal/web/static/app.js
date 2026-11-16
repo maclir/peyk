@@ -542,10 +542,10 @@ async function start(cfg) {
     );
   }
 
-  function arrangeRow(list, t, i) {
+  function arrangeRow(list, t, i, { inProject = false } = {}) {
     return h("div", { class: "task arrange" },
       icon("grip"),
-      face(projectNamed(t.project), t.project, "sm"),
+      inProject ? null : face(projectNamed(t.project), t.project, "sm"),
       h("span", { class: "ttext one" }, t.text),
       h("button", { type: "button", class: "icon step", "aria-label": `Move up: ${t.text}`, disabled: i === 0 ? "" : null, onclick: () => move(t, i - 1, list) }, icon("up")),
       h("button", { type: "button", class: "icon step", "aria-label": `Move down: ${t.text}`, disabled: i === list.length - 1 ? "" : null, onclick: () => move(t, i + 1, list) }, icon("down")),
@@ -1056,6 +1056,7 @@ async function start(cfg) {
   function openSheet(project) {
     if (sheet?.project !== project) buildSheet(project);
     sheet.open = true;
+    sheet.arranging = false;
     sheet.scrim.hidden = false;
     render();
     if (!queuedFor(project).length) sheet.text.focus();
@@ -1114,7 +1115,7 @@ async function start(cfg) {
         list,
         h("div", { class: "sheetfoot" }, form)));
     document.body.append(scrim);
-    sheet = { project, key, scrim, head, list, form, text: form.querySelector("textarea"), open: false };
+    sheet = { project, key, scrim, head, list, form, text: form.querySelector("textarea"), open: false, arranging: false };
   }
 
   function sheetSend(t, clear) {
@@ -1136,9 +1137,15 @@ async function start(cfg) {
     sheet.head.replaceChildren(
       face(p, sheet.project, "sm"),
       h("h2", { class: "grow" }, "Inbox", h("span", { class: `dot ${p?.free ? "free" : "busy"}`, title: p?.free ? "Free" : p?.busy || "Busy" })),
+      tasks.length > 1 || sheet.arranging
+        ? h("button", { type: "button", class: "link", onclick: () => { sheet.arranging = !sheet.arranging; state.menu = null; render(); } },
+          icon("sort"), sheet.arranging ? "Done" : "Reorder")
+        : null,
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: closeSheet }, icon("x")));
     sheet.list.replaceChildren(...(tasks.length
-      ? tasks.map((t) => (state.editing === t.id ? editor(t, false) : taskCard(t, now, { inProject: true, sendWith: sheetSend })))
+      ? tasks.map((t, i) => (state.editing === t.id ? editor(t, false)
+        : sheet.arranging ? arrangeRow(tasks, t, i, { inProject: true })
+          : taskCard(t, now, { inProject: true, sendWith: sheetSend })))
       : [h("p", { class: "empty" }, "Nothing queued.")]));
     syncThumbs(sheet.form, sheet.key);
   }
