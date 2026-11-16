@@ -80,7 +80,6 @@ async function notify(note) {
     tag: note.session || undefined,
     renotify: Boolean(note.session) && !watched,
     silent: watched,
-    icon: "/static/icon-192.png",
     badge: "/static/notification-badge.png",
     data: { url: note.url },
   });
