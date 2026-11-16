@@ -152,6 +152,20 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return err
 		}
 		return act.Push(ctx, s.Path)
+	case command.CheckUpdate, command.Update:
+		if a.Checkout == nil {
+			return errors.New("this agent cannot update itself")
+		}
+		if err := a.Checkout.Fetch(ctx); err != nil {
+			return err
+		}
+		if p.Type == command.Update {
+			if err := a.Checkout.Update(ctx); err != nil {
+				return err
+			}
+			a.restart = true
+		}
+		return a.publishVersion(ctx)
 	}
 	return fmt.Errorf("unknown command type %q", p.Type)
 }

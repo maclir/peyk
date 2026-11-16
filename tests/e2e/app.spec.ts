@@ -138,7 +138,7 @@ test.describe('signed in', () => {
     await makeOwner(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
     await signIn(page);
-    await expect(page.getByRole('img', { name: 'Laptop online' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Laptop online. Check for updates' })).toBeVisible();
     const usage = page.getByRole('link', { name: 'Claude usage: 5h 77% left, 7d 5% left' });
     await expect(usage).toHaveAttribute('href', 'https://claude.ai/settings/usage');
     await expect(usage.locator('.meter.low')).toHaveCount(1);
@@ -247,11 +247,35 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply.pending')).toHaveText('Working…');
   });
 
+  test('tapping the laptop checks for updates, and Update is signed', async () => {
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();
+    await page.getByRole('button', { name: 'Laptop online. Check for updates' }).click();
+    await expect(page.getByText('Check for updates: waiting for the laptop…')).toBeVisible();
+    const check = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'check')!;
+    expect(check.fields.assertion).toBeUndefined();
+    expect(check.fields.grant).toBeUndefined();
+    await put(page, 'laptop/version', { commit: 'abc1234', behind: 2 });
+    await put(page, `commands/${check.name.split('/').pop()}`, { ...plain(check.fields), status: 'done' });
+    await expect(page.getByText('The laptop has 2 new commits to update to.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Laptop online at abc1234. Check for updates' })).toBeVisible();
+
+    await passkeyOn(page);
+    await page.getByRole('button', { name: 'Update the laptop: 2 new commits' }).click();
+    await expect(page.getByText('Update the laptop: waiting for the laptop…')).toBeVisible();
+    const upd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'update')!;
+    expect(upd.fields.grant).toBeDefined();
+    await put(page, 'laptop/version', { commit: 'def5678', behind: 0 });
+    await put(page, `commands/${upd.name.split('/').pop()}`, { ...plain(upd.fields), status: 'done' });
+    await expect(page.getByText('Update the laptop: done.')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();
+  });
+
   test('a send that does not go out says so on its task', async () => {
     await put(page, 'laptop/status', { online: false, seen_at: new Date() });
     await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
     await page.goto('/#inbox');
-    await expect(page.getByRole('img', { name: 'Laptop offline, seen just now' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Laptop offline, seen just now. Check for updates' })).toBeVisible();
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
     await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('button', { name: 'Send without clearing' }).click();

@@ -186,7 +186,7 @@ const pageHTML = `<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
 <body data-firebase="{{.}}">
-<header class="bar"><h1><img src="/static/icon.svg" alt="" width="24" height="24">peyk</h1><div id="hstat" class="hstat"><a id="usage" class="usage" href="https://claude.ai/settings/usage" target="_blank" rel="noopener" hidden><span class="meter"><i></i></span><span class="meter"><i></i></span></a><span id="seen" class="seen"></span><span id="laptop" class="laptop" role="img" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span></div></header>
+<header class="bar"><h1><img src="/static/icon.svg" alt="" width="24" height="24">peyk</h1><div id="hstat" class="hstat"><a id="usage" class="usage" href="https://claude.ai/settings/usage" target="_blank" rel="noopener" hidden><span class="meter"><i></i></span><span class="meter"><i></i></span></a><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></header>
 <main id="app"><p class="notice" id="notice">Loading…</p></main>
 <script type="module" src="/static/app.js"></script></body></html>`
 

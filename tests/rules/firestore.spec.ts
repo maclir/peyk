@@ -20,6 +20,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'laptop/status'), { online: true });
     await setDoc(doc(db, 'laptop/push'), { vapid_public_key: 'k' });
     await setDoc(doc(db, 'laptop/usage'), { five_hour: { used: 20 } });
+    await setDoc(doc(db, 'laptop/version'), { commit: 'abc1234', behind: 2 });
     await setDoc(doc(db, 'laptop/secret'), { x: 1 });
     await setDoc(doc(db, 'other/thing'), { secret: true });
     await setDoc(doc(db, 'projects/knip'), { name: 'knip', free: true });
@@ -42,6 +43,7 @@ describe('owner', () => {
     await assertSucceeds(getDoc(doc(owner(), 'sessions/knip')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/status')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/usage')));
+    await assertSucceeds(getDoc(doc(owner(), 'laptop/version')));
   });
 
   it('cannot write anything, because only the laptop and server write', async () => {
@@ -49,6 +51,7 @@ describe('owner', () => {
     await assertFails(deleteDoc(doc(owner(), 'sessions/knip')));
     await assertFails(setDoc(doc(owner(), 'laptop/status'), { online: false }));
     await assertFails(setDoc(doc(owner(), 'laptop/usage'), { five_hour: { used: 0 } }));
+    await assertFails(setDoc(doc(owner(), 'laptop/version'), { commit: 'x', behind: 0 }));
   });
 
   it('cannot list the laptop collection or read other collections', async () => {
@@ -62,6 +65,7 @@ describe('anyone else', () => {
     await assertFails(getDocs(collection(stranger(), 'sessions')));
     await assertFails(getDoc(doc(stranger(), 'laptop/status')));
     await assertFails(getDoc(doc(stranger(), 'laptop/usage')));
+    await assertFails(getDoc(doc(stranger(), 'laptop/version')));
   });
 
   it('a claim of false is not the owner', async () => {
@@ -200,6 +204,9 @@ describe('commands', () => {
     await assertSucceeds(setDoc(doc(owner(), 'commands/c2'), push));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c3'), cmd({ type: 'clear' })));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c5'), cmd({ type: 'answer' })));
+    const { assertion: unsigned, ...check } = cmd({ type: 'check' });
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c6'), check));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c7'), cmd({ type: 'update' })));
     const { assertion: a, ...bare } = cmd();
     await assertSucceeds(setDoc(doc(owner(), 'commands/c4'), { ...bare, grant: { statement: '{}', assertion: a, signature: 'e' } }));
     await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));

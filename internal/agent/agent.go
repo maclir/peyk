@@ -87,6 +87,15 @@ type Agent struct {
 	// Notify, when set, is told about sessions that start needing you or
 	// finish a turn.
 	Notify Notifier
+	// Checkout, when set, is the checkout the agent runs from: it publishes
+	// the checkout's version after every refresh and lets the phone fetch
+	// and update it.
+	Checkout Checkout
+	version  string
+	// restart is set once an update has landed; Run then returns, and
+	// launchd starts the agent again, which rebuilds it.
+	restart bool
+
 	// Refreshed, when set, is told the sessions after every refresh that
 	// published them.
 	Refreshed func(at time.Time, snaps []session.Snapshot)
@@ -189,6 +198,9 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	if a.Refreshed != nil {
 		a.Refreshed(a.Now(), snaps)
+	}
+	if err := a.publishVersion(ctx); err != nil {
+		return err
 	}
 	if a.Notify == nil || prev == nil {
 		return nil
@@ -570,6 +582,10 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			}
 			if err := a.execute(ctx, in); err != nil {
 				return err
+			}
+			if a.restart {
+				a.Log.Print("updated; exiting so launchd starts the new build")
+				return nil
 			}
 		case p := <-a.Power:
 			asleep, wake = p.Asleep, nil

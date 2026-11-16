@@ -16,7 +16,7 @@ import (
 // jobs are the agent, run through make so a restart rebuilds it and reads
 // .env afresh, and the menu bar app that shows and controls it.
 func jobs(repo, home string, lookup func(string) (string, bool)) []launchd.Job {
-	menuEnv := map[string]string{}
+	menuEnv := map[string]string{"PEYK_REPO": repo}
 	if o, ok := lookup("PEYK_ORIGIN"); ok && o != "" {
 		menuEnv["PEYK_ORIGIN"] = o
 	}
@@ -100,4 +100,10 @@ func uninstallJobs(ctx context.Context, out io.Writer) error {
 		fmt.Fprintf(out, "removed %s\n", label)
 	}
 	return nil
+}
+
+// restartAgent rebuilds and restarts the agent.
+func restartAgent(ctx context.Context) error {
+	_, err := laptop.Exec(ctx, "", "launchctl", "kickstart", "-k", launchd.Domain()+"/"+launchd.Agent)
+	return err
 }

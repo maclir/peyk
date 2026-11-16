@@ -30,6 +30,9 @@ const usage = `usage: peyk <command>
   keys           list trusted passkeys
   install        run the agent and its menu bar app under launchd
   uninstall      stop both and remove them from launchd
+  restart        rebuild and restart the launchd agent
+  check-update   fetch this checkout and print how far behind it is
+  update         fast-forward this checkout and restart the agent on it
 `
 
 func main() {
@@ -81,6 +84,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return installJobs(ctx, out)
 	case "uninstall":
 		return uninstallJobs(ctx, out)
+	case "restart":
+		return restartAgent(ctx)
+	case "check-update":
+		return checkUpdate(ctx, out)
+	case "update":
+		return update(ctx)
 	case "import-tasks":
 		return importTasks(ctx, os.Stdin, out)
 	case "owner":

@@ -13,6 +13,7 @@ const app = document.getElementById("app");
 const hstatEl = document.getElementById("hstat");
 const laptopEl = document.getElementById("laptop");
 const seenEl = document.getElementById("seen");
+const updateEl = document.getElementById("update");
 const usageEl = document.getElementById("usage");
 const config = document.body.dataset.firebase;
 
@@ -56,7 +57,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
     sheetSent: null,
@@ -95,6 +96,10 @@ async function start(cfg) {
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "usage"), (snap) => {
         state.usage = snap.exists() ? snap.data() : null;
+        render();
+      }, failed),
+      fs.onSnapshot(fs.doc(db, "laptop", "version"), (snap) => {
+        state.version = snap.exists() ? snap.data() : null;
         render();
       }, failed),
     ];
@@ -170,7 +175,15 @@ async function start(cfg) {
     const since = !online && state.laptop && state.laptop.seen_at ? ago(state.laptop.seen_at, now) : "";
     const seen = !since ? "" : since === "now" ? "seen just now" : `seen ${since} ago`;
     seenEl.textContent = seen;
-    laptopEl.setAttribute("aria-label", online ? "Laptop online" : `Laptop offline${seen ? `, ${seen}` : ""}`);
+    const commit = state.version?.commit ? ` at ${state.version.commit}` : "";
+    laptopEl.setAttribute("aria-label", (online ? `Laptop online${commit}` : `Laptop offline${seen ? `, ${seen}` : ""}`) + ". Check for updates");
+    laptopEl.title = `Laptop ${online ? "online" : "offline"}${commit}. Tap to check for updates.`;
+    laptopEl.classList.toggle("busy", state.busy.has("check"));
+    const behind = online ? state.version?.behind ?? 0 : 0;
+    updateEl.hidden = !behind;
+    updateEl.disabled = state.busy.has("update");
+    updateEl.textContent = state.busy.has("update") ? "Updating…" : "Update";
+    updateEl.setAttribute("aria-label", `Update the laptop: ${behind} new commit${behind === 1 ? "" : "s"}`);
 
     const left = usageLeft(state.usage, now);
     usageEl.hidden = !left;
@@ -271,6 +284,17 @@ async function start(cfg) {
     return h("button", { ...attrs, class: `${attrs.class ?? ""} busy`, disabled: "", "aria-busy": "true" }, spinner(), ...children);
   }
 
+  // Tapping the laptop asks it to fetch its checkout; the version it then
+  // publishes says whether an update is waiting.
+  laptopEl.addEventListener("click", () => sendCommand("check", {}, "Check for updates", "check", (text, busy) => {
+    if (text === "Check for updates: done.") {
+      const n = state.version?.behind ?? 0;
+      text = n ? `The laptop has ${n} new commit${n === 1 ? "" : "s"} to update to.` : "The laptop is up to date.";
+    }
+    setStatus(text, busy);
+  }));
+  updateEl.addEventListener("click", () => sendCommand("update", {}, "Update the laptop", "update"));
+
   // sendCommand signs the payload with this device's session key (push needs
   // none), stores it, and reports each step and what the laptop made of it
   // through report. key stays busy until the laptop answers, so the same
@@ -294,7 +318,7 @@ async function start(cfg) {
     report(`${label}: signing…`, true);
     render();
     try {
-      if (type !== "push") data.grant = await passkey.signCommand(payload, () => report(`${label}: approve with your passkey…`, true));
+      if (type !== "push" && type !== "check") data.grant = await passkey.signCommand(payload, () => report(`${label}: approve with your passkey…`, true));
       report(`${label}: sending…`, true);
       await fs.setDoc(ref, data);
     } catch (err) {

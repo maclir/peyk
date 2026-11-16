@@ -20,10 +20,14 @@ html.locked { overflow: hidden; }
 [hidden] { display: none !important; }
 .hstat { display: flex; align-items: center; gap: 14px; }
 .seen { font: 0.75rem var(--mono); color: var(--bad); }
-/* The laptop's state is the dot on its icon; text appears only when it is offline. */
-.laptop { position: relative; display: inline-flex; width: 22px; height: 22px; color: var(--muted); }
+/* The laptop's state is the dot on its icon; text appears only when it is
+   offline. The padding is the tap target; the negative margin keeps it from
+   growing the header. */
+.laptop { position: relative; display: inline-flex; width: 22px; height: 22px; color: var(--muted); padding: 11px; margin: -11px; box-sizing: content-box; border: 0; background: none; border-radius: 0; font-weight: inherit; }
+.laptop.busy { opacity: 0.5; }
+.update { padding: 4px 10px; font-size: 0.8rem; border-radius: 99px; background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .laptop svg { width: 22px; height: 22px; }
-.laptop.on::after, .laptop.off::after { content: ""; position: absolute; right: -3px; bottom: 1px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--bg); }
+.laptop.on::after, .laptop.off::after { content: ""; position: absolute; right: 8px; bottom: 12px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--bg); }
 .laptop.on::after { background: var(--ok); }
 .laptop.off::after { background: var(--bad); }
 /* Two bars, the 5-hour window over the week, filled to what is left. */

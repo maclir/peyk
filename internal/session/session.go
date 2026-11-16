@@ -275,3 +275,13 @@ func Finished(s Snapshot, sentAt time.Time) (bool, string) {
 	}
 	return true, ""
 }
+
+// Version is the laptop checkout's commit against the branch it follows, as
+// of the last fetch, published as laptop/version.
+type Version struct {
+	Commit string `firestore:"commit" json:"commit"`
+	// Behind counts the fetched commits HEAD does not have yet.
+	Behind int `firestore:"behind" json:"behind"`
+	// CheckedAt is when the checkout last fetched; zero if it never has.
+	CheckedAt time.Time `firestore:"checked_at,omitempty" json:"checked_at,omitempty"`
+}

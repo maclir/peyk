@@ -93,7 +93,7 @@ func TestJobsRunTheAgentThroughMakeAndGiveTheMenuTheOrigin(t *testing.T) {
 	if menu.Label != launchd.Menu || menu.Program[0] != "/code/peyk/bin/Peyk.app/Contents/MacOS/Peyk" || menu.KeepAlive {
 		t.Fatalf("menu job = %+v", menu)
 	}
-	if menu.Env["PEYK_ORIGIN"] != "https://peyk.example" || len(menu.Env) != 1 {
+	if menu.Env["PEYK_ORIGIN"] != "https://peyk.example" || menu.Env["PEYK_REPO"] != "/code/peyk" || len(menu.Env) != 2 {
 		t.Fatalf("menu env = %v", menu.Env)
 	}
 }

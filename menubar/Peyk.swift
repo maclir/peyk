@@ -3,11 +3,13 @@
 import AppKit
 import SwiftUI
 
+let env = ProcessInfo.processInfo.environment
 let agentLabel = "com.peyk.agent"
 let home = FileManager.default.homeDirectoryForCurrentUser
 let healthURL = home.appendingPathComponent(".peyk/agent.json")
 let logURL = home.appendingPathComponent(".peyk/agent.log")
 let plistPath = home.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path
+let repo = env["PEYK_REPO"]
 let domain = "gui/\(getuid())"
 
 enum AgentState {
@@ -21,6 +23,28 @@ enum AgentState {
         case .stopped: "stopped"
         }
     }
+}
+
+/// What `peyk check-update` prints: the checkout against its upstream.
+struct Version: Decodable {
+    let commit: String
+    let behind: Int
+}
+
+/// Runs this checkout's own peyk binary.
+func peyk(_ args: String...) -> (status: Int32, output: Data) {
+    guard let repo else { return (-1, Data()) }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: repo).appendingPathComponent("bin/peyk")
+    p.arguments = args
+    p.currentDirectoryURL = URL(fileURLWithPath: repo)
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = pipe
+    do { try p.run() } catch { return (-1, Data("\(error)".utf8)) }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return (p.terminationStatus, data)
 }
 
 struct Health: Decodable {
@@ -99,7 +123,12 @@ func ago(_ seconds: TimeInterval) -> String {
 final class Model: ObservableObject {
     @Published var state = AgentState.starting
     @Published var detail: [String] = []
-    let origin = ProcessInfo.processInfo.environment["PEYK_ORIGIN"].flatMap(URL.init(string:))
+    /// The last check's answer: nil until checked, then the version or why
+    /// the check failed.
+    @Published var version: Version?
+    @Published var updateNote: String?
+    @Published var updating = false
+    let origin = env["PEYK_ORIGIN"].flatMap(URL.init(string:))
     private var timer: Timer?
 
     init() {
@@ -142,6 +171,38 @@ final class Model: ObservableObject {
             let (status, out) = launchctl(args)
             if status != 0 { NSLog("launchctl %@: %@", args.joined(separator: " "), out) }
             DispatchQueue.main.async { self.refresh() }
+        }
+    }
+
+    func checkForUpdates() {
+        updateNote = "Checking…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (status, out) = peyk("check-update")
+            let v = status == 0 ? try? JSONDecoder().decode(Version.self, from: out) : nil
+            DispatchQueue.main.async {
+                self.version = v
+                if let v {
+                    self.updateNote = v.behind == 0 ? "Up to date at \(v.commit)" : nil
+                } else {
+                    self.updateNote = "Check failed: \(String(decoding: out, as: UTF8.self).prefix(80))"
+                }
+            }
+        }
+    }
+
+    /// Fast-forwards and restarts the agent; a change to this app relaunches
+    /// it, which ends this process.
+    func update() {
+        updating = true
+        updateNote = "Updating…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (status, out) = peyk("update")
+            DispatchQueue.main.async {
+                self.updating = false
+                self.version = nil
+                self.updateNote = status == 0 ? "Updated" : "Update failed: \(String(decoding: out, as: UTF8.self).prefix(80))"
+                self.refresh()
+            }
         }
     }
 
@@ -246,6 +307,15 @@ struct PeykMenu: App {
             }
             .disabled(model.origin == nil)
             Button("Show log") { NSWorkspace.shared.open(logURL) }
+            Divider()
+            if let v = model.version, v.behind > 0 {
+                Button("Update (\(v.behind) new commit\(v.behind == 1 ? "" : "s"))") { model.update() }
+                    .disabled(model.updating)
+            } else {
+                Button("Check for updates") { model.checkForUpdates() }
+                    .disabled(repo == nil || model.updating)
+            }
+            if let note = model.updateNote { Text(note) }
             Divider()
             Button("Quit menu bar app") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {

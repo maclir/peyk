@@ -30,6 +30,11 @@ const (
 	Push     = "push"
 	// Answer replies to a session's open multiple-choice dialog.
 	Answer = "answer"
+	// CheckUpdate fetches the laptop's checkout so the phone can see whether
+	// an update is waiting.
+	CheckUpdate = "check"
+	// Update fast-forwards the laptop's checkout and restarts the agent on it.
+	Update = "update"
 )
 
 const (
@@ -39,8 +44,9 @@ const (
 )
 
 // Signed says whether a command type needs a passkey signature. Push sends
-// commits that are already made to the remote they track, so it does not.
-func Signed(typ string) bool { return typ != Push }
+// commits that are already made to the remote they track, and check only
+// fetches, so neither does. Update runs new code, so it does.
+func Signed(typ string) bool { return typ != Push && typ != CheckUpdate }
 
 // MaxAge bounds how far ahead a payload may expire, so a signed command
 // cannot be held back and replayed much later.

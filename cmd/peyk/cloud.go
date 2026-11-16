@@ -157,9 +157,14 @@ func runAgent(ctx context.Context) error {
 		return err
 	}
 	defer agent.RemoveHealth(healthPath())
+	own, err := ownCheckout()
+	if err != nil {
+		return err
+	}
 	c := collector()
 	a := &agent.Agent{
 		Refreshed:   reportHealth(healthPath(), time.Now(), logger),
+		Checkout:    own,
 		Power:       power,
 		Edits:       edits,
 		Transcripts: transcripts, Replies: replies,
