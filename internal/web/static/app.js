@@ -58,6 +58,8 @@ async function start(cfg) {
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
+    // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
+    sheetSent: null,
     // Picks for open questions by question id, kept across redraws.
     answers: new Map() };
   let unsubscribe = [];
@@ -186,7 +188,8 @@ async function start(cfg) {
     renderLaptop();
     // Snapshots re-render the whole view; keep what is being typed.
     const typed = 'textarea, input[type="search"]';
-    const drafts = new Map([...app.querySelectorAll(typed)].map((t) => [t.id, t.value]));
+    const fields = () => [...app.querySelectorAll(typed), ...(sheet ? sheet.list.querySelectorAll(typed) : [])];
+    const drafts = new Map(fields().map((t) => [t.id, t.value]));
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
     const id = shownSession();
@@ -198,12 +201,13 @@ async function start(cfg) {
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
-    else if (s) app.replaceChildren(tabs, status, detail(s));
+    else if (s) app.replaceChildren(status, detail(s));
     else if (view === "inbox") app.replaceChildren(tabs, status, inbox());
     else app.replaceChildren(tabs, status, board());
 
-    for (const t of app.querySelectorAll(typed)) if (drafts.has(t.id)) t.value = drafts.get(t.id);
-    document.documentElement.classList.toggle("locked", view === "inbox" && state.picking);
+    renderSheet(s);
+    for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
+    document.documentElement.classList.toggle("locked", (view === "inbox" && state.picking) || Boolean(sheet?.open));
     if (focused) document.getElementById(focused)?.focus();
     if (s && !document.hidden) dismissNotes(s.id);
   }
@@ -492,17 +496,21 @@ async function start(cfg) {
           onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more"))),
       h("div", { class: "ttext" }, t.text),
       taskImages(t),
-      open ? h("div", { class: "menu" },
-        clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => send(t, false) }, "Send without clearing") : null,
-        h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
-        h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, "Edit"),
-        h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
-      ) : null,
+      open ? taskMenu(t, clears, send) : null,
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
         t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => send(t, clears) }, "Send", icon("arrow")) : null,
       ),
+    );
+  }
+
+  function taskMenu(t, clears, sendWith) {
+    return h("div", { class: "menu" },
+      clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => sendWith(t, false) }, "Send without clearing") : null,
+      h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
+      h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, "Edit"),
+      h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
     );
   }
 
@@ -810,7 +818,7 @@ async function start(cfg) {
     render();
   }
 
-  function editor(t) {
+  function editor(t, movable = true) {
     const key = `edit:${t.id}`;
     // Snapshots re-render the editor; the chosen project survives in state.
     const chosen = state.editProject ?? t.project;
@@ -832,7 +840,7 @@ async function start(cfg) {
       }
     };
     const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
-      submitLabel: "Save", submitIcon: "check", send: save, lead: projectPill(chosen, t),
+      submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null,
       tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
     form.querySelector("textarea").value = t.text;
     return form;
@@ -957,11 +965,11 @@ async function start(cfg) {
           h("h2", {}, s.title, chip(st), flagRow(s)),
           g && !onDefaultBranch(g) ? h("span", { class: "branch" }, g.branch || "detached") : null,
           ciLink(g)),
+        inboxButton(s),
         s.cleared || busy ? null : busyButton(`clear:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Clear", title: "Clear the conversation", onclick: () => sendCommand("clear", { session: s.id }, `Clear ${s.title}`, `clear:${s.id}`) }, icon("trash")),
         s.aoe_status !== "stopped" ? busyButton(`stop:${s.id}`, { type: "button", class: "icon tool", "aria-label": "Stop", title: "Stop the worker", onclick: () => sendCommand("stop", { session: s.id }, `Stop ${s.title}`, `stop:${s.id}`) }, icon("stop")) : null,
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
-      nextTasks(s),
       g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       h("div", { class: "convo" },
@@ -977,15 +985,135 @@ async function start(cfg) {
     );
   }
 
-  // A free worker links to the inbox, narrowed to its project, to pick what
-  // it does next.
-  function nextTasks(s) {
+  function queuedFor(project) {
+    return queue(state.tasks, state.projects).filter((t) => t.project === project);
+  }
+
+  function inboxButton(s) {
     const p = projectOf(s);
-    if (!p?.free) return null;
-    const n = state.tasks.filter((t) => t.status === "queued" && t.project === p.name).length;
-    if (!n) return null;
-    return h("a", { class: "nextlink", href: "#inbox", onclick: () => { state.only = p.name; state.filter = "ready"; } },
-      h("span", { class: "dot free" }), h("span", { class: "grow" }, `${n} ${n === 1 ? "task" : "tasks"} in inbox`), icon("arrow"));
+    if (!p) return null;
+    const n = queuedFor(p.name).length;
+    return h("button", { type: "button", class: "icon tool inboxbtn", title: "Inbox", "aria-label": n ? `Inbox, ${n} queued` : "Inbox", "aria-haspopup": "dialog",
+      onclick: () => openSheet(p.name) },
+      icon("tray"), n ? h("span", { class: "count" }, String(n)) : null);
+  }
+
+  // The project's inbox as a sheet over its worker. It lives outside #app and
+  // its composer is built once per project, never redrawn: a snapshot while
+  // typing would otherwise replace the textarea under the caret, dropping
+  // keystrokes and the phone keyboard's composition.
+  let sheet = null;
+
+  function openSheet(project) {
+    if (sheet?.project !== project) buildSheet(project);
+    sheet.open = true;
+    sheet.scrim.hidden = false;
+    render();
+    if (!queuedFor(project).length) sheet.text.focus();
+  }
+
+  function closeSheet() {
+    if (!sheet?.open) return;
+    sheet.open = false;
+    sheet.scrim.hidden = true;
+    state.menu = null;
+    state.sheetSent = null;
+    if (state.editing && sheet.list.contains(document.getElementById(`edit-${state.editing}`))) {
+      dropDraft(`edit:${state.editing}`);
+      state.editing = null;
+    }
+    render();
+  }
+
+  function buildSheet(project) {
+    if (sheet) {
+      dropDraft(sheet.key);
+      sheet.scrim.remove();
+    }
+    const key = `sheet:${project}`;
+    // The draft is cleared as soon as the task is accepted, as in the inbox.
+    // A held add sends only if the worker is still free once the task is saved.
+    const add = async (text, andSend = false) => {
+      const value = text.value.trim();
+      if (!value) return;
+      const attaching = draft(key);
+      text.value = "";
+      state.drafts.delete(key);
+      try {
+        const t = await track(`add:${key}`, () => addTask(project, value, attaching));
+        forgetImages(attaching);
+        if (andSend && projectNamed(project)?.free) sheetSend(t, hasConversation(t));
+      } catch (err) {
+        if (!text.value) text.value = value;
+        if (!draft(key).length) state.drafts.set(key, attaching);
+        render();
+        alertLine(`Could not add the task: ${err.message}`);
+      }
+    };
+    const hold = (text) => {
+      if (!text.value.trim() || !projectNamed(project)?.free) return false;
+      add(text, true);
+    };
+    const form = composerForm({ key, id: "sheet-text", label: `New task for ${project}`, placeholder: "Add a task", cls: "add", submitLabel: "Add task", send: add, hold });
+    const head = h("div", { class: "sheethead" });
+    const list = h("div", { class: "sheetbody tlist" });
+    const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && closeSheet() },
+      h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": `${project} inbox`, onkeydown: (e) => e.key === "Escape" && closeSheet() },
+        h("div", { class: "grabber" }),
+        head,
+        h("p", { class: "alert", id: "alert", role: "status" }),
+        list,
+        h("div", { class: "sheetfoot" }, form)));
+    document.body.append(scrim);
+    sheet = { project, key, scrim, head, list, form, text: form.querySelector("textarea"), open: false };
+  }
+
+  function sheetSend(t, clear) {
+    state.sheetSent = t.id;
+    send(t, clear);
+  }
+
+  function renderSheet(s) {
+    if (!sheet?.open) return;
+    if (!s || projectOf(s)?.name !== sheet.project) return closeSheet();
+    const tasks = queuedFor(sheet.project);
+    // A sent task closes the sheet, unless something is being written for the next one.
+    if (state.sheetSent && !tasks.some((t) => t.id === state.sheetSent)) {
+      state.sheetSent = null;
+      if (!sheet.text.value.trim() && !draft(sheet.key).length) return closeSheet();
+    }
+    const p = projectNamed(sheet.project);
+    sheet.head.replaceChildren(
+      face(p, sheet.project, "sm"),
+      h("h2", { class: "grow" }, "Inbox", h("span", { class: `dot ${p?.free ? "free" : "busy"}`, title: p?.free ? "Free" : p?.busy || "Busy" })),
+      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: closeSheet }, icon("x")));
+    sheet.list.replaceChildren(...(tasks.length ? tasks.map(sheetRow) : [h("p", { class: "empty" }, "Nothing queued.")]));
+    syncThumbs(sheet.form, sheet.key);
+  }
+
+  // Only the thumbnails are redrawn; the textarea stays where it is.
+  function syncThumbs(form, key) {
+    const imgs = draft(key);
+    form.querySelector(":scope > .thumbs")?.remove();
+    if (imgs.length) form.prepend(h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))));
+    form.querySelector('[aria-label="Attach image"]').disabled = imgs.length >= MAX_IMAGES;
+  }
+
+  function sheetRow(t) {
+    if (state.editing === t.id) return editor(t, false);
+    const clears = t.ready && hasConversation(t);
+    const open = state.menu === t.id;
+    const sent = state.sends.get(t.id);
+    return h("article", { class: "srow" },
+      h("div", { class: "smain" },
+        h("div", { class: "ttext" }, t.text),
+        taskImages(t),
+        sent ? h("span", { class: "tstatus", role: "status" }, sent.text) : null,
+        open ? taskMenu(t, clears, sheetSend) : null),
+      t.saving ? h("span", { class: "saving" }, spinner()) : h("div", { class: "sacts" },
+        h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
+          onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more")),
+        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sheetSend(t, clears) }, "Send") : null));
   }
 
   function pushCard(s, now) {
@@ -1159,6 +1287,7 @@ const ICONS = {
   chevron: '<path d="M6 9l6 6 6-6"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
   clip: '<path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/>',
+  tray: '<path d="M4 13l2.5-7h11L20 13v6H4z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',
   sort: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',

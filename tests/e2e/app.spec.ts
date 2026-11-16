@@ -493,24 +493,58 @@ test.describe('signed in', () => {
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
 
-  test("a free worker links to its project's tasks in the inbox", async () => {
+  test("a worker's inbox sheet lists, adds and sends its project's tasks", async () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });
     await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
     await page.goto('/#s-h');
     await expect(page.locator('.detail')).toBeVisible();
-    await expect(page.getByRole('link', { name: /in inbox/ })).toHaveCount(0);
+    await expect(page.locator('nav.tabs')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Inbox, 1 queued' }).click();
+    let sheet = page.getByRole('dialog', { name: 'hamta inbox' });
+    await expect(sheet.locator('.ttext')).toHaveText(['Waits on hamta']);
+    await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect(sheet).toBeHidden();
 
-    await page.goto('/#inbox');
-    await page.getByRole('button', { name: /^All/ }).click();
-    await page.evaluate(() => { location.hash = '#s-k'; });
-    await page.getByRole('link', { name: '2 tasks in inbox' }).click();
-    await expect(page).toHaveURL(/#inbox$/);
-    await expect(page.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.tasks .ttext')).toHaveText(['First thing', 'Second thing']);
-    await page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' }).click();
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    await page.getByRole('button', { name: 'Inbox, 2 queued' }).click();
+    sheet = page.getByRole('dialog', { name: 'knip inbox' });
+    await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing']);
+    await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
 
+    // The worker turning busy mid-sentence leaves the same box, text and focus.
+    const box = sheet.getByLabel('New task for knip');
+    await box.evaluate((el) => { (el as HTMLTextAreaElement & { kept?: boolean }).kept = true; });
+    await box.pressSequentially('Third');
+    const knip = { name: 'knip', path: '/c/knip', session_id: 'k', active: new Date() };
+    await put(page, 'projects/knip', { ...knip, free: false, busy: 'working' });
+    await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
+    await box.pressSequentially(' thing');
+    await expect(box).toHaveValue('Third thing');
+    await expect(box).toBeFocused();
+    expect(await box.evaluate((el) => (el as HTMLTextAreaElement & { kept?: boolean }).kept)).toBe(true);
+    await put(page, 'projects/knip', { ...knip, free: true, busy: '' });
+
+    await sheet.getByRole('button', { name: 'Add task' }).click();
+    await expect(box).toHaveValue('');
+    await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing', 'Third thing']);
+    await expect(page.getByRole('button', { name: 'Inbox, 3 queued' })).toBeVisible();
+    const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Third thing');
+    await expect.poll(stored).toBeTruthy();
+    expect((await stored())!.fields.project.stringValue).toBe('knip');
+
+    await sheet.locator('.srow', { hasText: 'First thing' }).getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(sheet.locator('.srow', { hasText: 'First thing' }).getByRole('status')).toHaveText(/knip.*: waiting for the laptop…/);
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'one' });
+    await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'dispatched', session_id: 'k', created_at: new Date(Date.now() - 3000), dispatched_at: new Date() });
+    await expect(sheet).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Inbox, 2 queued' })).toBeVisible();
+
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
 

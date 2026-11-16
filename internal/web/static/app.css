@@ -130,8 +130,8 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .pending code { background: none; padding: 0; color: var(--accent); }
 .pending .when { margin-left: 6px; }
 .when { color: var(--muted); font-weight: 400; }
-.nextlink { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); font-weight: 600; text-decoration: none; }
-.nextlink .ico svg { width: 14px; height: 14px; color: var(--muted); }
+.inboxbtn { position: relative; }
+.inboxbtn .count { position: absolute; top: 3px; right: 1px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--ink); color: var(--bg); font: 700 0.68rem/18px var(--mono); text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg); }
 .protos { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .protos li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .protos a { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
@@ -174,7 +174,7 @@ button.tool { width: 40px; height: 40px; color: var(--muted); }
 .composer { position: sticky; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 2; transition: transform 0.2s ease; display: flex; flex-direction: column; gap: 6px; margin: 8px -4px 0; padding: 10px 10px 8px 14px; background: var(--card); border: 1px solid var(--line-strong); border-radius: 20px; box-shadow: 0 -6px 16px var(--bg), 0 2px 10px rgba(0, 0, 0, 0.06), 0 calc(50vh + 24px) 0 50vh var(--bg); }
 /* A tucked composer moves below the end of the page; clipping keeps it from lengthening the page. Only the vertical axis clips, since the composer is wider than #app. The padding moves the clip edge to the end of the page, and the negative margin keeps the page length the same. */
 #app { overflow-x: visible; overflow-y: clip; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); margin-bottom: calc(-1rem - env(safe-area-inset-bottom, 0px)); }
-html.tuck .composer:not(.edit):not(:focus-within) { transform: translateY(calc(100% + 60px)); }
+html.tuck #app .composer:not(.edit):not(:focus-within) { transform: translateY(calc(100% + 60px)); }
 .composer textarea { border: 0; outline: none; resize: none; padding: 4px 0; font: inherit; font-size: 0.95rem; line-height: 1.4; color: var(--ink); background: transparent; min-height: 1.4em; field-sizing: content; max-height: 40vh; }
 .composer textarea:focus-visible { outline: none; }
 .composer.edit { position: static; margin: 0; box-shadow: none; }
@@ -251,6 +251,17 @@ button.step { width: 40px; height: 40px; background: var(--paper); color: var(--
 .pname { font-weight: 600; overflow-wrap: anywhere; }
 .pstat { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
 .pstat.ok { color: var(--ok); } .pstat.busy { color: var(--warn); }
+/* A worker's inbox: its project's queued tasks, with a composer that adds to it. */
+.sheethead h2 { display: flex; align-items: center; gap: 8px; }
+.sheet > .alert { padding: 0 16px; }
+.tlist { flex: 1 1 auto; min-height: 0; padding-bottom: 4px; }
+.srow { display: flex; align-items: flex-start; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.srow .smain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 7px; }
+.srow .sacts { display: flex; align-items: center; gap: 2px; flex: none; }
+.srow .saving { display: inline-flex; width: 36px; justify-content: center; padding-top: 10px; color: var(--accent); }
+.tlist .composer.edit { margin: 8px 0; }
+.sheetfoot { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.sheetfoot .composer { position: static; margin: 0; box-shadow: none; background: var(--bg); }
 .badge { font-size: 0.72rem; font-weight: 600; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--paper); white-space: nowrap; }
 
 .fp { display: block; font: 700 1.4rem var(--mono); letter-spacing: 0.08em; margin-top: 8px; color: var(--ink); }
