@@ -43,7 +43,7 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		Title:      s.Title,
 		Path:       s.Path,
 		AoeStatus:  s.Status,
-		State:      session.Derive(s.Status, git),
+		State:      session.Derive(s.Status, Backgrounded(t), git),
 		Git:        git,
 		Transcript: t,
 		UpdatedAt:  c.Now(),

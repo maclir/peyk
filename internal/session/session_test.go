@@ -8,26 +8,31 @@ import (
 func TestDerive(t *testing.T) {
 	clean := &Git{}
 	tests := []struct {
-		name   string
-		status string
-		git    *Git
-		want   State
+		name         string
+		status       string
+		backgrounded bool
+		git          *Git
+		want         State
 	}{
-		{"waiting beats dirty tree", "waiting", &Git{Dirty: 3}, NeedsInput},
-		{"running agent with uncommitted work", "running", &Git{Dirty: 2}, Working},
-		{"starting counts as working", "starting", clean, Working},
-		{"error", "error", clean, Error},
-		{"idle with uncommitted changes", "idle", &Git{Dirty: 1, Unpushed: 2}, Dirty},
-		{"idle with unpushed commits", "idle", &Git{Unpushed: 2}, Unpushed},
-		{"stopped with unpushed commits", "stopped", &Git{Unpushed: 1}, Unpushed},
-		{"idle and clean", "idle", clean, Idle},
-		{"stopped and clean", "stopped", clean, Stopped},
-		{"no repository", "idle", nil, Idle},
-		{"unknown status", "unknown", clean, Idle},
+		{"waiting beats dirty tree", "waiting", false, &Git{Dirty: 3}, NeedsInput},
+		{"running agent with uncommitted work", "running", false, &Git{Dirty: 2}, Working},
+		{"starting counts as working", "starting", false, clean, Working},
+		{"error", "error", false, clean, Error},
+		{"idle with uncommitted changes", "idle", false, &Git{Dirty: 1, Unpushed: 2}, Dirty},
+		{"idle with unpushed commits", "idle", false, &Git{Unpushed: 2}, Unpushed},
+		{"stopped with unpushed commits", "stopped", false, &Git{Unpushed: 1}, Unpushed},
+		{"idle and clean", "idle", false, clean, Idle},
+		{"stopped and clean", "stopped", false, clean, Stopped},
+		{"no repository", "idle", false, nil, Idle},
+		{"unknown status", "unknown", false, clean, Idle},
+		{"idle with a background task and unpushed commits", "idle", true, &Git{Unpushed: 1}, Working},
+		{"idle with a background task and a dirty tree", "idle", true, &Git{Dirty: 1}, Working},
+		{"waiting beats a background task", "waiting", true, clean, NeedsInput},
+		{"stopped session's background task died with it", "stopped", true, &Git{Unpushed: 1}, Unpushed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Derive(tt.status, tt.git); got != tt.want {
+			if got := Derive(tt.status, tt.backgrounded, tt.git); got != tt.want {
 				t.Fatalf("Derive(%q) = %q, want %q", tt.status, got, tt.want)
 			}
 		})

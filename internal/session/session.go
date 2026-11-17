@@ -189,10 +189,12 @@ type Transcript struct {
 	ID  string
 }
 
-// Derive turns aoe's status and the repository state into one board state.
-// What the agent is doing wins over what it left behind, because a running
-// agent is expected to have uncommitted work.
-func Derive(aoeStatus string, git *Git) State {
+// Derive turns aoe's status, whether the agent has tasks still running in the
+// background, and the repository state into one board state. What the agent
+// is doing wins over what it left behind, because a running agent is
+// expected to have uncommitted work. aoe sees an agent between turns as idle
+// even while its background tasks run; a stopped session's tasks died with it.
+func Derive(aoeStatus string, backgrounded bool, git *Git) State {
 	switch aoeStatus {
 	case "waiting":
 		return NeedsInput
@@ -200,6 +202,11 @@ func Derive(aoeStatus string, git *Git) State {
 		return Working
 	case "error":
 		return Error
+	case "stopped":
+	default:
+		if backgrounded {
+			return Working
+		}
 	}
 	if git != nil {
 		if git.Dirty > 0 {

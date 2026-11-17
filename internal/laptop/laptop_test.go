@@ -539,3 +539,51 @@ func TestPendingQuestionIsGoneOnceAnswered(t *testing.T) {
 		t.Fatalf("a session without its own transcript has no question: %+v", q)
 	}
 }
+
+func launched(result string) string {
+	return `{"type":"user","isSidechain":false,"timestamp":"2026-11-17T14:00:00Z","message":{"content":[{"type":"tool_result","content":"started"}]},"toolUseResult":` + result + `}`
+}
+
+func ended(id string) string {
+	return `{"type":"user","isSidechain":false,"timestamp":"2026-11-17T14:05:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>` + id + `</task-id>\n<status>completed</status>\n</task-notification>"}}`
+}
+
+func TestBackgroundedUntilEveryTaskEnds(t *testing.T) {
+	shell := launched(`{"stdout":"","backgroundTaskId":"bo7d3d3ap"}`)
+	agent := launched(`{"isAsync":true,"status":"async_launched","agentId":"a9f3"}`)
+	monitor := launched(`{"taskId":"bi6y","timeoutMs":600000,"persistent":false}`)
+	watcher := launched(`{"taskId":"bper","persistent":true}`)
+	tests := []struct {
+		name  string
+		lines []string
+		want  bool
+	}{
+		{"shell still running", []string{shell, assistant("2026-11-17T14:01:00Z", "tests are running")}, true},
+		{"shell ended", []string{shell, ended("bo7d3d3ap")}, false},
+		{"async agent still running", []string{agent}, true},
+		{"one of two ended", []string{shell, agent, ended("a9f3")}, true},
+		{"monitor still running", []string{monitor}, true},
+		{"persistent monitor is not work in flight", []string{watcher}, false},
+		{"stopped by the agent", []string{shell, `{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_1","name":"TaskStop","input":{"task_id":"bo7d3d3ap"}}]}}`}, false},
+		{"no tasks", []string{assistant("2026-11-17T14:01:00Z", "done")}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claude := t.TempDir()
+			work := "/Users/me/code/areh"
+			writeTranscript(t, claude, work, "s", time.Now(), tt.lines...)
+			if got := Backgrounded(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"}); got != tt.want {
+				t.Fatalf("Backgrounded = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBackgroundedReadsOnlyTheSessionsOwnTranscript(t *testing.T) {
+	claude := t.TempDir()
+	work := "/Users/me/code/areh"
+	writeTranscript(t, claude, work, "other", time.Now(), launched(`{"backgroundTaskId":"b1"}`))
+	if Backgrounded(session.Transcript{Dir: TranscriptDir(claude, work)}) {
+		t.Fatal("unrecorded transcript reported a background task")
+	}
+}

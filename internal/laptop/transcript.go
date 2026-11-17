@@ -319,3 +319,92 @@ func resultLine(lines [][]byte, id string) []byte {
 	}
 	return nil
 }
+
+// launch is the part of a tool result that names a task the agent left
+// running after its turn: a background shell, an async subagent, or a
+// monitor. A persistent monitor watches for the rest of the session, so it
+// never means the agent still has work in flight.
+type launch struct {
+	ToolUseResult struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+		Status           string `json:"status"`
+		AgentID          string `json:"agentId"`
+		TaskID           string `json:"taskId"`
+		Persistent       bool   `json:"persistent"`
+	} `json:"toolUseResult"`
+}
+
+func (l launch) id() string {
+	r := l.ToolUseResult
+	switch {
+	case r.BackgroundTaskID != "":
+		return r.BackgroundTaskID
+	case r.Status == "async_launched":
+		return r.AgentID
+	case r.TaskID != "" && !r.Persistent:
+		return r.TaskID
+	}
+	return ""
+}
+
+var taskEnded = regexp.MustCompile(`<task-id>([A-Za-z0-9_-]+)</task-id>`)
+
+// stopTool ends a task without Claude Code writing a notification for it.
+const stopTool = "TaskStop"
+
+type stopCall struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Input struct {
+		TaskID string `json:"task_id"`
+	} `json:"input"`
+}
+
+// stopped returns the tasks an assistant entry stops.
+func stopped(line []byte) []string {
+	var e entry
+	var calls []stopCall
+	if json.Unmarshal(line, &e) != nil || e.IsSidechain || e.Type != "assistant" || json.Unmarshal(e.Message.Content, &calls) != nil {
+		return nil
+	}
+	var ids []string
+	for _, c := range calls {
+		if c.Type == "tool_use" && c.Name == stopTool && c.Input.TaskID != "" {
+			ids = append(ids, c.Input.TaskID)
+		}
+	}
+	return ids
+}
+
+// Backgrounded says whether the agent launched a task that has not ended:
+// Claude Code has not reported it and the agent has not stopped it. Claude Code wakes the agent when one ends, so its
+// turn finishing does not mean its work has. Only the session's own
+// transcript is read, because only its own process runs its tasks.
+func Backgrounded(t session.Transcript) bool {
+	if t.ID == "" {
+		return false
+	}
+	running := map[string]bool{}
+	for _, line := range tail(filepath.Join(t.Dir, t.ID+".jsonl")) {
+		for _, m := range taskEnded.FindAllSubmatch(line, -1) {
+			delete(running, string(m[1]))
+		}
+		if bytes.Contains(line, []byte(`"name":"`+stopTool+`"`)) {
+			for _, id := range stopped(line) {
+				delete(running, id)
+			}
+		}
+		if !bytes.Contains(line, []byte(`"toolUseResult"`)) {
+			continue
+		}
+		var e entry
+		var l launch
+		if json.Unmarshal(line, &e) != nil || e.IsSidechain || e.Type != "user" || json.Unmarshal(line, &l) != nil {
+			continue
+		}
+		if id := l.id(); id != "" {
+			running[id] = true
+		}
+	}
+	return len(running) > 0
+}
