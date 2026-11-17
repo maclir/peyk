@@ -210,7 +210,7 @@ test.describe('signed in', () => {
     await expect.poll(async () => (await list(page, 'seen')).map((d) => [d.name.split('/').pop(), Boolean(d.fields.seen_at)])).toEqual([['k', true]]);
   });
 
-  test('a dismissal replaces its worker\'s notification silently and closes it', async () => {
+  test('a dismissal closes its worker\'s notification without showing one', async () => {
     await page.goto('/');
     await page.waitForFunction(() => navigator.serviceWorker.controller);
     const [worker] = page.context().serviceWorkers();
@@ -224,7 +224,7 @@ test.describe('signed in', () => {
       await (self as any).notify({ session: 'z', dismiss: true });
       return { open: [...open], shown };
     });
-    expect(got).toEqual({ open: ['h'], shown: ['k silently', 'z silently'] });
+    expect(got).toEqual({ open: ['h'], shown: [] });
   });
 
   test("a push for the worker on screen is shown silently and closed, others with sound", async () => {

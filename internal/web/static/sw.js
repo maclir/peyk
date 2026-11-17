@@ -114,8 +114,7 @@ self.addEventListener("push", (event) => {
 
 // Browsers require every push to show a notification: Safari revokes the
 // subscription otherwise, and Chrome shows a generic one in its place. A note
-// for the worker already on screen is shown silently and closed at once, and
-// so is a dismissal, which replaces the worker's notification before closing it.
+// for the worker already on screen is shown silently and closed at once.
 async function notify(note) {
   if (note.dismiss) return dismiss(note.session);
   const visible = await visibleWindows();
@@ -138,14 +137,13 @@ async function notify(note) {
   if (watched) (await self.registration.getNotifications({ tag: note.session })).forEach((n) => n.close());
 }
 
+// A dismissal only closes. A placeholder shown and closed at once can stay on
+// an installed Android app as an empty notification, and Chrome judges a
+// push by what is open when it ends, so a closed placeholder counts as none.
 async function dismiss(session) {
-  const open = (await self.registration.getNotifications({ tag: session })).length;
-  await log("dismissed elsewhere", { session, open });
-  try {
-    await self.registration.showNotification("peyk", { tag: session, silent: true, badge: "/static/notification-badge.png" });
-  } finally {
-    (await self.registration.getNotifications({ tag: session })).forEach((n) => n.close());
-  }
+  const open = await self.registration.getNotifications({ tag: session });
+  open.forEach((n) => n.close());
+  await log("dismissed elsewhere", { session, closed: open.length });
 }
 
 async function visibleWindows() {
