@@ -907,7 +907,7 @@ test.describe('signed in', () => {
     await page.goto('/#s-k');
     await passkeyOn(page);
     await expect(page.locator('.detail h2 .chip.idle')).toHaveText('idle');
-    await expect(page.locator('.detail .dsub .tag')).toHaveCount(0);
+    await expect(page.locator('.dhead .tag')).toHaveCount(0);
     await expect(page.locator('.reply.sent.none')).toHaveText('Nothing sent yet.');
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear conversation' }).click();

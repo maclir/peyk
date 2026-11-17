@@ -1240,21 +1240,20 @@ async function start(cfg) {
       const at = activity(s);
       out.push(
         h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
-          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
+          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "md"), h("span", { class: `sdot ${st.tone}` })),
           h("span", { class: "cbody" },
             // The group heading names the state; only Needs you holds more than one.
-            h("span", { class: "top" }, h("span", { class: "name" }, s.title), h("span", { class: "grow" }), st.group === "Needs you" ? chip(st) : null),
+            h("span", { class: "top" },
+              h("span", { class: "name" }, s.title),
+              h("span", { class: "tags" }, tagList(s, false), waitingLabel(s.id)),
+              h("span", { class: "grow" }),
+              st.group === "Needs you" ? chip(st) : null,
+              at ? h("span", { class: "when" }, ago(at, now)) : null),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
             s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
               : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
-              : s.cleared ? h("span", { class: "msg fresh" }, icon("chat"), "New conversation")
+              : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
               : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
-            h("span", { class: "tags" },
-              tagList(s, false),
-              waitingLabel(s.id),
-              h("span", { class: "grow" }),
-              at ? h("span", { class: "when" }, ago(at, now)) : null,
-            ),
           ),
         ),
       );
@@ -1299,12 +1298,13 @@ async function start(cfg) {
       h("div", { class: "dhead" },
         h("div", { class: "drow" },
           h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
-          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "md"), h("span", { class: `sdot ${st.tone}` })),
-          h("h2", {}, s.title, chip(st)),
+          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
+          h("div", { class: "dtitle" },
+            h("h2", {}, s.title, chip(st)),
+            h("div", { class: "tags" }, tagList(s, true))),
           quickButton(s),
           inboxButton(s),
           workerMenu(s, busy)),
-        h("div", { class: "dsub tags" }, tagList(s, true)),
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
@@ -1795,7 +1795,6 @@ const ICONS = {
   "ci-success": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>',
   "ci-failure": '<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
   "ci-cancelled": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>',
-  chat: '<path d="M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
   frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
   grip: '<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
 };
