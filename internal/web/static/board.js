@@ -18,7 +18,7 @@ export function sortSessions(sessions) {
   );
 }
 
-function activity(s) {
+export function activity(s) {
   if (s.state === "unpushed" && s.git?.last) return time(s.git.last.at);
   return Math.max(time(s.message?.at), time(s.prompt?.at));
 }
@@ -97,16 +97,33 @@ export function ciStatus(git) {
   const ci = git && git.ci;
   if (!ci) return null;
   const c = CI[ci.state] || { word: ci.state, tone: "idle" };
-  return { short: `ci ${c.word}`, long: `${ci.workflow || "CI"} ${c.word}`, tone: c.tone, url: ci.url };
+  return { state: CI[ci.state] ? ci.state : "queued", long: `${ci.workflow || "CI"} ${c.word}`, tone: c.tone, url: ci.url };
 }
 
-// Flags say what a worker is ready for: cleared when its conversation is
-// empty, clean when its repository has nothing uncommitted or unpushed.
-export function flags(s) {
+// Tags are the facts about a worker that differ from committed, pushed and
+// on the default branch, in a fixed order. "Pushed" and "clean" are never
+// tags: a worker's state group already implies them.
+export function tags(s) {
   const out = [];
-  if (s.cleared) out.push("cleared");
-  if (s.git && !s.git.dirty && !s.git.unpushed) out.push("clean");
+  const g = s.git;
+  if (g) {
+    if (g.dirty > 0) out.push({ kind: "edit", tone: "warn", text: String(g.dirty), label: count(g.dirty, "uncommitted file") });
+    if (g.unpushed > 0) out.push({ kind: "push", tone: "ok", text: String(g.unpushed), label: count(g.unpushed, "unpushed commit") });
+    if (!g.upstream) {
+      const text = g.unpushed > 0 ? "no remote branch" : "no remote";
+      out.push({ kind: "noremote", tone: "", text, label: text });
+    }
+    if (!onDefaultBranch(g)) out.push({ kind: "branch", tone: "", text: g.branch || "detached", label: `branch ${g.branch || "detached"}` });
+    const ci = ciStatus(g);
+    if (ci) out.push({ kind: `ci-${ci.state}`, tone: ci.tone, text: "CI", label: ci.long, url: ci.url });
+  }
+  const n = s.prototypes?.length ?? 0;
+  if (n) out.push({ kind: "frame", tone: "acc", text: n > 1 ? String(n) : "", label: n > 1 ? `${n} prototypes` : "prototype" });
   return out;
+}
+
+function count(n, noun) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 // quickAction is the one worker command offered beside the inbox: a stopped

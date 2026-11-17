@@ -158,7 +158,8 @@ test.describe('signed in', () => {
     await expect(hamta.getByText('needs input')).toBeVisible();
     await expect(hamta.getByText('Task: Add CSV export')).toBeVisible();
     const knip = page.locator('.card', { hasText: 'knip' });
-    await expect(knip.getByText('2 unpushed')).toBeVisible();
+    await expect(knip.getByLabel('2 unpushed commits')).toHaveText('2');
+    await expect(knip.locator('.chip')).toHaveCount(0);
 
     await knip.click();
     await expect(page.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
@@ -176,7 +177,7 @@ test.describe('signed in', () => {
   test('push asks the laptop and shows its answer', async () => {
     await page.goto('/#s-k');
     await expect(page.locator('.facts')).toContainText('main → origin/main');
-    await expect(page.locator('.dhead .branch')).toHaveCount(0);
+    await expect(page.locator('.dhead .tag.branch')).toHaveCount(0);
     await page.getByRole('button', { name: 'Push 2' }).click();
     await expect(page.getByText('Push knip: waiting for the laptop…')).toBeVisible();
     const [cmd] = await list(page, 'commands');
@@ -848,7 +849,7 @@ test.describe('signed in', () => {
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       prototypes: [{ url: 'https://claude.ai/artifact/abc', title: 'Knip table sign', at: new Date() }] });
     await page.goto('/');
-    await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag.proto')).toHaveText('prototype');
+    await expect(page.locator('.card', { hasText: 'knip' }).getByLabel('prototype', { exact: true })).toHaveText('');
     await page.locator('.card', { hasText: 'knip' }).click();
     const link = page.getByRole('link', { name: 'Knip table sign' });
     await expect(link).toHaveAttribute('href', 'https://claude.ai/artifact/abc');
@@ -860,21 +861,22 @@ test.describe('signed in', () => {
       git: { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0,
         ci: { sha: '3f2a1c4e', workflow: 'Test and deploy', state: 'failure', url: 'https://github.com/o/knip/actions/runs/7' } } });
     await page.goto('/');
-    await expect(page.locator('.card', { hasText: 'knip' }).locator('.meta .ci')).toHaveText('ci failed');
+    const ci = page.locator('.card', { hasText: 'knip' }).getByLabel('Test and deploy failed');
+    await expect(ci).toHaveText('CI');
+    await expect(ci).toHaveClass(/ci-failure bad/);
     await page.locator('.card', { hasText: 'knip' }).click();
     const link = page.getByRole('link', { name: 'Test and deploy failed' });
     await expect(link).toHaveAttribute('href', 'https://github.com/o/knip/actions/runs/7');
     await expect(link).toHaveAttribute('target', '_blank');
   });
 
-  test('a worker is cleared on its own and shows when it is cleared and clean', async () => {
+  test('a worker is cleared on its own and shows a new conversation', async () => {
     const git = { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0 };
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false, git });
     await page.goto('/#s-k');
     await passkeyOn(page);
     await expect(page.locator('.detail h2 .chip.idle')).toHaveText('idle');
-    const flags = page.locator('.detail .dsub .flag');
-    await expect(flags).toHaveText(['clean']);
+    await expect(page.locator('.detail .dsub .tag')).toHaveCount(0);
     await expect(page.locator('.reply.sent.none')).toHaveText('Nothing sent yet.');
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear conversation' }).click();
@@ -884,14 +886,14 @@ test.describe('signed in', () => {
 
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true, git,
       prompt: { text: '/clear', at: new Date() } });
-    await expect(flags).toHaveText(['cleared', 'clean']);
     await expect(page.locator('.reply.sent:not(.none)')).toHaveText('/clear');
     await expect(page.locator('.reply.pending')).toHaveCount(0);
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await expect(page.getByRole('menuitem', { name: 'Clear conversation' })).toHaveCount(0);
     await page.goto('/');
-    await expect(page.locator('.card', { hasText: 'knip' }).locator('.flag')).toHaveText(['cleared', 'clean']);
-    await expect(page.locator('.card', { hasText: 'hamta' }).locator('.flag')).toHaveCount(0);
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.msg')).toHaveText('New conversation');
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.tag')).toHaveCount(0);
+    await expect(page.locator('.card', { hasText: 'hamta' }).getByText('New conversation')).toHaveCount(0);
   });
 
   test('Clear and stop sends one signed stop that clears', async () => {

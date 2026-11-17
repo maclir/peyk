@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -99,18 +99,32 @@ describe('board', () => {
 
   it("labels a pushed commit's CI", () => {
     const url = 'https://github.com/o/r/actions/runs/1';
-    expect(ciStatus({ ci: { workflow: 'Test and deploy', state: 'running', url } })).toEqual({ short: 'ci running', long: 'Test and deploy running', tone: 'run', url });
+    expect(ciStatus({ ci: { workflow: 'Test and deploy', state: 'running', url } })).toEqual({ state: 'running', long: 'Test and deploy running', tone: 'run', url });
     expect(ciStatus({ ci: { workflow: 'CI', state: 'success', url } })?.long).toBe('CI passed');
     expect(ciStatus({ ci: { workflow: 'CI', state: 'failure', url } })?.tone).toBe('bad');
     expect(ciStatus({ unpushed: 0 })).toBeNull();
     expect(ciStatus(null)).toBeNull();
   });
 
-  it('flags cleared and clean workers', () => {
-    expect(flags({ cleared: true, git: { dirty: 0, unpushed: 0 } })).toEqual(['cleared', 'clean']);
-    expect(flags({ cleared: false, git: { dirty: 1, unpushed: 0 } })).toEqual([]);
-    expect(flags({ cleared: false, git: { dirty: 0, unpushed: 2 } })).toEqual([]);
-    expect(flags({ cleared: true })).toEqual(['cleared']);
+  it('tags only what differs from committed, pushed and on the default branch', () => {
+    const pushed = { branch: 'main', upstream: 'origin/main', dirty: 0, unpushed: 0 };
+    expect(tags({ git: pushed })).toEqual([]);
+    expect(tags({})).toEqual([]);
+    const url = 'https://github.com/o/r/actions/runs/1';
+    const all = tags({ git: { branch: 'fix', upstream: '', dirty: 1, unpushed: 3, ci: { workflow: 'CI', state: 'failure', url } },
+      prototypes: [{ url: 'a' }, { url: 'b' }] });
+    expect(all.map((t) => [t.kind, t.tone, t.text, t.label])).toEqual([
+      ['edit', 'warn', '1', '1 uncommitted file'],
+      ['push', 'ok', '3', '3 unpushed commits'],
+      ['noremote', '', 'no remote branch', 'no remote branch'],
+      ['branch', '', 'fix', 'branch fix'],
+      ['ci-failure', 'bad', 'CI', 'CI failed'],
+      ['frame', 'acc', '2', '2 prototypes'],
+    ]);
+    expect(all[4].url).toBe(url);
+    expect(tags({ git: { ...pushed, upstream: '' } }).map((t) => t.text)).toEqual(['no remote']);
+    expect(tags({ git: pushed, prototypes: [{ url: 'a' }] })).toEqual([{ kind: 'frame', tone: 'acc', text: '', label: 'prototype' }]);
+    expect(tags({ git: { ...pushed, ci: { state: 'mystery' } } })[0].kind).toBe('ci-queued');
   });
 
   it('formats ages', () => {

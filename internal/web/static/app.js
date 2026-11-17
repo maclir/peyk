@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, waitingReplies } from "./board.js";
+import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, doneTasks, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -1155,23 +1155,24 @@ async function start(cfg) {
         group = st.group;
         out.push(h("h2", { class: "group" }, group));
       }
-      const last = s.git && s.git.last;
       const task = currentTask(state.tasks, s.id);
+      const at = activity(s);
       out.push(
         h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
-          h("span", { class: "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
+          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
           h("span", { class: "cbody" },
-            h("span", { class: "top" }, h("span", { class: "name" }, s.title), flagRow(s), h("span", { class: "grow" }), chip(st)),
+            // The group heading names the state; only Needs you holds more than one.
+            h("span", { class: "top" }, h("span", { class: "name" }, s.title), h("span", { class: "grow" }), st.group === "Needs you" ? chip(st) : null),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
             s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
               : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
+              : s.cleared ? h("span", { class: "msg fresh" }, icon("chat"), "New conversation")
               : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
-            h("span", { class: "meta" },
-              last ? h("span", {}, `${last.hash} · ${ago(last.at, now)}`) : null,
-              h("span", {}, pushLabel(s.git)),
-              ciMeta(s.git),
-              s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
+            h("span", { class: "tags" },
+              tagList(s, false),
               waitingLabel(s.id),
+              h("span", { class: "grow" }),
+              at ? h("span", { class: "when" }, ago(at, now)) : null,
             ),
           ),
         ),
@@ -1217,15 +1218,12 @@ async function start(cfg) {
       h("div", { class: "dhead" },
         h("div", { class: "drow" },
           h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
-          face(projectOf(s), s.title, "md"),
+          h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "md"), h("span", { class: `sdot ${st.tone}` })),
           h("h2", {}, s.title, chip(st)),
           quickButton(s),
           inboxButton(s),
           workerMenu(s, busy)),
-        h("div", { class: "dsub" },
-          flagRow(s),
-          g && !onDefaultBranch(g) ? h("span", { class: "branch" }, g.branch || "detached") : null,
-          ciLink(g)),
+        h("div", { class: "dsub tags" }, tagList(s, true)),
       ),
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
@@ -1660,27 +1658,16 @@ function loading(text) {
   return h("p", { class: "notice loading", role: "status" }, spinner(), text);
 }
 
-function flagRow(s) {
-  const f = flags(s);
-  const proto = s.prototypes && s.prototypes.length
-    ? h("span", { class: "flag proto", title: "Published a prototype; open it from the worker" }, s.prototypes.length > 1 ? `${s.prototypes.length} prototypes` : "prototype")
-    : null;
-  return f.length || proto ? h("span", { class: "flags" }, proto, f.map((x) => h("span", { class: `flag ${x}` }, x))) : null;
-}
-
-function ciMeta(git) {
-  const ci = ciStatus(git);
-  return ci ? h("span", { class: `ci ${ci.tone}` }, ci.short) : null;
-}
-
-// The run's own page on GitHub, opened outside the app.
-function ciLink(git) {
-  const ci = ciStatus(git);
-  if (!ci) return null;
-  const label = [h("span", { class: `dot ${ci.tone}` }), ci.long, ci.url ? icon("arrow") : null];
-  return ci.url
-    ? h("a", { class: `cilink ${ci.tone}`, href: ci.url, target: "_blank", rel: "noopener noreferrer" }, label)
-    : h("span", { class: `cilink ${ci.tone}` }, label);
+// A worker's tags, the same on its card and its page. On the card the whole
+// card is the link, so only the page links a tag to what it describes.
+function tagList(s, linked) {
+  return tags(s).map((t) => {
+    const attrs = { class: `tag ${t.kind} ${t.tone}`.trim(), "aria-label": t.label, title: t.label };
+    const body = [icon(t.kind), t.text || null];
+    return linked && t.url
+      ? h("a", { ...attrs, class: `${attrs.class} link`, href: t.url, target: "_blank", rel: "noopener noreferrer" }, body)
+      : h("span", attrs, body);
+  });
 }
 
 function chip(st) {
@@ -1712,6 +1699,16 @@ const ICONS = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
   restart: '<path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  push: '<path d="M12 20V8"/><path d="M6.5 13.5 12 8l5.5 5.5"/><path d="M5 4h14"/>',
+  noremote: '<path d="M7 18h10a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 9 4.5 4.5 0 0 0 7 18z"/><path d="M4 4l16 16"/>',
+  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9c0 5-12 3-12 8"/>',
+  "ci-queued": '<circle cx="12" cy="12" r="8.5" stroke-dasharray="2.5 3.2"/>',
+  "ci-running": '<circle cx="12" cy="12" r="8.5" opacity="0.3"/><path class="arc" d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/>',
+  "ci-success": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>',
+  "ci-failure": '<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
+  "ci-cancelled": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>',
+  chat: '<path d="M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
   frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
   grip: '<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
 };
