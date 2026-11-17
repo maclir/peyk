@@ -364,6 +364,7 @@ test.describe('signed in', () => {
     await passkeyOn(page);
     const task = page.locator('.task', { hasText: 'Start fresh' });
     await expect(task).toContainText('Free · clears the conversation first');
+    await expect(task.locator('button.send .ico.broom')).toHaveCount(1);
     await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
     await expect(task.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-busy', 'true');
@@ -391,6 +392,7 @@ test.describe('signed in', () => {
     await task.getByRole('button', { name: /More actions/ }).click();
     await expect(task.getByRole('button', { name: 'Move to top' })).toBeVisible();
     await expect(task.getByRole('button', { name: 'Send without clearing' })).toHaveCount(0);
+    await expect(task.locator('button.send .ico.broom')).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
   });
 
@@ -910,6 +912,24 @@ test.describe('signed in', () => {
     await expect(page.getByRole('menuitem', { name: 'Stop worker' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: 'Clear and stop' })).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/sessions/c`, { headers: admin });
+  });
+
+  test('the quick action beside the inbox clears and stops a finished worker in one tap', async () => {
+    await put(page, 'sessions/f', { id: 'f', title: 'fini', path: '/c/fini', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
+    await page.goto('/#s-f');
+    await passkeyOn(page);
+    await page.getByRole('button', { name: 'Clear and stop' }).click();
+    await expect(page.getByText('Clear and stop fini: waiting for the laptop…')).toBeVisible();
+    const sent = (await list(page, 'commands')).filter((c) => JSON.parse(c.fields.payload.stringValue).session === 'f');
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0].fields.payload.stringValue)).toMatchObject({ type: 'stop', session: 'f', clear: true });
+
+    await put(page, 'sessions/f', { id: 'f', title: 'fini', path: '/c/fini', aoe_status: 'stopped', state: 'unpushed', updated_at: new Date(), cleared: true });
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Clear and stop' })).toHaveCount(0);
+    await put(page, 'sessions/f', { id: 'f', title: 'fini', path: '/c/fini', aoe_status: 'running', state: 'working', updated_at: new Date(), cleared: false });
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(0);
+    await page.request.delete(`${FIRESTORE}/sessions/f`, { headers: admin });
   });
 
   test("a worker's question is answered from the phone", async () => {

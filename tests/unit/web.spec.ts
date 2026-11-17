@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, mergeReply, pushLabel, replyFields, sortSessions, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -47,6 +47,18 @@ describe('renderMarkdown', () => {
 });
 
 describe('board', () => {
+  it('offers one quick action by worker state and inbox', () => {
+    const w = (aoe_status: string, state: string, cleared = false) => ({ aoe_status, state, cleared });
+    expect(quickAction(w('stopped', 'stopped'), 0)).toBe('start');
+    expect(quickAction(w('stopped', 'unpushed'), 2)).toBe('start');
+    expect(quickAction(w('idle', 'unpushed'), 0)).toBe('clearstop');
+    expect(quickAction(w('idle', 'idle'), 0)).toBe('clearstop');
+    expect(quickAction(w('idle', 'idle', true), 0)).toBe('stop');
+    expect(quickAction(w('idle', 'unpushed'), 1)).toBe('clear');
+    expect(quickAction(w('idle', 'idle', true), 1)).toBeNull();
+    for (const state of ['working', 'needs_input', 'error', 'dirty']) expect(quickAction(w('idle', state), 0)).toBeNull();
+  });
+
   it('sorts by what needs attention, then by title when nothing has happened', () => {
     const got = sortSessions([
       { title: 'b', state: 'idle' },

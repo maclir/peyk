@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, waitingReplies } from "./board.js";
+import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -638,7 +638,7 @@ async function start(cfg) {
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
-        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, "Send", icon("arrow")) : null,
+        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, clears ? icon("broom") : null, "Send", icon("arrow")) : null,
       ),
     );
   }
@@ -1219,6 +1219,7 @@ async function start(cfg) {
           h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
           face(projectOf(s), s.title, "md"),
           h("h2", {}, s.title, chip(st)),
+          quickButton(s),
           inboxButton(s),
           workerMenu(s, busy)),
         h("div", { class: "dsub" },
@@ -1333,14 +1334,14 @@ async function start(cfg) {
     icon(ico), label);
     const clearStop = h("button", { type: "button", role: "menuitem", class: "danger",
       onclick: () => run("stop", "Clear and stop", { clear: true }) },
-    icon("trash"), "Clear and stop");
+    icon("clearstop"), "Clear and stop");
     const stopped = s.aoe_status === "stopped";
     const pending = ["clear", "start", "restart", "stop"].some((c) => state.busy.has(`${c}:${s.id}`));
     return h("div", { class: "wmenu" },
       h("button", { type: "button", class: "icon tool", "aria-label": "Worker actions", "aria-haspopup": "menu", "aria-expanded": String(open),
         onclick: () => { state.menu = open ? null : key; render(); } }, pending ? spinner() : icon("more")),
       open ? h("div", { class: "pop", role: "menu", onkeydown: (e) => { if (e.key === "Escape") { state.menu = null; render(); } } },
-        s.cleared || busy ? null : item("clear", "trash", "Clear conversation"),
+        s.cleared || busy ? null : item("clear", "broom", "Clear conversation"),
         stopped ? item("start", "play", "Start worker") : item("restart", "restart", "Restart worker"),
         stopped ? null : h("hr"),
         stopped ? null : item("stop", "stop", "Stop worker"),
@@ -1350,6 +1351,24 @@ async function start(cfg) {
 
   function queuedFor(project) {
     return queue(state.tasks, state.projects).filter((t) => t.project === project);
+  }
+
+  // The quick action shares the menu's busy keys, so either shows the other's
+  // command as pending.
+  function quickButton(s) {
+    const p = projectOf(s);
+    const action = quickAction(s, p ? queuedFor(p.name).length : 0);
+    if (!action) return null;
+    const [cmd, ico, label, fields] = {
+      start: ["start", "play", "Start", {}],
+      stop: ["stop", "stop", "Stop", {}],
+      clear: ["clear", "broom", "Clear", {}],
+      clearstop: ["stop", "clearstop", "Clear and stop", { clear: true }],
+    }[action];
+    const title = action === "clear" ? "Clear conversation" : label;
+    return busyButton(`${cmd}:${s.id}`, { type: "button", class: "icon tool", title, "aria-label": title,
+      onclick: () => sendCommand(cmd, { session: s.id, ...fields }, `${label} ${s.title}`, `${cmd}:${s.id}`) },
+    icon(ico));
   }
 
   function inboxButton(s) {
@@ -1687,6 +1706,8 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  broom: '<g transform="translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g>',
+  clearstop: '<g transform="translate(-0.3 -0.4) scale(.85) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><rect x="15" y="15" width="6.5" height="6.5" rx="1.5"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',

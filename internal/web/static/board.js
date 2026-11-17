@@ -109,6 +109,18 @@ export function flags(s) {
   return out;
 }
 
+// quickAction is the one worker command offered beside the inbox: a stopped
+// worker can only start; a finished one is shut down when nothing waits for
+// it, or cleared for the next task when something does. A busy or dirty
+// worker gets none, so a tap cannot interrupt work or drop the context of
+// uncommitted changes.
+export function quickAction(s, queued) {
+  if (s.aoe_status === "stopped") return "start";
+  if (s.state !== "idle" && s.state !== "unpushed") return null;
+  if (queued) return s.cleared ? null : "clear";
+  return s.cleared ? "stop" : "clearstop";
+}
+
 // The picker shows recently active projects first; never-active ones follow
 // by name.
 export function sortProjects(projects) {
