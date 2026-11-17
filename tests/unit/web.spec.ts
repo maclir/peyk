@@ -132,6 +132,12 @@ describe('inbox', () => {
     expect(filterQueue(list, 'all', 'hamta').map((t: any) => t.text)).toEqual(['h']);
   });
 
+  it('holds back tasks for a hidden project', async () => {
+    const { queue } = await load();
+    const list = queue([{ project: 'areh', text: 'a', status: 'queued', created_at: new Date(2026, 0, 1) }], [{ name: 'areh', free: true, hidden: true }]);
+    expect(list.map((t: any) => `${t.ready}:${t.why}`)).toEqual(['false:project hidden']);
+  });
+
   it('moves a task by giving it a rank between its new neighbours', async () => {
     const { rankAt } = await load();
     const list = [{ rank: 10 }, { rank: 20 }, { rank: 30 }];

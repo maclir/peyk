@@ -126,6 +126,19 @@ describe('tasks', () => {
     await assertFails(updateDoc(doc(stranger(), 'tasks/queued'), { text: 'x' }));
   });
 
+  it('a hidden project takes no new tasks, but its queued ones can still be edited or moved away', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'projects/areh'), { name: 'areh', free: true, hidden: true });
+      await setDoc(doc(db, 'tasks/stuck'), { project: 'areh', text: 'x', status: 'queued' });
+    });
+    await assertFails(addDoc(collection(owner(), 'tasks'), task({ project: 'areh' })));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { project: 'areh' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/stuck'), { text: 'edited', rank: 5 }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/stuck'), { project: 'knip' }));
+    await assertSucceeds(addDoc(collection(owner(), 'tasks'), task({ project: 'hamta' })));
+  });
+
   it('nobody else reads or adds tasks', async () => {
     await assertFails(getDocs(collection(stranger(), 'tasks')));
     await assertFails(addDoc(collection(stranger(), 'tasks'), task()));
@@ -209,6 +222,8 @@ describe('commands', () => {
     await assertSucceeds(setDoc(doc(owner(), 'commands/c7'), cmd({ type: 'update' })));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c8'), cmd({ type: 'start' })));
     await assertSucceeds(setDoc(doc(owner(), 'commands/c9'), cmd({ type: 'restart' })));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c10'), cmd({ type: 'hide' })));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c11'), cmd({ type: 'show' })));
     const { assertion: a, ...bare } = cmd();
     await assertSucceeds(setDoc(doc(owner(), 'commands/c4'), { ...bare, grant: { statement: '{}', assertion: a, signature: 'e' } }));
     await assertSucceeds(getDoc(doc(owner(), 'commands/c1')));

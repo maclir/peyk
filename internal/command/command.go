@@ -39,6 +39,9 @@ const (
 	CheckUpdate = "check"
 	// Update fast-forwards the laptop's checkout and restarts the agent on it.
 	Update = "update"
+	// Hide and Show take projects out of the phone's picker and put them back.
+	Hide = "hide"
+	Show = "show"
 )
 
 const (
@@ -87,6 +90,8 @@ type Payload struct {
 	// Images are a dispatch's or reply's attachments, each named by the SHA-256 of its
 	// bytes, so the signature covers the images as well as the text.
 	Images []string `json:"images,omitempty"`
+	// Projects are the projects a hide or show applies to.
+	Projects []string `json:"projects,omitempty"`
 	// Expires is Unix milliseconds.
 	Expires int64 `json:"expires"`
 }

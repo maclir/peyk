@@ -216,6 +216,9 @@ type Project struct {
 	Active time.Time `firestore:"active" json:"active"`
 	// Logo is the repository's own mark as a data URI, if it has one.
 	Logo string `firestore:"logo,omitempty" json:"logo,omitempty"`
+	// Hidden projects are left out of the phone's picker; the repository
+	// and its session are untouched.
+	Hidden bool `firestore:"hidden,omitempty" json:"hidden,omitempty"`
 }
 
 // Projects lists every session, plus every repository in repoDirs that no

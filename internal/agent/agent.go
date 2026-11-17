@@ -5,7 +5,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,6 +52,13 @@ type PowerEvent struct {
 // the network is back.
 const powerRetry = 15 * time.Second
 
+// HiddenProjects keeps the names of the projects hidden from the phone's
+// picker across restarts.
+type HiddenProjects interface {
+	Load() ([]string, error)
+	Save([]string) error
+}
+
 type Watcher interface {
 	Set(ctx context.Context, workdirs []string) error
 }
@@ -84,6 +94,9 @@ type Agent struct {
 
 	// Commands, when set, lets the phone make the laptop act.
 	Commands *Commands
+	// Hidden, when set, lets the phone hide projects from its picker.
+	Hidden HiddenProjects
+	hidden map[string]bool
 	// Notify, when set, is told about sessions that start needing you or
 	// finish a turn.
 	Notify Notifier
@@ -177,20 +190,18 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		sessions[s.ID] = s
 		a.sessions[s.ID] = s
 	}
-	projects := map[string]any{}
 	a.projects = map[string]session.Project{}
 	logos, _ := a.Collect.(logoFinder)
 	for _, p := range session.Projects(snaps, repos) {
 		if logos != nil {
 			p.Logo = logos.Logo(p.Path)
 		}
-		projects[ProjectID(p.Name)] = p
 		a.projects[p.Name] = p
 	}
 	if err := a.sync(ctx, store.Sessions, sessions); err != nil {
 		return err
 	}
-	if err := a.sync(ctx, store.Projects, projects); err != nil {
+	if err := a.publishProjects(ctx); err != nil {
 		return err
 	}
 	if err := a.finishTasks(ctx); err != nil {
@@ -441,6 +452,65 @@ func (a *Agent) PublishUsage(ctx context.Context) error {
 	}
 	a.usageKey = key
 	return nil
+}
+
+// publishProjects writes the projects of the last refresh, each marked
+// hidden or not.
+func (a *Agent) publishProjects(ctx context.Context) error {
+	if a.hidden == nil && a.Hidden != nil {
+		names, err := a.Hidden.Load()
+		if err != nil {
+			return fmt.Errorf("read hidden projects: %w", err)
+		}
+		a.hidden = map[string]bool{}
+		for _, n := range names {
+			a.hidden[n] = true
+		}
+	}
+	docs := make(map[string]any, len(a.projects))
+	for name, p := range a.projects {
+		p.Hidden = a.hidden[name]
+		a.projects[name] = p
+		docs[ProjectID(name)] = p
+	}
+	return a.sync(ctx, store.Projects, docs)
+}
+
+// setHidden hides or shows projects and publishes the change at once, so the
+// phone need not wait for the next refresh.
+func (a *Agent) setHidden(ctx context.Context, names []string, hide bool) error {
+	if a.Hidden == nil {
+		return errors.New("this agent cannot hide projects")
+	}
+	if len(names) == 0 {
+		return errors.New("name at least one project")
+	}
+	for _, n := range names {
+		if _, ok := a.projects[n]; !ok && hide {
+			return fmt.Errorf("no project named %s", n)
+		}
+	}
+	next := map[string]bool{}
+	for n := range a.hidden {
+		next[n] = true
+	}
+	for _, n := range names {
+		if hide {
+			next[n] = true
+		} else {
+			delete(next, n)
+		}
+	}
+	list := make([]string, 0, len(next))
+	for n := range next {
+		list = append(list, n)
+	}
+	sort.Strings(list)
+	if err := a.Hidden.Save(list); err != nil {
+		return fmt.Errorf("save hidden projects: %w", err)
+	}
+	a.hidden = next
+	return a.publishProjects(ctx)
 }
 
 // ProjectID is a project's document id: its name, which Firestore accepts

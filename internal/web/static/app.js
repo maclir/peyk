@@ -90,6 +90,8 @@ async function start(cfg) {
 
   const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
+    // The picker's edit mode, what it has ticked, and the last hide it can undo.
+    hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", undoHide: null,
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
     sheetSent: null,
     // Picks for open questions by question id, kept across redraws.
@@ -334,7 +336,7 @@ async function start(cfg) {
   // through report. key stays busy until the laptop answers, so the same
   // action cannot be sent twice meanwhile. Resolves once the command is
   // stored, to whether it was.
-  async function sendCommand(type, fields, label, key, report = setStatus) {
+  async function sendCommand(type, fields, label, key, report = setStatus, onDone = null) {
     if (state.busy.has(key)) return false;
     if (!laptopOnline(state.laptop, Date.now())) {
       report(`${label}: the laptop is offline, so nothing was sent.`);
@@ -375,6 +377,7 @@ async function start(cfg) {
       unsub();
       if (c.status === "failed" && String(c.error).startsWith("session approval:")) passkey.forgetGrant();
       finish(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
+      if (c.status === "done") onDone?.();
     }, (err) => {
       clearTimeout(timer);
       finish(`${label}: cannot follow the result: ${err.message}`);
@@ -438,7 +441,7 @@ async function start(cfg) {
   }
 
   function inbox() {
-    const projects = sortProjects(state.projects);
+    const projects = sortProjects(state.projects.filter((p) => !p.hidden));
     if (!state.picked || !projects.some((p) => p.name === state.picked)) state.picked = projects[0]?.name ?? null;
     const all = queue(state.tasks, state.projects);
     if (state.only && !all.some((t) => t.project === state.only)) state.only = null;
@@ -644,7 +647,12 @@ async function start(cfg) {
 
   function projectPill(name, task = null) {
     return h("button", { type: "button", class: "pill", "aria-label": `Project: ${name ?? "none"}`, "aria-haspopup": "dialog", disabled: name ? null : "",
-      onclick: () => { state.picking = true; state.pickFor = task; state.pickQuery = ""; render(); document.getElementById("pick-search")?.focus(); } },
+      onclick: () => {
+        Object.assign(state, { picking: true, pickFor: task, pickQuery: "", hiding: false, pickStatus: "", undoHide: null });
+        state.hideSel.clear();
+        render();
+        document.getElementById("pick-search")?.focus();
+      } },
       name ? face(projectNamed(name), name, "xs") : null, h("span", {}, name ?? "No project"), icon("chevron"));
   }
 
@@ -680,32 +688,74 @@ async function start(cfg) {
       cls: "add", submitLabel: "Add task", send: add, hold, lead: projectPill(state.picked) });
   }
 
+  // The picker lists the projects that are not hidden. Its edit mode hides
+  // the ticked ones; hidden projects wait, folded, at the bottom, and search
+  // still finds them so none is lost.
   function picker(projects) {
     const t = state.pickFor;
     const current = t ? state.editProject ?? t.project : state.picked;
-    const close = () => { state.picking = false; state.pickFor = null; render(); document.getElementById(t ? `edit-${t.id}` : "task-text")?.focus(); };
+    const hidden = state.projects.filter((p) => p.hidden).sort((a, b) => a.name.localeCompare(b.name));
+    const close = () => {
+      Object.assign(state, { picking: false, pickFor: null, hiding: false, undoHide: null });
+      render();
+      document.getElementById(t ? `edit-${t.id}` : "task-text")?.focus();
+    };
     const pick = (name) => {
       if (t) state.editProject = name;
       else state.picked = name;
       close();
     };
+    const report = (text) => {
+      state.pickStatus = text;
+      const el = document.getElementById("pick-status");
+      if (el) el.textContent = text;
+    };
+    const hide = (names) => {
+      const label = names.length === 1 ? `Hide ${names[0]}` : `Hide ${names.length} projects`;
+      sendCommand("hide", { projects: names }, label, "hide", report, () => {
+        state.undoHide = names;
+        render();
+      }).then((sent) => {
+        if (!sent) return;
+        state.hiding = false;
+        state.hideSel.clear();
+        render();
+      });
+    };
+    const show = (names, label) => {
+      state.undoHide = null;
+      sendCommand("show", { projects: names }, label, `show:${names.join(",")}`, report);
+    };
     const queued = new Map();
     for (const t of state.tasks) if (t.status === "queued") queued.set(t.project, (queued.get(t.project) || 0) + 1);
     const row = (p) => {
       const st = projectStatus(p);
-      const on = p.name === current;
-      return h("button", { type: "button", role: "radio", class: "prow", "aria-checked": String(on), onclick: () => pick(p.name) },
-        face(p, p.name, "lg"),
+      const main = [face(p, p.name, "lg"),
         h("span", { class: "pmain" },
           h("span", { class: "pname" }, p.name),
           h("span", { class: `pstat ${st.tone}` }, h("span", { class: `dot ${st.tone}` }), st.text)),
-        queued.get(p.name) ? h("span", { class: "badge" }, `${queued.get(p.name)} queued`) : null,
-        on ? icon("check") : null);
+        queued.get(p.name) ? h("span", { class: "badge" }, `${queued.get(p.name)} queued`) : null];
+      if (state.hiding) {
+        const on = state.hideSel.has(p.name);
+        return h("button", { type: "button", role: "checkbox", class: "prow", "aria-checked": String(on),
+          onclick: () => { on ? state.hideSel.delete(p.name) : state.hideSel.add(p.name); render(); } },
+          h("span", { class: "tick" }, icon("check")), main);
+      }
+      const on = p.name === current;
+      return h("button", { type: "button", role: "radio", class: "prow", "aria-checked": String(on), onclick: () => pick(p.name) },
+        main, on ? icon("check") : null);
     };
+    const hiddenRow = (p) =>
+      h("div", { class: "prow hidden" },
+        face(p, p.name, "lg"),
+        h("span", { class: "pmain" }, h("span", { class: "pname" }, p.name), h("span", { class: "pstat" }, "hidden")),
+        h("button", { type: "button", class: "chipbtn", "aria-label": `Show ${p.name}`, disabled: state.busy.has(`show:${p.name}`) ? "" : null,
+          onclick: () => show([p.name], `Show ${p.name}`) }, "Show"));
     const results = () => {
       const q = state.pickQuery || "";
       const matches = searchProjects(projects, q);
-      const recent = q ? [] : projects.filter((p) => p.active).slice(0, 4);
+      const recent = q || state.hiding ? [] : projects.filter((p) => p.active).slice(0, 4);
+      const hiddenMatches = q ? searchProjects(hidden, q) : [];
       return [
         recent.length ? [
           h("h3", { class: "group" }, "Recent"),
@@ -713,22 +763,50 @@ async function start(cfg) {
             h("button", { type: "button", class: "tile", "aria-label": `${p.name} (recent)`, "aria-pressed": String(p.name === current), onclick: () => pick(p.name) },
               face(p, p.name, "xl"), h("span", {}, p.name), h("span", { class: `dot ${projectStatus(p).tone}` })))),
         ] : null,
-        h("h3", { class: "group" }, q ? `Matches · ${matches.length}` : "All projects"),
+        h("h3", { class: "group" }, q ? `Matches · ${matches.length + hiddenMatches.length}` : "All projects"),
         matches.length
-          ? h("div", { class: "plist", role: "radiogroup", "aria-label": "Project" }, matches.map(row))
-          : h("p", { class: "empty" }, "No project matches."),
+          ? h("div", { class: "plist", role: state.hiding ? "group" : "radiogroup", "aria-label": "Project" }, matches.map(row))
+          : hiddenMatches.length ? null : h("p", { class: "empty" }, "No project matches."),
+        hiddenMatches.length ? h("div", { class: "plist" }, hiddenMatches.map(hiddenRow)) : null,
+        !q && hidden.length ? [
+          h("h3", { class: "group" },
+            h("button", { type: "button", class: "fold", "aria-expanded": String(state.showHidden), onclick: () => { state.showHidden = !state.showHidden; render(); } },
+              "Hidden", h("span", { class: "n" }, String(hidden.length)), icon("chevron"))),
+          state.showHidden ? h("div", { class: "plist" }, hidden.map(hiddenRow)) : null,
+        ] : null,
       ].flat().filter(Boolean);
     };
+    const n = state.hideSel.size;
+    const head = state.hiding
+      ? h("div", { class: "sheethead" }, h("h2", {}, "Hide projects"),
+        h("button", { type: "button", class: "link", onclick: () => { state.hiding = false; state.hideSel.clear(); render(); } }, "Done"))
+      : h("div", { class: "sheethead" }, h("h2", {}, "Send to"),
+        h("span", { class: "heads" },
+          h("button", { type: "button", class: "link", onclick: () => { Object.assign(state, { hiding: true, undoHide: null, pickStatus: "" }); render(); } }, "Edit"),
+          h("button", { type: "button", class: "link", onclick: close }, "Cancel")));
+    const foot = state.hiding
+      ? h("div", { class: "sheetfoot pickfoot" },
+        h("span", { class: "grow hint", id: "pick-status", role: "status" }, state.pickStatus || (n ? `${n} selected` : "Tick the projects to hide")),
+        h("button", { type: "button", class: "danger", disabled: n && !state.busy.has("hide") ? null : "", onclick: () => hide([...state.hideSel]) },
+          n ? `Hide ${n}` : "Hide"))
+      : state.undoHide || state.pickStatus
+        ? h("div", { class: "sheetfoot pickfoot" },
+          h("span", { class: "grow hint", id: "pick-status", role: "status" }, state.undoHide
+            ? `Hid ${state.undoHide.length === 1 ? state.undoHide[0] : `${state.undoHide.length} projects`}.`
+            : state.pickStatus),
+          state.undoHide ? h("button", { type: "button", class: "link", onclick: () => show(state.undoHide, "Undo") }, "Undo") : null)
+        : null;
     // Typing redraws only the results: replacing the input under the caret
     // drops keystrokes and breaks the phone keyboard's composition.
     const body = h("div", { class: "sheetbody" }, results());
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Choose a project", onkeydown: (e) => e.key === "Escape" && close() },
-        sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Send to"), h("button", { type: "button", class: "link", onclick: close }, "Cancel")), close),
+        sheetTop(head, close),
         h("label", { class: "search" }, icon("search"),
           h("input", { type: "search", id: "pick-search", placeholder: `Search ${projects.length} projects`, "aria-label": "Search projects", value: state.pickQuery || "",
             oninput: (e) => { state.pickQuery = e.target.value; body.replaceChildren(...results()); } })),
         body,
+        foot,
       ),
     );
   }

@@ -398,6 +398,52 @@ test.describe('signed in', () => {
     await expect(edited).toHaveCount(0);
   });
 
+  test('the picker hides projects, finds hidden ones, and undoes a hide', async () => {
+    const areh = { name: 'areh', path: '/c/areh', session_id: '', free: true, busy: '' };
+    await put(page, 'projects/areh', areh);
+    await page.goto('/#inbox');
+    await passkeyOn(page);
+    await page.getByRole('button', { name: /^Project:/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'Choose a project' });
+    await expect(sheet.getByLabel('Search projects')).toHaveAttribute('placeholder', 'Search 3 projects');
+    await sheet.getByRole('button', { name: 'Edit' }).click();
+    await expect(sheet.getByRole('heading', { name: 'Hide projects' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Hide', exact: true })).toBeDisabled();
+    await sheet.getByRole('checkbox', { name: /areh/ }).click();
+    await expect(sheet.getByRole('checkbox', { name: /areh/ })).toHaveAttribute('aria-checked', 'true');
+    await sheet.getByRole('button', { name: 'Hide 1' }).click();
+
+    const sent = async (type: string) => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === type);
+    await expect.poll(() => sent('hide')).toBeTruthy();
+    const hide = (await sent('hide'))!;
+    expect(JSON.parse(hide.fields.payload.stringValue)).toMatchObject({ type: 'hide', projects: ['areh'] });
+    await expect(sheet.getByRole('heading', { name: 'Send to' })).toBeVisible();
+    await put(page, 'projects/areh', { ...areh, hidden: true });
+    await put(page, `commands/${hide.name.split('/').pop()}`, { ...plain(hide.fields), status: 'done' });
+    await expect(sheet.getByText('Hid areh.')).toBeVisible();
+    await expect(sheet.getByRole('radio', { name: /areh/ })).toHaveCount(0);
+    await expect(sheet.getByLabel('Search projects')).toHaveAttribute('placeholder', 'Search 2 projects');
+
+    await expect(sheet.getByRole('button', { name: 'Show areh' })).toHaveCount(0);
+    await sheet.getByRole('button', { name: /^Hidden/ }).click();
+    await expect(sheet.getByRole('button', { name: 'Show areh' })).toBeVisible();
+    await sheet.getByLabel('Search projects').fill('are');
+    await expect(sheet.getByText('Matches · 1')).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Show areh' })).toBeVisible();
+
+    await sheet.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(() => sent('show')).toBeTruthy();
+    const show = (await sent('show'))!;
+    expect(JSON.parse(show.fields.payload.stringValue)).toMatchObject({ type: 'show', projects: ['areh'] });
+    await put(page, 'projects/areh', areh);
+    await expect(sheet.getByRole('radio', { name: /areh/ })).toBeVisible();
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    await expect(sheet).toHaveCount(0);
+
+    for (const c of [hide, show]) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/projects/areh`, { headers: admin });
+  });
+
   test('a long press on Add task sends the task when its worker is free', async () => {
     await page.goto('/#inbox');
     await passkeyOn(page);

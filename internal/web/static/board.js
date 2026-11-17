@@ -122,7 +122,9 @@ export function queue(tasks, projects) {
     .sort((a, b) => taskRank(a) - taskRank(b))
     .map((t) => {
       const p = byName.get(t.project);
-      return p && p.free ? { ...t, ready: true } : { ...t, ready: false, why: p ? p.busy : "project no longer exists" };
+      if (!p) return { ...t, ready: false, why: "project no longer exists" };
+      if (p.hidden) return { ...t, ready: false, why: "project hidden" };
+      return p.free ? { ...t, ready: true } : { ...t, ready: false, why: p.busy };
     });
 }
 

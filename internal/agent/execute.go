@@ -72,6 +72,9 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if !ok {
 			return fmt.Errorf("no project named %s", p.Project)
 		}
+		if proj.Hidden {
+			return fmt.Errorf("%s is hidden; show it first", proj.Name)
+		}
 		if !proj.Free {
 			return fmt.Errorf("%s is not free: %s", proj.Name, proj.Busy)
 		}
@@ -172,6 +175,8 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return err
 		}
 		return act.Push(ctx, s.Path)
+	case command.Hide, command.Show:
+		return a.setHidden(ctx, p.Projects, p.Type == command.Hide)
 	case command.CheckUpdate, command.Update:
 		if a.Checkout == nil {
 			return errors.New("this agent cannot update itself")

@@ -322,3 +322,77 @@ func TestDispatchedTaskIsMarkedDoneWhenItsSessionFinishes(t *testing.T) {
 		t.Fatalf("task = %v", got)
 	}
 }
+
+type memHidden struct{ names []string }
+
+func (m *memHidden) Load() ([]string, error)   { return m.names, nil }
+func (m *memHidden) Save(names []string) error { m.names = names; return nil }
+
+func TestHideAndShowProjects(t *testing.T) {
+	ph := newPhone(t)
+	ctx := context.Background()
+	a, mem, acts := commandAgent(t, ph)
+	saved := &memHidden{names: []string{"zynk"}}
+	a.Hidden = saved
+	a.hidden = nil
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hidden := func(name string) bool {
+		v, _ := mem.Get(store.Projects, name)
+		return v.(session.Project).Hidden
+	}
+	if !hidden("zynk") || hidden("knip") {
+		t.Fatal("the saved list is not published")
+	}
+
+	run := func(id string, p command.Payload) map[string]any {
+		t.Helper()
+		if err := a.execute(ctx, ph.command(id, p, a.Now())); err != nil {
+			t.Fatal(err)
+		}
+		return mem.Updated(store.Commands, id)
+	}
+	if res := run("c1", command.Payload{Type: command.Hide, Projects: []string{"knip", "dorna"}}); res["status"] != command.Done {
+		t.Fatalf("hide = %v", res)
+	}
+	if !hidden("knip") || !hidden("dorna") || strings.Join(saved.names, ",") != "dorna,knip,zynk" {
+		t.Fatalf("after hide: saved %v", saved.names)
+	}
+	if res := run("c2", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x"}); res["status"] != command.Failed || !strings.Contains(res["error"].(string), "knip is hidden") {
+		t.Fatalf("dispatch to a hidden project = %v", res)
+	}
+	if len(acts.calls) != 0 {
+		t.Fatalf("calls = %v", acts.calls)
+	}
+	if res := run("c3", command.Payload{Type: command.Show, Projects: []string{"knip"}}); res["status"] != command.Done {
+		t.Fatalf("show = %v", res)
+	}
+	if hidden("knip") || strings.Join(saved.names, ",") != "dorna,zynk" {
+		t.Fatalf("after show: saved %v", saved.names)
+	}
+	// A refresh keeps what was hidden.
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !hidden("dorna") || hidden("knip") {
+		t.Fatal("a refresh lost the hidden list")
+	}
+	if res := run("c4", command.Payload{Type: command.Hide, Projects: []string{"nope"}}); res["status"] != command.Failed || !strings.Contains(res["error"].(string), "no project named nope") {
+		t.Fatalf("hide an unknown project = %v", res)
+	}
+	if res := run("c5", command.Payload{Type: command.Hide}); res["status"] != command.Failed {
+		t.Fatalf("hide nothing = %v", res)
+	}
+}
+
+func TestHideNeedsAStore(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Hide, Projects: []string{"knip"}}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed {
+		t.Fatalf("result = %v", res)
+	}
+}

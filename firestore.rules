@@ -51,6 +51,12 @@ service cloud.firestore {
         && boundedString(data.text, 20000);
     }
 
+    // A hidden project takes no new tasks, and no task moves to one. A task
+    // already queued for it may still be edited or reordered.
+    function visibleTarget(data) {
+      return get(/databases/$(database)/documents/projects/$(data.project)).data.get('hidden', false) != true;
+    }
+
     // The phone's order for queued tasks; a task without one sorts by when
     // it was made.
     function validRank(data) {
@@ -76,6 +82,7 @@ service cloud.firestore {
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank'])
         && validTarget(request.resource.data)
+        && visibleTarget(request.resource.data)
         && validRank(request.resource.data)
         && validImages(request.resource.data)
         && request.resource.data.created_at == request.time
@@ -84,6 +91,7 @@ service cloud.firestore {
         && resource.data.status == 'queued'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images'])
         && validTarget(request.resource.data)
+        && (request.resource.data.project == resource.data.project || visibleTarget(request.resource.data))
         && validRank(request.resource.data)
         && validImages(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
@@ -111,7 +119,7 @@ service cloud.firestore {
       allow read: if isOwner();
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'grant', 'status', 'created_at'])
-        && request.resource.data.type in ['dispatch', 'reply', 'answer', 'clear', 'stop', 'start', 'restart', 'push', 'check', 'update']
+        && request.resource.data.type in ['dispatch', 'reply', 'answer', 'clear', 'stop', 'start', 'restart', 'push', 'check', 'update', 'hide', 'show']
         && boundedString(request.resource.data.payload, 30000)
         && request.resource.data.status == 'pending'
         && request.resource.data.created_at == request.time

@@ -64,6 +64,11 @@ func attachmentsDir() string {
 	return filepath.Join(home, ".peyk", "attachments")
 }
 
+func hiddenPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "hidden.json")
+}
+
 func project() (string, error) {
 	p := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if p == "" {
@@ -173,6 +178,7 @@ func runAgent(ctx context.Context) error {
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 		Usage:        func() (*session.Usage, error) { return laptop.LoadUsage(usagePath()) },
 		UsageChanged: usage,
+		Hidden:       laptop.HiddenFile{Path: hiddenPath()},
 		Commands: &agent.Commands{
 			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
 			Keys:        keyring().Load,

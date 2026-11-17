@@ -302,3 +302,16 @@ button.busy .ico { display: none; }
 #notice::before { content: ""; display: inline-block; width: 0.9em; height: 0.9em; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -0.12em; }
 .thumb.loading { background: linear-gradient(90deg, var(--paper), var(--line), var(--paper)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+
+/* The picker's edit mode: a tick per row and a footer that hides the ticked. */
+.sheethead .heads { display: flex; gap: 8px; }
+.prow .tick { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--card); }
+.prow .tick .ico svg { width: 14px; height: 14px; opacity: 0; }
+.prow[role="checkbox"][aria-checked="true"] .tick { background: var(--accent); border-color: var(--accent); }
+.prow[role="checkbox"][aria-checked="true"] .tick .ico svg { opacity: 1; }
+.prow[role="checkbox"] .tick .ico { color: var(--card); }
+.prow.hidden .face { opacity: 0.5; }
+.prow.hidden .pname { color: var(--muted); font-weight: 500; }
+button.chipbtn { padding: 4px 12px; border-radius: 999px; font-size: 0.8rem; }
+button.danger { background: var(--bad); border-color: var(--bad); color: var(--card); }
+.pickfoot { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
