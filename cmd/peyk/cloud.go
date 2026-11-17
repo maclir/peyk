@@ -120,7 +120,7 @@ func runAgent(ctx context.Context) error {
 	pings := make(chan struct{}, 1)
 	go agent.Serve(ctx, ln, pings)
 	// Any background listener failing ends the agent; it says which.
-	bgErr := make(chan error, 3)
+	bgErr := make(chan error, 4)
 	background := func(f func() error) {
 		go func() {
 			err := f()
@@ -135,6 +135,8 @@ func runAgent(ctx context.Context) error {
 	background(func() error { return fs.Commands(ctx, cmds) })
 	history := make(chan store.HistoryRequest)
 	background(func() error { return fs.HistoryRequests(ctx, history) })
+	seen := make(chan string)
+	background(func() error { return fs.Seen(ctx, seen) })
 
 	logger := log.New(os.Stderr, "peyk: ", log.LstdFlags)
 	logger.Printf("publishing to %s; Ctrl-C to go offline", p)
@@ -182,6 +184,7 @@ func runAgent(ctx context.Context) error {
 		UsageChanged: usage,
 		Hidden:       laptop.HiddenFile{Path: hiddenPath()},
 		History:      laptop.History, HistoryRequests: history,
+		Seen: seen,
 		Commands: &agent.Commands{
 			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
 			Keys:        keyring().Load,

@@ -157,7 +157,16 @@ service cloud.firestore {
         && request.resource.data.requested_at == request.time;
     }
 
-    // A new passkey's public half, under the one-time code `peyk pair`
+    // A device saying it showed a session, so the laptop has every device
+    // close that session's notifications. The agent deletes it once handled.
+    match /seen/{id} {
+      allow create, update: if isOwner()
+        && exists(/databases/$(database)/documents/sessions/$(id))
+        && request.resource.data.keys().hasOnly(['seen_at'])
+        && request.resource.data.seen_at == request.time;
+    }
+
+        // A new passkey's public half, under the one-time code `peyk pair`
     // printed. The laptop shows its fingerprint and asks before trusting it.
     match /pairings/{code} {
       allow create: if isOwner()

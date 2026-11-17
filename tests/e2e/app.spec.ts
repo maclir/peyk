@@ -204,6 +204,29 @@ test.describe('signed in', () => {
     await expect.poll(() => page.evaluate(() => [...(window as any).open_notes])).toEqual(['h']);
   });
 
+  test('opening a worker tells the laptop, so other devices close its notifications', async () => {
+    await page.goto('/#s-k');
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+    await expect.poll(async () => (await list(page, 'seen')).map((d) => [d.name.split('/').pop(), Boolean(d.fields.seen_at)])).toEqual([['k', true]]);
+  });
+
+  test('a dismissal replaces its worker\'s notification silently and closes it', async () => {
+    await page.goto('/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    const [worker] = page.context().serviceWorkers();
+    const got = await worker.evaluate(async () => {
+      const reg = (self as any).registration;
+      const open = new Set(['k', 'h']);
+      const shown: string[] = [];
+      reg.showNotification = async (_: string, o: any) => { open.add(o.tag); shown.push(`${o.tag}${o.silent ? ' silently' : ''}`); };
+      reg.getNotifications = async ({ tag }: { tag: string }) => (open.has(tag) ? [{ close: () => open.delete(tag) }] : []);
+      await (self as any).notify({ session: 'k', dismiss: true });
+      await (self as any).notify({ session: 'z', dismiss: true });
+      return { open: [...open], shown };
+    });
+    expect(got).toEqual({ open: ['h'], shown: ['k silently', 'z silently'] });
+  });
+
   test("a push for the worker on screen is shown silently and closed, others with sound", async () => {
     await page.goto('/');
     await page.waitForFunction(() => navigator.serviceWorker.controller);

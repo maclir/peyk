@@ -66,6 +66,10 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 	if err != nil {
 		return err
 	}
+	// Acting on a session is seeing it, even from a device not showing it.
+	if p.Session != "" {
+		defer a.seen(ctx, p.Session)
+	}
 	act := a.Commands.Act
 	switch p.Type {
 	case command.Dispatch:

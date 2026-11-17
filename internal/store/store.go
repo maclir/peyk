@@ -14,6 +14,7 @@
 //	laptop/usage               session.Usage        agent writes
 //	attachments/{sha256}       Attachment           phone creates and deletes
 //	history/{aoe session id}   History              phone requests and deletes, agent fills
+//	seen/{aoe session id}      {seen_at}            phone writes, agent deletes
 package store
 
 import (
@@ -33,6 +34,7 @@ const (
 	Subscriptions = "subscriptions"
 	Attachments   = "attachments"
 	History       = "history"
+	Seen          = "seen"
 )
 
 // Attachment is an image added to a task. Its id is the SHA-256 of Data in
@@ -126,6 +128,9 @@ type Listener interface {
 	// HistoryRequests sends every history request the phone writes, and
 	// the ones already waiting, until ctx ends or listening fails.
 	HistoryRequests(ctx context.Context, out chan<- HistoryRequest) error
+	// Seen sends the id of every session a device writes it has shown,
+	// until ctx ends or listening fails.
+	Seen(ctx context.Context, out chan<- string) error
 }
 
 // HeldReader finds the replies held for the phone to send again or cancel.

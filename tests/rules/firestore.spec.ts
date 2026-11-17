@@ -349,3 +349,26 @@ describe('history', () => {
     await assertFails(getDocs(collection(owner(), 'history')));
   });
 });
+
+describe('seen', () => {
+  const see = (db: ReturnType<typeof owner>, id = 'knip') => setDoc(doc(db, `seen/${id}`), { seen_at: serverTimestamp() });
+
+  it('the owner says it showed a live session, again and again', async () => {
+    await assertSucceeds(see(owner()));
+    await assertSucceeds(see(owner()));
+  });
+
+  it('cannot name an unpublished session, add fields, choose the time, or read', async () => {
+    await assertFails(see(owner(), 'nope'));
+    await assertFails(setDoc(doc(owner(), 'seen/knip'), { seen_at: serverTimestamp(), extra: 1 }));
+    await assertFails(setDoc(doc(owner(), 'seen/knip'), { seen_at: Timestamp.fromMillis(0) }));
+    await assertSucceeds(see(owner()));
+    await assertFails(getDoc(doc(owner(), 'seen/knip')));
+    await assertFails(deleteDoc(doc(owner(), 'seen/knip')));
+  });
+
+  it('nobody else says it showed a session', async () => {
+    await assertFails(see(stranger()));
+    await assertFails(see(anonymous()));
+  });
+});

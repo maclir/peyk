@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
 )
@@ -184,6 +185,22 @@ func TestExecuteCommands(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestActingOnANotifiedSessionDismissesItEverywhere(t *testing.T) {
+	ph := newPhone(t)
+	a, _, _ := commandAgent(t, ph)
+	n := &recordingNotifier{}
+	a.Notify = n
+	if err := a.notify(context.Background(), []notify.Note{{Session: "h", Title: "hamta", Body: "Finished"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Stop, Session: "h"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(n.notes, "|"); got != "hamta: Finished|dismiss h" {
+		t.Fatalf("notes = %v", got)
 	}
 }
 

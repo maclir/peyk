@@ -28,7 +28,14 @@ type Note struct {
 	Body    string `json:"body"`
 	URL     string `json:"url"`
 	Icon    string `json:"icon"`
+	// Dismiss closes the session's notifications instead of showing one.
+	Dismiss bool `json:"dismiss,omitempty"`
 }
+
+// Dismissal closes a session's notification on every device. It shares the
+// session's push topic, so it also replaces a note the push service has yet
+// to deliver.
+func Dismissal(session string) Note { return Note{Session: session, Dismiss: true} }
 
 // Icons are the event marks under /static, drawn by cmd/icon.
 const (

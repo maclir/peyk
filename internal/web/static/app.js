@@ -305,11 +305,19 @@ async function start(cfg) {
   // Notifications are tagged with their worker's id; seeing the worker
   // answers them. Every render of a worker gets here, so the log records a
   // dismissal that found nothing once per visit, and every one that found or
-  // failed something.
+  // failed something. The laptop is told once per visit, and has every other
+  // device close the worker's notifications, whether or not this one has any.
   const dismissLogged = new Set();
-  document.addEventListener("visibilitychange", () => dismissLogged.clear());
-  window.addEventListener("hashchange", () => dismissLogged.clear());
+  const seenSent = new Set();
+  const newVisit = () => { dismissLogged.clear(); seenSent.clear(); };
+  document.addEventListener("visibilitychange", newVisit);
+  window.addEventListener("hashchange", newVisit);
   function dismissNotes(id) {
+    if (!seenSent.has(id)) {
+      seenSent.add(id);
+      fs.setDoc(fs.doc(db, "seen", id), { seen_at: fs.serverTimestamp() })
+        .catch((err) => noteLog("seen failed", { session: id, error: String(err) }));
+    }
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.ready
       .then((reg) => reg.getNotifications())

@@ -115,6 +115,32 @@ func (s *Firestore) HistoryRequests(ctx context.Context, out chan<- HistoryReque
 	}
 }
 
+// Seen listens to the seen documents. The agent deletes each once handled,
+// and a removal is not a sighting.
+func (s *Firestore) Seen(ctx context.Context, out chan<- string) error {
+	it := s.client.Collection(Seen).Snapshots(ctx)
+	defer it.Stop()
+	for {
+		snap, err := it.Next()
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("listen for seen sessions: %w", err)
+		}
+		for _, ch := range snap.Changes {
+			if ch.Kind == firestore.DocumentRemoved {
+				continue
+			}
+			select {
+			case out <- ch.Doc.Ref.ID:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}
+}
+
 // Pairing waits until the phone writes pairings/{code}.
 func (s *Firestore) Pairing(ctx context.Context, code string) (Pairing, error) {
 	it := s.client.Collection(Pairings).Doc(code).Snapshots(ctx)

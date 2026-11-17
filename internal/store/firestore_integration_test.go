@@ -223,3 +223,39 @@ func TestFirestoreHistoryRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFirestoreSeen(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("run with make test-integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	s, err := NewFirestore(ctx, "peyk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	out := make(chan string, 4)
+	go s.Seen(ctx, out)
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	if err := s.Put(ctx, Seen, "it-seen", map[string]any{"seen_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	if id := <-out; id != "it-seen" {
+		t.Fatalf("seen %s", id)
+	}
+	if err := s.Delete(ctx, Seen, "it-seen"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(ctx, Seen, "it-seen-2", map[string]any{"seen_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	// The deletion between the two is not a sighting.
+	if id := <-out; id != "it-seen-2" {
+		t.Fatalf("seen %s", id)
+	}
+	if err := s.Delete(ctx, Seen, "it-seen-2"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -100,6 +100,11 @@ type Agent struct {
 	// Notify, when set, is told about sessions that start needing you or
 	// finish a turn.
 	Notify Notifier
+	// Seen sends the sessions a device showed. Each one notified since it was
+	// last seen gets a dismissal, so every device closes its notification,
+	// including devices that never showed the session.
+	Seen     <-chan string
+	notified map[string]bool
 	// Checkout, when set, is the checkout the agent runs from: it publishes
 	// the checkout's version after every refresh and lets the phone fetch
 	// and update it.
@@ -224,13 +229,38 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if err := a.publishVersion(ctx); err != nil {
 		return err
 	}
-	if a.Notify == nil || prev == nil {
+	if prev == nil {
 		return nil
 	}
-	if notes := notify.Changes(prev, a.sessions); len(notes) > 0 {
-		return a.Notify.Notify(ctx, notes)
+	return a.notify(ctx, notify.Changes(prev, a.sessions))
+}
+
+func (a *Agent) notify(ctx context.Context, notes []notify.Note) error {
+	if a.Notify == nil || len(notes) == 0 {
+		return nil
+	}
+	if err := a.Notify.Notify(ctx, notes); err != nil {
+		return err
+	}
+	if a.notified == nil {
+		a.notified = map[string]bool{}
+	}
+	for _, n := range notes {
+		a.notified[n.Session] = true
 	}
 	return nil
+}
+
+// seen dismisses a session's notifications everywhere. A failure only logs:
+// a notification left open is no reason to stop the agent.
+func (a *Agent) seen(ctx context.Context, id string) {
+	if !a.notified[id] {
+		return
+	}
+	delete(a.notified, id)
+	if err := a.Notify.Notify(ctx, []notify.Note{notify.Dismissal(id)}); err != nil {
+		a.Log.Printf("dismiss %s: %v", id, err)
+	}
 }
 
 // clearedTo is a cleared session's new conversation and the one aoe still
@@ -399,13 +429,7 @@ func (a *Agent) RefreshCI(ctx context.Context) error {
 	if err := a.sync(ctx, store.Sessions, docs); err != nil {
 		return err
 	}
-	if a.Notify == nil {
-		return nil
-	}
-	if notes := notify.Changes(prev, next); len(notes) > 0 {
-		return a.Notify.Notify(ctx, notes)
-	}
-	return nil
+	return a.notify(ctx, notify.Changes(prev, next))
 }
 
 // RefreshReplies rereads the transcripts of working sessions and publishes
@@ -697,6 +721,11 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			}
 		case r := <-a.HistoryRequests:
 			a.serveHistory(ctx, r)
+		case id := <-a.Seen:
+			a.seen(ctx, id)
+			if err := a.Store.Delete(ctx, store.Seen, id); err != nil {
+				a.Log.Printf("seen %s: %v", id, err)
+			}
 		case in := <-cmds:
 			if a.Commands == nil {
 				continue

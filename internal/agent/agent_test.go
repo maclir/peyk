@@ -332,9 +332,47 @@ type recordingNotifier struct{ notes []string }
 
 func (r *recordingNotifier) Notify(_ context.Context, notes []notify.Note) error {
 	for _, n := range notes {
+		if n.Dismiss {
+			r.notes = append(r.notes, "dismiss "+n.Session)
+			continue
+		}
 		r.notes = append(r.notes, n.Title+": "+n.Body)
 	}
 	return nil
+}
+
+func TestSeenDismissesANotifiedSessionEverywhereOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	n := &recordingNotifier{}
+	a := newAgent(c, mem)
+	a.Notify = n
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Working}, session.Snapshot{ID: "h", Title: "hamta", State: session.Idle})
+	_ = a.Refresh(ctx)
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle}, session.Snapshot{ID: "h", Title: "hamta", State: session.Idle})
+	_ = a.Refresh(ctx)
+	seen := make(chan string)
+	a.Seen = seen
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, nil, nil) }()
+
+	for _, id := range []string{"k", "k", "h"} {
+		_ = mem.Put(ctx, store.Seen, id, map[string]any{})
+		seen <- id
+	}
+	seen <- "sync"
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(n.notes, "|"); got != "knip: Finished|dismiss k" {
+		t.Fatalf("notes = %v", got)
+	}
+	if ids, _ := mem.IDs(ctx, store.Seen); len(ids) != 0 {
+		t.Fatalf("seen left: %v", ids)
+	}
 }
 
 func TestRefreshNotifiesOnTransitionsButNotAtStart(t *testing.T) {
