@@ -23,7 +23,7 @@ service cloud.firestore {
     }
 
     match /laptop/{doc} {
-      allow get: if isOwner() && doc in ['status', 'push', 'usage', 'version'];
+      allow get: if isOwner() && doc in ['status', 'push', 'usage', 'actions', 'version'];
     }
 
     // A phone's Web Push endpoint. The id is a hash of the endpoint, so a

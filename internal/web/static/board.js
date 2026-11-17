@@ -76,6 +76,17 @@ export function usageLeft(usage, now) {
   });
 }
 
+// actionsLeft is what is left of the month's included GitHub Actions
+// minutes. A month past its reset is whole again, its repositories' usage gone.
+export function actionsLeft(actions, now) {
+  if (!actions?.included) return null;
+  const at = toDate(actions.resets_at);
+  const resetsAt = at && at.getTime() > now ? at : null;
+  const used = resetsAt ? Math.max(0, Math.min(actions.included, actions.used ?? 0)) : 0;
+  const left = actions.included - used;
+  return { left, included: actions.included, pct: Math.round((100 * left) / actions.included), resetsAt, repos: resetsAt ? actions.repos ?? [] : [] };
+}
+
 export function pushLabel(git) {
   if (!git) return "no repository";
   if (git.unpushed > 0 && !git.upstream) return `${git.unpushed} unpushed · no remote branch`;

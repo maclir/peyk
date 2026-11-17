@@ -20,6 +20,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'laptop/status'), { online: true });
     await setDoc(doc(db, 'laptop/push'), { vapid_public_key: 'k' });
     await setDoc(doc(db, 'laptop/usage'), { five_hour: { used: 20 } });
+    await setDoc(doc(db, 'laptop/actions'), { included: 2000, used: 760 });
     await setDoc(doc(db, 'laptop/version'), { commit: 'abc1234', behind: 2 });
     await setDoc(doc(db, 'laptop/secret'), { x: 1 });
     await setDoc(doc(db, 'other/thing'), { secret: true });
@@ -38,11 +39,12 @@ const stranger = () => env.authenticatedContext('someone', { email: 'someone@exa
 const anonymous = () => env.unauthenticatedContext().firestore();
 
 describe('owner', () => {
-  it('reads sessions, laptop status and Claude usage', async () => {
+  it('reads sessions, laptop status, and Claude and Actions usage', async () => {
     await assertSucceeds(getDocs(collection(owner(), 'sessions')));
     await assertSucceeds(getDoc(doc(owner(), 'sessions/knip')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/status')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/usage')));
+    await assertSucceeds(getDoc(doc(owner(), 'laptop/actions')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/version')));
   });
 
@@ -51,6 +53,7 @@ describe('owner', () => {
     await assertFails(deleteDoc(doc(owner(), 'sessions/knip')));
     await assertFails(setDoc(doc(owner(), 'laptop/status'), { online: false }));
     await assertFails(setDoc(doc(owner(), 'laptop/usage'), { five_hour: { used: 0 } }));
+    await assertFails(setDoc(doc(owner(), 'laptop/actions'), { included: 2000, used: 0 }));
     await assertFails(setDoc(doc(owner(), 'laptop/version'), { commit: 'x', behind: 0 }));
   });
 
@@ -65,6 +68,7 @@ describe('anyone else', () => {
     await assertFails(getDocs(collection(stranger(), 'sessions')));
     await assertFails(getDoc(doc(stranger(), 'laptop/status')));
     await assertFails(getDoc(doc(stranger(), 'laptop/usage')));
+    await assertFails(getDoc(doc(stranger(), 'laptop/actions')));
     await assertFails(getDoc(doc(stranger(), 'laptop/version')));
   });
 

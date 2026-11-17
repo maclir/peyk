@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -31,6 +31,7 @@ const laptopEl = document.getElementById("laptop");
 const seenEl = document.getElementById("seen");
 const updateEl = document.getElementById("update");
 const usageEl = document.getElementById("usage");
+const usagePopEl = document.getElementById("usagepop");
 const config = document.body.dataset.firebase;
 
 const h = (tag, attrs = {}, ...children) => {
@@ -104,7 +105,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, statusTone: "", busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, actions: null, version: null, user: null, picked: null, status: "", statusBusy: false, statusTone: "", busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
@@ -158,6 +159,10 @@ async function start(cfg) {
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "usage"), (snap) => {
         state.usage = snap.exists() ? snap.data() : null;
+        render();
+      }, failed),
+      fs.onSnapshot(fs.doc(db, "laptop", "actions"), (snap) => {
+        state.actions = snap.exists() ? snap.data() : null;
         render();
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "version"), (snap) => {
@@ -216,6 +221,8 @@ async function start(cfg) {
   document.addEventListener("click", (e) => {
     if (state.menu && !e.target.closest(".wmenu")) { state.menu = null; render(); }
   });
+  usageEl.addEventListener("click", () => { state.menu = state.menu === "usage" ? null : "usage"; render(); });
+  usageEl.parentElement.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.menu === "usage") { state.menu = null; render(); usageEl.focus(); } });
   window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
   tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
@@ -262,15 +269,53 @@ async function start(cfg) {
     updateEl.textContent = state.busy.has("update") ? "Updating…" : "Update";
     updateEl.setAttribute("aria-label", `Update the laptop: ${behind} new commit${behind === 1 ? "" : "s"}`);
 
-    const left = usageLeft(state.usage, now);
-    usageEl.hidden = !left;
-    if (!left) return;
-    usageEl.querySelectorAll(".meter").forEach((m, i) => {
-      m.classList.toggle("low", left[i].left < 10);
-      m.firstElementChild.style.width = `${100 - left[i].left}%`;
+    renderUsage(now);
+  }
+
+  // The header shows Claude's windows and the month's Actions minutes as bars;
+  // the popover names them, and each row opens that quota's own page.
+  function renderUsage(now) {
+    const claude = usageLeft(state.usage, now);
+    const gh = actionsLeft(state.actions, now);
+    const open = state.menu === "usage" && Boolean(claude || gh);
+    usageEl.hidden = !claude && !gh;
+    usagePopEl.hidden = !open;
+    usageEl.setAttribute("aria-expanded", String(open));
+    const meters = usageEl.querySelectorAll(".meter");
+    meters.forEach((m, i) => {
+      const left = i < 2 ? claude?.[i].left : gh?.pct;
+      m.hidden = left == null;
+      m.classList.toggle("low", left < 10);
+      m.firstElementChild.style.width = `${100 - (left ?? 100)}%`;
     });
-    usageEl.setAttribute("aria-label", `Claude usage: ${left.map((w) => `${w.label} ${w.left}% left`).join(", ")}`);
-    usageEl.title = left.map((w) => `${w.label} ${w.left}% left` + (w.resetsAt ? `, resets in ${ago(now, w.resetsAt.getTime())}` : "")).join("\n");
+    const minutes = (n) => n.toLocaleString("en-US");
+    const said = [
+      claude && `Claude ${claude.map((w) => `${w.label} ${w.left}% left`).join(", ")}`,
+      gh && `Actions ${minutes(gh.left)} of ${minutes(gh.included)} minutes left`,
+    ].filter(Boolean);
+    usageEl.setAttribute("aria-label", `Usage: ${said.join("; ")}`);
+    usageEl.title = said.join("\n");
+    if (!open) {
+      usagePopEl.replaceChildren();
+      return;
+    }
+    const row = (label, left, text) => h("span", { class: "uwin" }, h("span", {}, label),
+      h("span", { class: `meter${left < 10 ? " low" : ""}` }, h("i", { style: `width: ${100 - left}%` })), h("span", {}, text));
+    const link = (href, ...children) => h("a", { href, target: "_blank", rel: "noopener", onclick: () => { state.menu = null; render(); } }, ...children);
+    const day = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const parts = [];
+    if (claude) {
+      parts.push(link("https://claude.ai/settings/usage", h("strong", {}, "Claude"),
+        claude.map((w) => row(w.label, w.left, `${w.left}%` + (w.resetsAt ? ` · ${ago(now, w.resetsAt.getTime())}` : "")))));
+    }
+    if (claude && gh) parts.push(h("hr"));
+    if (gh) {
+      const most = gh.repos.map((r) => `${r.repo.split("/").pop()} ${minutes(r.minutes)}`).join(" · ");
+      parts.push(link("https://github.com/settings/billing", h("strong", {}, "GitHub Actions"),
+        row("min", gh.pct, `${minutes(gh.left)} left` + (gh.resetsAt ? ` · ${day(gh.resetsAt)}` : "")),
+        most ? h("span", { class: "hint" }, `Most used: ${most}`) : null));
+    }
+    usagePopEl.replaceChildren(...parts);
   }
 
   function render() {

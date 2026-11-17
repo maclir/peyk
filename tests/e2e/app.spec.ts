@@ -96,6 +96,10 @@ async function seed(page: Page) {
     five_hour: { used: 23.4, resets_at: new Date(now.getTime() + 2 * 3600_000) },
     seven_day: { used: 95, resets_at: new Date(now.getTime() + 50 * 3600_000) },
   });
+  await put(page, 'laptop/actions', {
+    included: 2000, used: 760, resets_at: new Date(now.getTime() + 10 * 86400_000),
+    repos: [{ repo: 'maclir/hamta', minutes: 410 }, { repo: 'maclir/knip', minutes: 250 }],
+  });
   await put(page, 'sessions/k', {
     id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'unpushed', updated_at: now,
     git: {
@@ -139,10 +143,20 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Sign out' }).click();
     await signIn(page);
     await expect(page.getByRole('button', { name: 'Laptop online. Check for updates' })).toBeVisible();
-    const usage = page.getByRole('link', { name: 'Claude usage: 5h 77% left, 7d 5% left' });
-    await expect(usage).toHaveAttribute('href', 'https://claude.ai/settings/usage');
+    const usage = page.getByRole('button', { name: 'Usage: Claude 5h 77% left, 7d 5% left; Actions 1,240 of 2,000 minutes left' });
     await expect(usage.locator('.meter.low')).toHaveCount(1);
     await expect(usage.locator('.meter i').first()).toHaveAttribute('style', 'width: 23%;');
+    await expect(usage.locator('.meter.gh i')).toHaveAttribute('style', 'width: 38%;');
+
+    await usage.click();
+    const pop = page.getByRole('dialog', { name: 'Usage' });
+    await expect(pop.getByRole('link', { name: /^Claude 5h/ })).toHaveAttribute('href', 'https://claude.ai/settings/usage');
+    const actions = pop.getByRole('link', { name: /^GitHub Actions/ });
+    await expect(actions).toHaveAttribute('href', 'https://github.com/settings/billing');
+    await expect(actions).toContainText('1,240 left');
+    await expect(actions).toContainText('Most used: hamta 410 · knip 250');
+    await page.keyboard.press('Escape');
+    await expect(pop).toBeHidden();
   });
 
   test('the board groups sessions and shows what each is doing', async () => {

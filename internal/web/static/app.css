@@ -31,9 +31,19 @@ html.locked { overflow: hidden; }
 .laptop.on::after, .laptop.off::after { content: ""; position: absolute; right: 8px; bottom: 12px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--bg); }
 .laptop.on::after { background: var(--ok); }
 .laptop.off::after { background: var(--bad); }
-/* Two bars, the 5-hour window over the week, filled to what is left. */
+/* Claude's 5-hour window over its week, then the month's Actions minutes, set apart. */
 /* The padding is the tap target; the negative margin keeps it from growing the header. */
-.usage { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 10px 0; margin: -10px 0; }
+.usage { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 10px 4px; margin: -10px -4px; border: 0; border-radius: 6px; background: none; }
+.usage[aria-expanded="true"] { background: var(--run-soft); }
+.meter.gh { margin-top: 2px; }
+.meter.gh i { background: var(--accent); }
+.upop { top: 34px; width: 280px; padding: 4px; }
+.upop a { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
+.upop a:hover, .upop a:focus-visible { background: var(--paper); outline: none; }
+.upop strong { font-weight: 600; }
+.upop .uwin { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; font: 0.75rem var(--mono); color: var(--muted); }
+.upop .uwin .meter { width: auto; }
+.upop .hint { font-size: 0.75rem; }
 .meter { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--muted); }
 .meter.low i { background: var(--bad); }

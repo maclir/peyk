@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -341,6 +341,27 @@ describe('usageLeft', () => {
   it('counts a reset or unreported window as whole', () => {
     const left = usageLeft({ five_hour: { used: 90, resets_at: at(-1) } }, now);
     expect(left.map((w: any) => [w.label, w.left, w.resetsAt])).toEqual([['5h', 100, null], ['7d', 100, null]]);
+  });
+});
+
+describe('actionsLeft', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const repos = [{ repo: 'maclir/a', minutes: 410 }];
+
+  it('is nothing until the laptop has reported Actions usage', () => {
+    expect(actionsLeft(null, now)).toBeNull();
+  });
+
+  it('turns used minutes into what is left this month', () => {
+    const resets = new Date('2026-12-01T00:00:00Z');
+    expect(actionsLeft({ included: 2000, used: 760, resets_at: resets, repos }, now))
+      .toEqual({ left: 1240, included: 2000, pct: 62, resetsAt: resets, repos });
+    expect(actionsLeft({ included: 2000, used: 2300, resets_at: resets, repos }, now).left).toBe(0);
+  });
+
+  it('counts a month past its reset as whole', () => {
+    expect(actionsLeft({ included: 2000, used: 1900, resets_at: new Date('2026-11-01T00:00:00Z'), repos }, now))
+      .toEqual({ left: 2000, included: 2000, pct: 100, resetsAt: null, repos: [] });
   });
 });
 

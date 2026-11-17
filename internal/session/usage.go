@@ -50,3 +50,20 @@ func ParseStatusLine(r io.Reader) (*Usage, error) {
 	}
 	return &Usage{FiveHour: conv(rl.FiveHour), SevenDay: conv(rl.SevenDay)}, nil
 }
+
+// Actions is how much of the month's included GitHub Actions compute the
+// account has used, in standard Linux runner minutes: GitHub charges other
+// runners more per minute from the same allowance, so a minute on them
+// counts as several here.
+type Actions struct {
+	Included int         `firestore:"included" json:"included"`
+	Used     int         `firestore:"used" json:"used"`
+	ResetsAt time.Time   `firestore:"resets_at" json:"resets_at"`
+	Repos    []RepoUsage `firestore:"repos" json:"repos"`
+}
+
+// RepoUsage is one repository's share of Actions.Used.
+type RepoUsage struct {
+	Repo    string `firestore:"repo" json:"repo"`
+	Minutes int    `firestore:"minutes" json:"minutes"`
+}

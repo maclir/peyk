@@ -140,6 +140,13 @@ type Agent struct {
 	UsageChanged <-chan struct{}
 	usageKey     string
 
+	// Actions, when set, reads the month's GitHub Actions usage. Billing has
+	// no event, so the agent asks at start and after a followed run
+	// finishes, which is when usage grows.
+	Actions    func(context.Context) (*session.Actions, error)
+	actionsDue bool
+	actionsKey string
+
 	// clears follows sessions cleared from the phone until aoe reports
 	// their new conversation, keyed by session id.
 	clears map[string]clearedTo
@@ -387,6 +394,9 @@ func (a *Agent) lookupCI(ctx context.Context, g *session.Git, run *ciRun) {
 		a.Log.Printf("ci: %v", err)
 		return
 	}
+	if res != nil && res.State.Done() && (run.result == nil || !run.result.State.Done()) {
+		a.actionsDue = true
+	}
 	run.result = res
 }
 
@@ -527,6 +537,30 @@ func (a *Agent) PublishUsage(ctx context.Context) error {
 		return err
 	}
 	a.usageKey = key
+	return nil
+}
+
+// PublishActions writes laptop/actions when the Actions usage changed. A
+// failed lookup leaves the last published usage, which is still the best
+// known, and waits for the next finished run.
+func (a *Agent) PublishActions(ctx context.Context) error {
+	a.actionsDue = false
+	if a.Actions == nil {
+		return nil
+	}
+	u, err := a.Actions(ctx)
+	if err != nil {
+		a.Log.Printf("actions usage: %v", err)
+		return nil
+	}
+	key := contentKey(u)
+	if key == a.actionsKey {
+		return nil
+	}
+	if err := a.Store.Put(ctx, "laptop", "actions", u); err != nil {
+		return err
+	}
+	a.actionsKey = key
 	return nil
 }
 
@@ -684,6 +718,9 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	if err := a.PublishUsage(ctx); err != nil {
 		return err
 	}
+	if err := a.PublishActions(ctx); err != nil {
+		return err
+	}
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
 	var debounce, replies, ci, wake <-chan time.Time
@@ -704,6 +741,9 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			if err := a.Refresh(ctx); err != nil {
 				return err
 			}
+			if err := a.publishActionsIfDue(ctx); err != nil {
+				return err
+			}
 		case <-a.Replies:
 			if replies == nil {
 				replies = time.After(a.Debounce)
@@ -720,6 +760,9 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		case <-ci:
 			ci = nil
 			if err := a.RefreshCI(ctx); err != nil {
+				return err
+			}
+			if err := a.publishActionsIfDue(ctx); err != nil {
 				return err
 			}
 		case r := <-a.HistoryRequests:
@@ -763,4 +806,11 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			}
 		}
 	}
+}
+
+func (a *Agent) publishActionsIfDue(ctx context.Context) error {
+	if !a.actionsDue {
+		return nil
+	}
+	return a.PublishActions(ctx)
 }

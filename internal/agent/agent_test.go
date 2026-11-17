@@ -622,6 +622,65 @@ func TestRunAsksGitHubAgainWhileARunIsUnfinished(t *testing.T) {
 	}
 }
 
+func TestRunRereadsActionsUsageWhenAFollowedRunFinishes(t *testing.T) {
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", Git: &session.Git{Pushed: "abc", Repo: "maclir/knip"}})
+	ci := &fakeCI{runs: map[string]*session.CI{"maclir/knip@abc": {SHA: "abc", State: session.CIRunning}}}
+	a := newAgent(c, mem)
+	a.CI, a.CIPoll, a.CIWait = ci, 10*time.Millisecond, time.Minute
+	var mu sync.Mutex
+	used, asked := 100, 0
+	a.Actions = func(context.Context) (*session.Actions, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		asked++
+		return &session.Actions{Included: 2000, Used: used}, nil
+	}
+	published := func() int {
+		v, ok := mem.Get("laptop", "actions")
+		if !ok {
+			return -1
+		}
+		return v.(*session.Actions).Used
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- a.Run(ctx, nil, nil) }()
+
+	waitFor(t, func() bool { return published() == 100 })
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	if asked != 1 {
+		t.Errorf("asked for Actions usage %d times while the run was unfinished, want 1", asked)
+	}
+	used = 130
+	mu.Unlock()
+	ci.set("maclir/knip@abc", &session.CI{SHA: "abc", State: session.CISuccess})
+	waitFor(t, func() bool { return published() == 130 })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublishActionsKeepsTheLastUsageWhenGitHubFails(t *testing.T) {
+	mem := store.NewMemory()
+	a := newAgent(&fakeCollector{}, mem)
+	a.Actions = func(context.Context) (*session.Actions, error) { return &session.Actions{Used: 5}, nil }
+	ctx := context.Background()
+	if err := a.PublishActions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a.Actions = func(context.Context) (*session.Actions, error) { return nil, errors.New("404 Not Found") }
+	if err := a.PublishActions(ctx); err != nil {
+		t.Fatalf("a GitHub failure stopped the agent: %v", err)
+	}
+	if v, _ := mem.Get("laptop", "actions"); v.(*session.Actions).Used != 5 {
+		t.Fatalf("published %+v, want the last known usage", v)
+	}
+}
+
 func TestPublishUsageWritesOnlyWhenItChanged(t *testing.T) {
 	mem := store.NewMemory()
 	a := newAgent(&fakeCollector{}, mem)

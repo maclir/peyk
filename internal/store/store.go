@@ -12,6 +12,7 @@
 //	subscriptions/{id}         notify.Subscription  phone creates, agent deletes when gone
 //	laptop/push                {vapid_public_key}   agent writes
 //	laptop/usage               session.Usage        agent writes
+//	laptop/actions             session.Actions      agent writes
 //	attachments/{sha256}       Attachment           phone creates and deletes
 //	history/{aoe session id}   History              phone requests and deletes, agent fills
 //	seen/{aoe session id}      {seen_at}            phone writes, agent deletes

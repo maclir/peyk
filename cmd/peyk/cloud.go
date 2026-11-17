@@ -197,6 +197,7 @@ func runAgent(ctx context.Context) error {
 		logger.Printf("not following CI: %v", err)
 	} else {
 		a.CI, a.CIPoll, a.CIWait = gh, 20*time.Second, 2*time.Minute
+		a.Actions = func(ctx context.Context) (*session.Actions, error) { return gh.Actions(ctx, time.Now()) }
 	}
 	err = a.Run(ctx, pings, cmds)
 	cancel()
