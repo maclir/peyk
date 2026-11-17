@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,28 +90,47 @@ func (g *GitWatcher) Set(ctx context.Context, workdirs []string) error {
 		if g.watched[p] {
 			continue
 		}
-		if err := g.w.Add(p); err != nil {
-			return fmt.Errorf("watch %s: %w", p, err)
+		if err := g.add(p); err != nil {
+			return err
 		}
-		g.watched[p] = true
 	}
 	return nil
 }
 
 func (g *GitWatcher) addTree(root string) error {
 	return filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
 		if !d.IsDir() || g.watched[p] {
 			return nil
 		}
-		if err := g.w.Add(p); err != nil {
-			return fmt.Errorf("watch %s: %w", p, err)
-		}
-		g.watched[p] = true
-		return nil
+		return g.add(p)
 	})
+}
+
+// add watches a path that git may be changing underneath it. On macOS,
+// adding a directory stats each entry, and a ref's .lock file can be renamed
+// away between the listing and the stat. Adding again then succeeds, unless
+// the path itself is gone, in which case nothing is left to watch.
+func (g *GitWatcher) add(p string) error {
+	var err error
+	for range 5 {
+		if err = g.w.Add(p); err == nil {
+			g.watched[p] = true
+			return nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if _, statErr := os.Stat(p); errors.Is(statErr, fs.ErrNotExist) {
+			return nil
+		}
+	}
+	return fmt.Errorf("watch %s: %w", p, err)
 }
 
 // Watched lists what is being watched, for tests.
