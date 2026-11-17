@@ -169,6 +169,10 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 //
 // The insets are what stop an installed app from drawing under a notch or a
 // home indicator. In a browser tab they are all zero and nothing moves.
+//
+// The SVG icon comes after the ICO because Chrome takes the last icon that fits
+// the tab, and only the SVG switches to a light mark on a dark tab strip. The
+// ICO is for browsers without SVG favicons.
 const pageHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
@@ -179,8 +183,8 @@ const pageHTML = `<!doctype html>
 <meta name="apple-mobile-web-app-title" content="peyk">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>peyk</title>
+<link rel="icon" href="/static/favicon.ico" sizes="32x32">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<link rel="icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/static/app.css">
