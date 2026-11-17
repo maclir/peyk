@@ -647,7 +647,6 @@ async function start(cfg) {
   function taskMenu(t, clears, sendWith) {
     return h("div", { class: "menu" },
       clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => sendWith(t, false) }, "Send without clearing") : null,
-      h("button", { type: "button", onclick: () => move(t, 0) }, "Move to top"),
       h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, "Edit"),
       h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
     );
@@ -663,8 +662,7 @@ async function start(cfg) {
     );
   }
 
-  // Moves within the list on screen; to the top moves within the whole queue.
-  function move(t, to, list = queue(state.tasks, state.projects)) {
+  function move(t, to, list) {
     const i = list.findIndex((x) => x.id === t.id);
     state.menu = null;
     fs.updateDoc(fs.doc(db, "tasks", t.id), { rank: rankAt(list, i, to) })

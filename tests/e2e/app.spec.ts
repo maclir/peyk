@@ -391,7 +391,7 @@ test.describe('signed in', () => {
 
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
     await task.getByRole('button', { name: /More actions/ }).click();
-    await expect(task.getByRole('button', { name: 'Move to top' })).toBeVisible();
+    await expect(task.getByRole('button', { name: 'Edit task: Start fresh' })).toBeVisible();
     await expect(task.getByRole('button', { name: 'Send without clearing' })).toHaveCount(0);
     await expect(task.locator('button.send .ico.broom')).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
@@ -709,10 +709,8 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Move up: Waits on hamta' }).click();
     await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
     await page.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.locator('.task', { hasText: 'Second thing' }).getByRole('button', { name: /More actions/ }).click();
-    await page.getByRole('button', { name: 'Move to top' }).click();
-    await expect(texts).toHaveText(['Second thing', 'First thing', 'Waits on hamta']);
-    expect((await get(page, 'tasks/two')).rank).toBeDefined();
+    await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
+    expect((await get(page, 'tasks/wait')).rank).toBeDefined();
 
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
