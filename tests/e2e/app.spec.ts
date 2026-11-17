@@ -687,6 +687,7 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Inbox, 1 queued' }).click();
     let sheet = page.getByRole('dialog', { name: 'hamta inbox' });
     await expect(sheet.locator('.ttext')).toHaveText(['Waits on hamta']);
+    await expect(sheet.locator('.sheethead')).toHaveText(/^.?Inbox$/);
     await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Close' }).click();
     await expect(sheet).toBeHidden();

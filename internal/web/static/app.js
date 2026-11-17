@@ -1341,10 +1341,10 @@ async function start(cfg) {
     sheet.head.replaceChildren(
       face(p, sheet.project, "sm"),
       h("h2", { class: "grow" }, "Inbox", h("span", { class: `dot ${p?.free ? "free" : "busy"}`, title: p?.free ? "Free" : p?.busy || "Busy" })),
-      tasks.length > 1 || sheet.arranging
-        ? h("button", { type: "button", class: "link", onclick: () => { sheet.arranging = !sheet.arranging; state.menu = null; render(); } },
-          icon("sort"), sheet.arranging ? "Done" : "Reorder")
-        : null,
+      ...(tasks.length > 1 || sheet.arranging
+        ? [h("button", { type: "button", class: "link", onclick: () => { sheet.arranging = !sheet.arranging; state.menu = null; render(); } },
+          icon("sort"), sheet.arranging ? "Done" : "Reorder")]
+        : []),
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: closeSheet }, icon("x")));
     sheet.list.replaceChildren(...(tasks.length
       ? tasks.map((t, i) => (state.editing === t.id ? editor(t, false)
