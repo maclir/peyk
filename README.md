@@ -18,9 +18,13 @@ To send tasks, replies, stops and pushes from the phone, pair its passkey once:
     make keys                  # list paired passkeys
     make unpair LABEL=pixel
 
-## How it works
+## Provision
 
-`docs/architecture.md` describes the laptop agent, the phone app and the Firestore rules between them. `docs/gcp.md` covers the cloud setup.
+`make help` lists every target. Set `GCLOUD_ACCOUNT` in `.env` first; cloud targets refuse to run without it. Steps no script can do:
+
+- Enable the Google sign-in provider in the Firebase console (Authentication → Sign-in method), and add the Cloud Run hostname under Authorized domains.
+- Copy the web config from `firebase apps:create web` into `.env` as `FIREBASE_*`.
+- Rerun `make harden` after any new Cloud Run address or custom domain, or the browser key refuses it.
 
 ## Develop
 
