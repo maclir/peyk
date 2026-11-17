@@ -611,13 +611,18 @@ test.describe('signed in', () => {
       headers: admin, data: { fields: { conversation: encode('conv'), latest: encode('m1') } },
     });
     expect(bound.ok()).toBe(true);
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: viewport.width, height: 300 });
     await page.goto('/#s-k');
     await passkeyOn(page);
     const reply = page.locator('form.composer.respond');
     await reply.getByLabel('Reply', { exact: true }).fill('Also add --csv');
+    await page.evaluate(() => window.scrollTo(0, 0));
     await reply.getByRole('button', { name: 'Send reply' }).click();
     await expect(page.getByText('Reply to knip: queued. It goes out when the laptop is back online.')).toBeVisible();
     await expect(page.getByText('Queued until the laptop is back online')).toBeVisible();
+    await expect(page.locator('.reply.queued')).toBeInViewport();
+    await page.setViewportSize(viewport);
 
     // A second reply joins the queued one rather than waiting behind it.
     await reply.getByLabel('Reply', { exact: true }).fill('And --yaml');

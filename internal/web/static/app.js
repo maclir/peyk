@@ -1579,6 +1579,8 @@ async function start(cfg) {
         if (box) box.value = "";
         dropDraft(key);
         render();
+        // The sent reply lands at the end of the conversation, under the composer.
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
       } else {
         dropUnused([{ images: ids }]);
       }
