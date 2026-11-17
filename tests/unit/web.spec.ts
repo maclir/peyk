@@ -251,6 +251,16 @@ describe('resume', () => {
   });
 });
 
+describe('done list errors', () => {
+  it('names a building index plainly and passes other errors through', async () => {
+    // @ts-expect-error plain browser module
+    const { doneError } = await import('../../internal/web/static/board.js');
+    expect(doneError({ code: 'failed-precondition', message: 'The query requires an index. https://console…' }))
+      .toBe('Firestore is still preparing this list. Try again in a few minutes.');
+    expect(doneError({ code: 'permission-denied', message: 'Missing permissions' })).toBe('Could not load done tasks: Missing permissions');
+  });
+});
+
 describe('pending reply', () => {
   it('stands in for a reply older than the last prompt', async () => {
     // @ts-expect-error plain browser module

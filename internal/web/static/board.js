@@ -219,6 +219,14 @@ export function sentTasks(tasks) {
     .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at));
 }
 
+// A Done list that cannot be read says why in words, not Firestore's: a
+// query whose index is still building fails with a console link.
+export function doneError(err) {
+  return err?.code === "failed-precondition"
+    ? "Firestore is still preparing this list. Try again in a few minutes."
+    : `Could not load done tasks: ${err?.message ?? err}`;
+}
+
 // What a done task offers for returning its worker to the task's
 // conversation: nothing without a conversation or a worker, a note when the
 // worker is already in it, and otherwise a resume that leaves the worker's

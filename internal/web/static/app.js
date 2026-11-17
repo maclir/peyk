@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
+import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -918,7 +918,7 @@ async function start(cfg) {
       d.cursor = snap.docs.at(-1) ?? d.cursor;
       d.more = snap.docs.length === DONE_PAGE;
     } catch (err) {
-      d.error = err.message;
+      d.error = doneError(err);
       d.more = false;
     } finally {
       d.loading = false;
@@ -948,7 +948,8 @@ async function start(cfg) {
     }
     return [
       ...d.tasks.map((t) => doneCard(t, now, inProject)),
-      d.error ? h("p", { class: "empty" }, `Could not load done tasks: ${d.error}`) : null,
+      d.error ? h("p", { class: "empty" }, d.error) : null,
+      d.error ? h("button", { type: "button", class: "link more", onclick: () => { done.delete(key); render(); } }, "Try again") : null,
       !d.tasks.length && !d.loading && !d.error ? h("p", { class: "empty" }, "Nothing done yet.") : null,
       d.loading ? loading("Loading done tasks…")
         : d.more ? h("button", { type: "button", class: "link more", onclick: () => loadDone(key) }, "Show more") : null,
