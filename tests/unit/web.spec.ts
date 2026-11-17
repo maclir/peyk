@@ -26,6 +26,21 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('[a](javascript:alert(1))')).not.toContain('<a');
   });
 
+  it('renders tables with alignment', () => {
+    const html = renderMarkdown('Before\n| Name | Count |\n|:-----|------:|\n| **a** | 1 |\n| b \\| c |\n\nAfter');
+    expect(html).toContain('<p>Before</p>');
+    expect(html).toContain(
+      '<div class="table"><table><thead><tr><th class="left">Name</th><th class="right">Count</th></tr></thead>' +
+        '<tbody><tr><td class="left"><strong>a</strong></td><td class="right">1</td></tr>' +
+        '<tr><td class="left">b | c</td><td class="right"></td></tr></tbody></table></div>',
+    );
+    expect(html).toContain('<p>After</p>');
+  });
+
+  it('leaves pipes outside a table as text', () => {
+    expect(renderMarkdown('a | b\nc | d')).toBe('<p>a | b c | d</p>');
+  });
+
   it('keeps code spans literal', () => {
     expect(renderMarkdown('`**not bold**`')).toContain('<code>**not bold**</code>');
   });
