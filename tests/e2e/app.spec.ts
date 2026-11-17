@@ -167,6 +167,10 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
     await expect(page.locator('.reply strong')).toHaveText('3f2a1c4');
     await expect(page.locator('.reply code')).toHaveText('make test');
+
+    await page.getByRole('link', { name: 'peyk' }).click();
+    await expect(page).toHaveURL(/\/#$/);
+    await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
   });
 
   test('push asks the laptop and shows its answer', async () => {
