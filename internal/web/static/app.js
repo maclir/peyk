@@ -639,7 +639,7 @@ async function start(cfg) {
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
-        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, clears ? icon("broom") : null, "Send", icon("arrow")) : null,
+        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, clears ? icon("broom") : null, "Send", icon("prompt")) : null,
       ),
     );
   }
@@ -674,9 +674,9 @@ async function start(cfg) {
   // New tasks, edits and replies share one composer, so each takes text,
   // pasted screenshots and attached images the same way. key names both its
   // busy state and its draft images.
-  // hold, when given, answers a long press on the submit button; it returns
-  // false to let the press submit as a tap would.
-  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon = "up", send, hold = null, lead = null, tail = null }) {
+  // hold, when given, answers a long press on the submit button while
+  // hold.armed() is true; otherwise the press submits as a tap would.
+  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tail = null }) {
     const imgs = draft(key);
     const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
@@ -688,29 +688,48 @@ async function start(cfg) {
         h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: imgs.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
         h("span", { class: "grow" }),
         tail,
-        busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel, ...(hold ? longPress(() => hold(text)) : {}) }, icon(submitIcon)),
+        busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel, ...(hold ? longPress(() => hold.armed(text), () => hold.fire(text)) : {}) },
+          icon(submitIcon), hold ? heldIcon() : null),
       ),
       files,
     );
   }
 
+  function heldIcon() {
+    const el = icon("prompt");
+    el.classList.add("held");
+    return el;
+  }
+
   // The click that ends a long press is swallowed, so the press does not
-  // also submit.
-  function longPress(fire, ms = 500) {
-    let timer = null;
+  // also submit. The button shows what the press will do only after a delay,
+  // so a quick tap does not flash it.
+  function longPress(armed, fire, { ms = 500, show = 150 } = {}) {
+    let timers = [];
     let held = false;
-    const cancel = () => { clearTimeout(timer); timer = null; };
+    let button = null;
+    const cancel = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+      button?.classList.remove("holding");
+    };
     return {
       onpointerdown: (e) => {
         if (e.button !== 0) return;
         held = false;
         cancel();
-        timer = setTimeout(() => {
-          timer = null;
-          if (fire() === false) return;
-          held = true;
-          navigator.vibrate?.(10);
-        }, ms);
+        if (!armed()) return;
+        button = e.currentTarget;
+        timers = [
+          setTimeout(() => button.classList.add("holding"), show),
+          setTimeout(() => {
+            timers = [];
+            if (!armed()) return cancel();
+            held = true;
+            navigator.vibrate?.(10);
+            fire();
+          }, ms),
+        ];
       },
       onpointerup: cancel, onpointerleave: cancel, onpointercancel: cancel,
       oncontextmenu: (e) => e.preventDefault(),
@@ -757,12 +776,12 @@ async function start(cfg) {
     };
     // A long press sends the task straight away, as its Send button would,
     // when the project's worker is free to take it.
-    const hold = (text) => {
-      if (!text.value.trim() || !projectNamed(state.picked)?.free || state.busy.has("add")) return false;
-      add(text, true);
+    const hold = {
+      armed: (text) => Boolean(text.value.trim() && projectNamed(state.picked)?.free && !state.busy.has("add")),
+      fire: (text) => add(text, true),
     };
     return composerForm({ key: "add", id: "task-text", label: "New task", placeholder: state.picked ? "Describe a task…" : "No projects published yet",
-      cls: "add", submitLabel: "Add task", send: add, hold, lead: projectPill(state.picked) });
+      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead: projectPill(state.picked) });
   }
 
   // The picker lists the projects that are not hidden. Its edit mode hides
@@ -1535,11 +1554,11 @@ async function start(cfg) {
         alertLine(`Could not add the task: ${err.message}`);
       }
     };
-    const hold = (text) => {
-      if (!text.value.trim() || !projectNamed(project)?.free) return false;
-      add(text, true);
+    const hold = {
+      armed: (text) => Boolean(text.value.trim() && projectNamed(project)?.free),
+      fire: (text) => add(text, true),
     };
-    const form = composerForm({ key, id: "sheet-text", label: `New task for ${project}`, placeholder: "Add a task", cls: "add", submitLabel: "Add task", send: add, hold });
+    const form = composerForm({ key, id: "sheet-text", label: `New task for ${project}`, placeholder: "Add a task", cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold });
     const head = h("div", { class: "sheethead" });
     const list = h("div", { class: "sheetbody tlist tasks" });
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && closeSheet() },
@@ -1706,7 +1725,7 @@ async function start(cfg) {
         dropUnused([{ images: ids }]);
       }
     };
-    return composerForm({ key, id: `reply-${s.id}`, label: "Reply", placeholder: `Reply to ${s.title}…`, rows: "1", cls: "respond", submitLabel: "Send reply", send: reply });
+    return composerForm({ key, id: `reply-${s.id}`, label: "Reply", placeholder: `Reply to ${s.title}…`, rows: "1", cls: "respond", submitLabel: "Send reply", submitIcon: "prompt", send: reply });
   }
 
   function waitingLabel(id) {
@@ -1790,7 +1809,8 @@ function oneLine(text) {
 // Stroke icons drawn in the text colour; static markup, never data.
 const ICONS = {
   more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
-  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  prompt: '<path d="M5 7l5 5-5 5"/><path d="M12.5 17H19"/>',
+  addtask: '<path d="M4 6h11M4 12h11M4 18h7"/><path d="M18 14.5v7M14.5 18h7"/>',
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',

@@ -492,17 +492,22 @@ test.describe('signed in', () => {
   test('a long press on Add task sends the task when its worker is free', async () => {
     await page.goto('/#inbox');
     await passkeyOn(page);
-    const press = async () => {
-      await page.getByRole('button', { name: 'Add task' }).hover();
+    const button = page.getByRole('button', { name: 'Add task' });
+    // The button shows the send icon during a press only when the press will send.
+    const press = async (sends: boolean) => {
+      await button.hover();
       await page.mouse.down();
-      await page.waitForTimeout(700);
+      await page.waitForTimeout(300);
+      await expect(button.locator('.ico.held')).toBeVisible({ visible: sends });
+      await expect(button.locator('.ico.addtask')).toBeVisible({ visible: !sends });
+      await page.waitForTimeout(400);
       await page.mouse.up();
     };
 
     await page.getByRole('button', { name: /^Project:/ }).click();
     await page.getByRole('dialog').getByRole('radio', { name: /hamta/ }).click();
     await page.getByLabel('New task').fill('Wait for hamta');
-    await press();
+    await press(false);
     const waiting = page.locator('.task', { hasText: 'Wait for hamta' });
     await expect(waiting).toContainText('Waiting · needs input');
     expect((await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'dispatch')).toHaveLength(0);
@@ -514,7 +519,7 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: /^Project:/ }).click();
     await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();
     await page.getByLabel('New task').fill('Ship it now');
-    await press();
+    await press(true);
     await expect(page.getByLabel('New task')).toHaveValue('');
     const task = page.locator('.task', { hasText: 'Ship it now' });
     await expect(task.getByRole('status')).toHaveText('Send to knip: waiting for the laptop…');
