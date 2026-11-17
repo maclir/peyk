@@ -170,6 +170,12 @@ button.tool.inboxbtn { width: auto; min-width: 40px; padding: 0 8px; gap: 4px; }
 .msg.pending, .reply.pending { font-style: italic; color: var(--muted); }
 .reply.pending .spin { margin-right: 8px; color: var(--accent); }
 .convo { display: flex; flex-direction: column; gap: 4px; }
+.convo .earlier { align-self: center; display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
+.convo .earlier .ico svg { width: 14px; height: 14px; }
+.convo .tools { font-size: 0.78rem; color: var(--muted); margin: 2px 0; max-width: 92%; }
+.convo .tools summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.convo .tools ul { margin: 4px 0 0; padding-left: 16px; font-family: var(--mono); overflow-wrap: anywhere; }
+.convo .tools .tname { color: var(--ink); }
 .who { font-size: 0.72rem; color: var(--muted); margin-top: 6px; }
 .who.mine { align-self: flex-end; }
 .waitrow { display: flex; flex-direction: column; gap: 4px; }

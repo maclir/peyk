@@ -13,6 +13,7 @@
 //	laptop/push                {vapid_public_key}   agent writes
 //	laptop/usage               session.Usage        agent writes
 //	attachments/{sha256}       Attachment           phone creates and deletes
+//	history/{aoe session id}   History              phone requests and deletes, agent fills
 package store
 
 import (
@@ -31,6 +32,7 @@ const (
 	Pairings      = "pairings"
 	Subscriptions = "subscriptions"
 	Attachments   = "attachments"
+	History       = "history"
 )
 
 // Attachment is an image added to a task. Its id is the SHA-256 of Data in
@@ -45,6 +47,19 @@ type Attachment struct {
 type AttachmentReader interface {
 	Attachment(ctx context.Context, id string) (Attachment, error)
 }
+
+// HistoryRequest is the phone asking for a session's whole conversation.
+// The agent answers by writing the entries and copying Requested into
+// Served, so a request is pending while the two differ, whatever the
+// laptop's clock says.
+type HistoryRequest struct {
+	Session   string
+	Requested time.Time
+	Served    time.Time
+}
+
+// Pending says whether the agent has yet to answer the request.
+func (r HistoryRequest) Pending() bool { return !r.Requested.IsZero() && !r.Requested.Equal(r.Served) }
 
 // Pairing is the public half of a passkey the phone just created.
 type Pairing struct {
@@ -108,6 +123,9 @@ type Listener interface {
 	// Pairing waits for the phone to write the pairing with this code.
 	Pairing(ctx context.Context, code string) (Pairing, error)
 	Subscriptions(ctx context.Context) ([]notify.Subscription, error)
+	// HistoryRequests sends every history request the phone writes, and
+	// the ones already waiting, until ctx ends or listening fails.
+	HistoryRequests(ctx context.Context, out chan<- HistoryRequest) error
 }
 
 // HeldReader finds the replies held for the phone to send again or cancel.

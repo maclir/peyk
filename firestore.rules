@@ -143,6 +143,20 @@ service cloud.firestore {
       return a is map && a.keys().hasOnly(['credential_id', 'authenticator_data', 'client_data_json', 'signature']);
     }
 
+    // A session's whole conversation, which the laptop writes only while the
+    // phone asks for it. The phone may only stamp a request with the server's
+    // time, and delete the document once it is done reading.
+    match /history/{id} {
+      allow get, delete: if isOwner();
+      allow create: if isOwner()
+        && exists(/databases/$(database)/documents/sessions/$(id))
+        && request.resource.data.keys().hasOnly(['requested_at'])
+        && request.resource.data.requested_at == request.time;
+      allow update: if isOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requested_at'])
+        && request.resource.data.requested_at == request.time;
+    }
+
     // A new passkey's public half, under the one-time code `peyk pair`
     // printed. The laptop shows its fingerprint and asks before trusting it.
     match /pairings/{code} {

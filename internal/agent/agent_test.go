@@ -637,3 +637,57 @@ func TestRefreshReportsThePublishedSessions(t *testing.T) {
 		t.Fatalf("reported %v at %v", got, at)
 	}
 }
+
+func TestRunPublishesAHistoryOnlyWhenAsked(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", Transcript: session.Transcript{Dir: "/t", ID: "conv"}})
+	a := newAgent(c, mem)
+	read := make(chan session.Transcript, 1)
+	a.History = func(t session.Transcript) ([]session.Entry, bool) {
+		read <- t
+		return []session.Entry{{Kind: session.EntryPrompt, Text: "hi"}}, true
+	}
+	requests := make(chan store.HistoryRequest)
+	a.HistoryRequests = requests
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, nil, nil) }()
+
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	requests <- store.HistoryRequest{Session: "k", Requested: at}
+	if t2 := <-read; t2.ID != "conv" {
+		t.Fatalf("read %+v", t2)
+	}
+	requests <- store.HistoryRequest{Session: "gone", Requested: at}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	got := mem.Updated(store.History, "k")
+	entries, _ := got["entries"].([]session.Entry)
+	if len(entries) != 1 || got["truncated"] != true || got["conversation"] != "conv" || got["served_at"] != at {
+		t.Fatalf("history = %+v", got)
+	}
+	if gone := mem.Updated(store.History, "gone"); gone["served_at"] != at || len(gone["entries"].([]session.Entry)) != 0 {
+		t.Fatalf("an ended session's request is answered empty: %+v", gone)
+	}
+}
+
+func TestHistoryRequestIsPendingUntilServed(t *testing.T) {
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		r    store.HistoryRequest
+		want bool
+	}{
+		{store.HistoryRequest{Requested: at}, true},
+		{store.HistoryRequest{Requested: at, Served: at}, false},
+		{store.HistoryRequest{Requested: at.Add(time.Second), Served: at}, true},
+		{store.HistoryRequest{}, false},
+	} {
+		if got := tc.r.Pending(); got != tc.want {
+			t.Errorf("%+v pending = %v", tc.r, got)
+		}
+	}
+}

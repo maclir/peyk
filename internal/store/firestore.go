@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/option"
@@ -70,6 +71,43 @@ func (s *Firestore) Commands(ctx context.Context, out chan<- Incoming) error {
 		for _, in := range added {
 			select {
 			case out <- in:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}
+}
+
+// HistoryRequests listens to the history documents. The agent's own answer
+// arrives too, and is no longer pending.
+func (s *Firestore) HistoryRequests(ctx context.Context, out chan<- HistoryRequest) error {
+	it := s.client.Collection(History).Snapshots(ctx)
+	defer it.Stop()
+	for {
+		snap, err := it.Next()
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("listen for history requests: %w", err)
+		}
+		for _, ch := range snap.Changes {
+			if ch.Kind == firestore.DocumentRemoved {
+				continue
+			}
+			var d struct {
+				Requested time.Time `firestore:"requested_at"`
+				Served    time.Time `firestore:"served_at"`
+			}
+			if err := ch.Doc.DataTo(&d); err != nil {
+				return fmt.Errorf("decode history request %s: %w", ch.Doc.Ref.ID, err)
+			}
+			r := HistoryRequest{Session: ch.Doc.Ref.ID, Requested: d.Requested, Served: d.Served}
+			if !r.Pending() {
+				continue
+			}
+			select {
+			case out <- r:
 			case <-ctx.Done():
 				return nil
 			}

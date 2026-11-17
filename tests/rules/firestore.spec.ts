@@ -315,3 +315,37 @@ describe('push', () => {
     await assertFails(getDoc(doc(stranger(), 'laptop/push')));
   });
 });
+
+describe('history', () => {
+  const request = (db: ReturnType<typeof owner>, id = 'knip') =>
+    setDoc(doc(db, `history/${id}`), { requested_at: serverTimestamp() }, { merge: true });
+
+  it('the owner requests a live session\'s history, reads it, asks again and deletes it', async () => {
+    await assertSucceeds(request(owner()));
+    await env.withSecurityRulesDisabled((ctx) =>
+      updateDoc(doc(ctx.firestore(), 'history/knip'), { entries: [{ kind: 'prompt', text: 'hi' }], served_at: Timestamp.now() }));
+    await assertSucceeds(getDoc(doc(owner(), 'history/knip')));
+    await assertSucceeds(request(owner()));
+    await assertSucceeds(deleteDoc(doc(owner(), 'history/knip')));
+  });
+
+  it('cannot request a session the laptop has not published', async () => {
+    await assertFails(request(owner(), 'nope'));
+  });
+
+  it('cannot write the history itself or a request time of its own', async () => {
+    await assertFails(setDoc(doc(owner(), 'history/knip'), { requested_at: serverTimestamp(), entries: [] }));
+    await assertFails(setDoc(doc(owner(), 'history/knip'), { requested_at: Timestamp.fromMillis(0) }));
+    await assertSucceeds(request(owner()));
+    await assertFails(updateDoc(doc(owner(), 'history/knip'), { entries: [{ kind: 'reply', text: 'forged' }] }));
+    await assertFails(updateDoc(doc(owner(), 'history/knip'), { served_at: serverTimestamp() }));
+  });
+
+  it('nobody else reads or requests a history', async () => {
+    await assertSucceeds(request(owner()));
+    await assertFails(getDoc(doc(stranger(), 'history/knip')));
+    await assertFails(request(stranger()));
+    await assertFails(deleteDoc(doc(stranger(), 'history/knip')));
+    await assertFails(getDocs(collection(owner(), 'history')));
+  });
+});

@@ -896,6 +896,46 @@ test.describe('signed in', () => {
     await put(page, 'sessions/q', { ...answered, aoe_status: 'running', state: 'working' });
     await expect(page.locator('.qcard')).toHaveCount(0);
   });
+
+  test("a worker's whole conversation is read from the laptop only while it is open", async () => {
+    const worker = { id: 'w', title: 'wide', path: '/c/wide', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      prompt: { text: 'Second ask', at: new Date() }, message: { text: 'Second answer', at: new Date() }, latest: 'r2' };
+    await put(page, 'sessions/w', worker);
+    await page.goto('/#s-w');
+    await page.getByRole('button', { name: 'Whole conversation' }).click();
+    await expect(page.getByText('Reading the conversation on the laptop…')).toBeVisible();
+    await expect.poll(async () => (await list(page, 'history')).length).toBe(1);
+    const asked = (await get(page, 'history/w')).requested_at.timestampValue;
+
+    // The laptop answers by copying the request time it served.
+    const at = new Date();
+    await put(page, 'history/w', { requested_at: new Date(asked), served_at: new Date(asked), truncated: false, entries: [
+      { kind: 'prompt', text: 'First ask', at },
+      { kind: 'reply', text: 'Looking.', at },
+      { kind: 'tool', tool: 'Bash', text: 'make test', at },
+      { kind: 'tool', tool: 'Edit', text: 'main.go', at },
+      { kind: 'reply', text: 'First **answer**', at },
+      { kind: 'prompt', text: 'Second ask', at },
+      { kind: 'reply', text: 'Second answer', at },
+    ] });
+    const convo = page.locator('.detail .convo').first();
+    await expect(convo.locator('.reply.sent')).toHaveText(['First ask', 'Second ask']);
+    await expect(convo.locator('.reply:not(.sent)')).toHaveText(['Looking.', 'First answer', 'Second answer']);
+    await expect(convo.locator('.who')).toHaveText([/^You/, /^wide/, /^You/, /^wide/]);
+    const tools = convo.locator('details.tools');
+    await expect(tools.locator('summary')).toHaveText('2 tool calls');
+    await tools.locator('summary').click();
+    await expect(tools.locator('li')).toHaveText(['Bash make test', 'Edit main.go']);
+
+    // A new reply asks the laptop again.
+    await put(page, 'sessions/w', { ...worker, message: { text: 'Third answer', at: new Date() }, latest: 'r3' });
+    await expect.poll(async () => (await get(page, 'history/w')).requested_at.timestampValue).not.toBe(asked);
+
+    await page.getByRole('button', { name: 'Latest only' }).click();
+    await expect(page.getByRole('button', { name: 'Whole conversation' })).toBeVisible();
+    await expect.poll(async () => (await list(page, 'history')).length).toBe(0);
+    await expect(convo.locator('.reply:not(.sent)')).toHaveText('Third answer');
+  });
 });
 
 // Strips Firestore's typed values back to plain ones for a rewrite.

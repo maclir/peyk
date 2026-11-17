@@ -184,3 +184,42 @@ func TestFirestoreDeliversWaitingRepliesInOrderAndListsHeldOnes(t *testing.T) {
 		}
 	}
 }
+
+func TestFirestoreHistoryRequests(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("run with make test-integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	s, err := NewFirestore(ctx, "peyk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	at := time.Date(2026, 11, 14, 9, 0, 0, 123456000, time.UTC)
+	if err := s.Put(ctx, History, "it-history", map[string]any{"requested_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	out := make(chan HistoryRequest, 4)
+	go s.HistoryRequests(ctx, out)
+	r := <-out
+	if r.Session != "it-history" || !r.Requested.Equal(at) || !r.Pending() {
+		t.Fatalf("request = %+v", r)
+	}
+	entries := []session.Entry{{Kind: session.EntryPrompt, Text: "hi", At: at}}
+	if err := s.Update(ctx, History, "it-history", map[string]any{"entries": entries, "served_at": r.Requested}); err != nil {
+		t.Fatal(err)
+	}
+	later := at.Add(time.Second)
+	if err := s.Update(ctx, History, "it-history", map[string]any{"requested_at": later}); err != nil {
+		t.Fatal(err)
+	}
+	// The answer itself is not pending, so the next request is the new one.
+	if r := <-out; !r.Requested.Equal(later) || !r.Served.Equal(at) {
+		t.Fatalf("next request = %+v", r)
+	}
+	if err := s.Delete(ctx, History, "it-history"); err != nil {
+		t.Fatal(err)
+	}
+}

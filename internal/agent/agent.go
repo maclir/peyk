@@ -121,6 +121,12 @@ type Agent struct {
 	CIWait time.Duration
 	ciRuns map[string]*ciRun
 
+	// History, when set, reads a session's whole conversation, and the agent
+	// publishes it for each of HistoryRequests. Nothing is published
+	// unless the phone asks, so an unread conversation costs nothing.
+	History         func(session.Transcript) (entries []session.Entry, truncated bool)
+	HistoryRequests <-chan store.HistoryRequest
+
 	// Usage, when set, reads the subscription's rate limits as Claude Code's
 	// status line last saved them, and the agent rereads it on UsageChanged.
 	// It is published apart from a refresh: it changes with every reply, and
@@ -457,6 +463,26 @@ func (a *Agent) finishTasks(ctx context.Context) error {
 	return nil
 }
 
+// serveHistory answers a history request. A failure only logs: the phone may
+// have closed the history and deleted the document, and the board is
+// unaffected either way.
+func (a *Agent) serveHistory(ctx context.Context, r store.HistoryRequest) {
+	if a.History == nil {
+		return
+	}
+	fields := map[string]any{"served_at": r.Requested, "entries": []session.Entry{}, "truncated": false, "conversation": ""}
+	if s, ok := a.sessions[r.Session]; ok {
+		entries, truncated := a.History(s.Transcript)
+		if entries == nil {
+			entries = []session.Entry{}
+		}
+		fields["entries"], fields["truncated"], fields["conversation"] = entries, truncated, s.Transcript.ID
+	}
+	if err := a.Store.Update(ctx, store.History, r.Session, fields); err != nil {
+		a.Log.Printf("history for %s: %v", r.Session, err)
+	}
+}
+
 // PublishUsage writes laptop/usage when the saved usage changed.
 func (a *Agent) PublishUsage(ctx context.Context) error {
 	if a.Usage == nil {
@@ -669,6 +695,8 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			if err := a.RefreshCI(ctx); err != nil {
 				return err
 			}
+		case r := <-a.HistoryRequests:
+			a.serveHistory(ctx, r)
 		case in := <-cmds:
 			if a.Commands == nil {
 				continue

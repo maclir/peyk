@@ -128,6 +128,24 @@ type Message struct {
 	At   time.Time `firestore:"at" json:"at"`
 }
 
+// Entry kinds in a conversation's history.
+const (
+	EntryPrompt = "prompt"
+	EntryReply  = "reply"
+	EntryTool   = "tool"
+)
+
+// Entry is one step of a conversation as the phone's history shows it: a
+// prompt a person sent, a reply's text, or one line naming a tool call. A
+// tool's output is left out: it can hold any file or secret the tool read.
+type Entry struct {
+	Kind string `firestore:"kind" json:"kind"`
+	// Tool is the tool's name, for a tool call.
+	Tool string    `firestore:"tool,omitempty" json:"tool,omitempty"`
+	Text string    `firestore:"text" json:"text"`
+	At   time.Time `firestore:"at" json:"at"`
+}
+
 // Snapshot is one session as published to the phone.
 type Snapshot struct {
 	ID        string   `firestore:"id" json:"id"`

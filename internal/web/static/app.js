@@ -111,7 +111,9 @@ async function start(cfg) {
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
     sheetSent: null,
     // Picks for open questions by question id, kept across redraws.
-    answers: new Map() };
+    answers: new Map(),
+    // The worker whose whole conversation is open: { id, latest, data, nodes, unsub }.
+    history: null };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -163,6 +165,7 @@ async function start(cfg) {
     ];
   }
   function stop() {
+    closeHistory();
     unsubscribe.forEach((u) => u());
     unsubscribe = [];
   }
@@ -279,6 +282,7 @@ async function start(cfg) {
 
     const id = shownSession();
     const s = id && state.sessions.get(id);
+    followHistory(s);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
       h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(activeCount()))),
@@ -1189,6 +1193,18 @@ async function start(cfg) {
     const msg = h("div", { class: pending ? "reply pending" : "reply" });
     if (pending) msg.append(h("p", { role: "status" }, s.state === "working" ? spinner() : null, pendingLabel(s)));
     else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
+    const whole = state.history?.id === s.id ? state.history : null;
+    const convo = whole
+      ? h("div", { class: "convo" }, historyView(s, whole, now), pending ? msg : null)
+      : h("div", { class: "convo" },
+        s.prompt || s.message
+          ? h("button", { type: "button", class: "link earlier", onclick: () => openHistory(s) }, icon("up"), "Whole conversation")
+          : null,
+        h("span", { class: "who mine" }, "You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""),
+        sent,
+        h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
+        msg,
+      );
     return h("article", { class: "detail" },
       h("div", { class: "dhead" },
         h("div", { class: "drow" },
@@ -1205,18 +1221,94 @@ async function start(cfg) {
       task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
-      h("div", { class: "convo" },
-        h("span", { class: "who mine" }, "You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""),
-        sent,
-        h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
-        msg,
-      ),
+      convo,
       waitingReplyList(s),
       s.question ? questionCard(s) : null,
       h("details", { class: "facts" }, h("summary", {}, "Details"),
         h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
       replyBox(s),
     );
+  }
+
+  // A worker's whole conversation is read from the laptop only while it is on
+  // screen: opening it asks the laptop to publish it, each new prompt or reply
+  // asks again, and leaving the worker or the app deletes it.
+  function openHistory(s) {
+    closeHistory();
+    const whole = { id: s.id, latest: s.latest, data: null, nodes: null, unsub: null };
+    state.history = whole;
+    whole.unsub = fs.onSnapshot(fs.doc(db, "history", s.id), (snap) => {
+      if (state.history !== whole) return;
+      whole.data = snap.exists() ? snap.data() : null;
+      whole.nodes = null;
+      render();
+    }, (err) => setStatus(`Cannot read the conversation: ${err.message}`));
+    requestHistory(whole);
+    render();
+  }
+
+  function requestHistory(whole) {
+    fs.setDoc(fs.doc(db, "history", whole.id), { requested_at: fs.serverTimestamp() }, { merge: true })
+      .catch((err) => setStatus(`Cannot ask the laptop for the conversation: ${err.message}`));
+  }
+
+  function closeHistory() {
+    const whole = state.history;
+    if (!whole) return;
+    state.history = null;
+    whole.unsub?.();
+    fs.deleteDoc(fs.doc(db, "history", whole.id)).catch(() => {});
+  }
+
+  function followHistory(s) {
+    const whole = state.history;
+    if (!whole) return;
+    if (!s || s.id !== whole.id) return closeHistory();
+    if (s.latest !== whole.latest) {
+      whole.latest = s.latest;
+      requestHistory(whole);
+    }
+  }
+
+  function historyView(s, whole, now) {
+    const less = h("button", { type: "button", class: "link earlier", onclick: () => { closeHistory(); render(); } }, icon("down"), "Latest only");
+    const data = whole.data;
+    if (!data?.served_at) {
+      return [less, laptopOnline(state.laptop, now)
+        ? loading("Reading the conversation on the laptop…")
+        : h("p", { class: "hint" }, "The laptop is offline. The conversation loads once it is back.")];
+    }
+    whole.nodes ??= historyEntries(s, data.entries || [], now);
+    return [less,
+      data.truncated ? h("p", { class: "hint" }, "The oldest messages are left out: the whole conversation is too long to show.") : null,
+      ...(whole.nodes.length ? whole.nodes : [h("p", { class: "hint" }, "Nothing in this conversation yet.")])];
+  }
+
+  // Successive tool calls collapse into one line that opens to list them.
+  function historyEntries(s, entries, now) {
+    const out = [];
+    let tools = [];
+    let last = null;
+    const flush = () => {
+      if (!tools.length) return;
+      const lines = tools.map((e) => h("li", {}, h("span", { class: "tname" }, e.tool), e.text ? ` ${e.text}` : ""));
+      out.push(h("details", { class: "tools" },
+        h("summary", {}, tools.length === 1 ? `${tools[0].tool}${tools[0].text ? ` ${tools[0].text}` : ""}` : `${tools.length} tool calls`),
+        h("ul", {}, lines)));
+      tools = [];
+    };
+    for (const e of entries) {
+      if (e.kind === "tool") { tools.push(e); continue; }
+      flush();
+      const mine = e.kind === "prompt";
+      if (mine || last !== "reply") out.push(h("span", { class: mine ? "who mine" : "who" }, mine ? "You" : s.title, e.at ? ` · ${ago(e.at, now)}` : ""));
+      const body = h("div", { class: mine ? "reply sent" : "reply" });
+      body.innerHTML = renderMarkdown(e.text);
+      out.push(body);
+      last = e.kind;
+    }
+    flush();
+    return out;
   }
 
   // Clear, start, restart and stop share a menu so the worker's name and
