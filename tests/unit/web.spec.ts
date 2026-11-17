@@ -224,6 +224,17 @@ describe('task images', () => {
   });
 });
 
+describe('shared text', () => {
+  it('keeps each distinct part of a share once', async () => {
+    // @ts-expect-error plain browser module
+    const { sharedText } = await import('../../internal/web/static/share.js');
+    expect(sharedText({})).toBe('');
+    expect(sharedText({ title: '', text: '', url: '' })).toBe('');
+    expect(sharedText({ title: 'Docs', text: 'Read https://x.dev/a', url: 'https://x.dev/a' })).toBe('Docs\nRead https://x.dev/a');
+    expect(sharedText({ title: ' Docs ', url: 'https://x.dev/a' })).toBe('Docs\nhttps://x.dev/a');
+  });
+});
+
 describe('answerText', () => {
   const question = {
     id: 'toolu_1',

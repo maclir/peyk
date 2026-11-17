@@ -557,6 +557,32 @@ test.describe('signed in', () => {
     expect(gone.status()).toBe(404);
   });
 
+  test("Android's share sheet attaches a screenshot to a new task", async () => {
+    await page.goto('/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    // The share sheet posts the manifest's share_target form as a navigation.
+    await page.evaluate((png) => {
+      const form = Object.assign(document.createElement('form'), { method: 'post', action: '/share', enctype: 'multipart/form-data' });
+      const input = Object.assign(document.createElement('input'), { type: 'file', name: 'images' });
+      const files = new DataTransfer();
+      files.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
+      input.files = files.files;
+      const text = Object.assign(document.createElement('input'), { type: 'hidden', name: 'text', value: 'Shared from Photos' });
+      form.append(input, text);
+      document.body.append(form);
+      form.submit();
+    }, PNG.toString('base64'));
+    await expect(page).toHaveURL(/\/#inbox$/);
+    await expect(page.locator('form.add .thumb img')).toHaveCount(1);
+    await expect(page.getByLabel('New task')).toHaveValue('Shared from Photos');
+
+    // The share is used once; a reload starts empty.
+    await page.reload();
+    await expect(page.getByLabel('New task')).toBeVisible();
+    await expect(page.locator('form.add .thumb')).toHaveCount(0);
+    await expect(page.getByLabel('New task')).toHaveValue('');
+  });
+
   test('a reply carries a screenshot to its worker', async () => {
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
     await page.goto('/#s-k');

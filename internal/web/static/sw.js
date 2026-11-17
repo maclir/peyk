@@ -23,6 +23,7 @@ const ASSETS = [
   "/static/markdown.js",
   "/static/images.js",
   "/static/passkey.js",
+  "/static/share.js",
   "/static/vendor/firebase-app.js",
   "/static/vendor/firebase-auth.js",
   "/static/vendor/firebase-firestore.js",
@@ -44,7 +45,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) return;
+  if (event.request.method === "POST" && url.pathname === SHARE) {
+    event.respondWith(keepShare(event.request));
+    return;
+  }
+  if (event.request.method !== "GET") return;
 
   // An installed icon has no browser chrome behind it, so a launch with no
   // signal has to reach the app rather than the browser's error page.
@@ -57,6 +63,42 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((hit) => hit || fetch(event.request)),
   );
 });
+
+// The manifest's share target. Shared files never reach the server: they wait
+// here, in the database share.js reads, until a signed-in page attaches them
+// to a new task's draft. A newer share replaces one never opened.
+const SHARE = "/share";
+
+async function keepShare(request) {
+  try {
+    const form = await request.formData();
+    const field = (k) => (typeof form.get(k) === "string" ? form.get(k) : "");
+    const share = {
+      title: field("title"), text: field("text"), url: field("url"),
+      files: form.getAll("images").filter((f) => typeof f !== "string" && f.size),
+    };
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open("peyk-share", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("shares");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("shares", "readwrite");
+        tx.objectStore("shares").put(share, "pending");
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally {
+      db.close();
+    }
+    await log("share", { files: share.files.length, text: Boolean(share.title || share.text || share.url) });
+  } catch (err) {
+    await log("share failed", { error: String(err) });
+  }
+  return Response.redirect("/#inbox", 303);
+}
 
 // Notifications from the laptop. The payload is encrypted to this browser's
 // subscription key; only here is it readable.

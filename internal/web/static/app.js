@@ -2,6 +2,7 @@ import { renderMarkdown } from "./markdown.js";
 import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
+import { sharedText, takeShare } from "./share.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
 // with no signal at all.
@@ -234,6 +235,7 @@ async function start(cfg) {
     }
     state.user = user;
     listen();
+    receiveShare().catch((err) => alertLine(`Could not attach what was shared: ${err.message}`));
     checkPush().then(render, (err) => setStatus(`Cannot check notifications: ${err.message}`));
   });
 
@@ -955,6 +957,22 @@ async function start(cfg) {
       }
     }
     render();
+  }
+
+  // A share from another app becomes the new task's draft. It waits for
+  // sign-in, since only a signed-in page can store the task.
+  async function receiveShare() {
+    const shared = await takeShare();
+    if (!shared) return;
+    if (location.hash !== "#inbox") history.replaceState(null, "", "#inbox");
+    render();
+    const box = document.getElementById("task-text");
+    const text = sharedText(shared);
+    if (box && text) box.value = box.value ? `${box.value}\n${text}` : text;
+    const all = shared.files || [];
+    const files = all.filter((f) => f.type.startsWith("image/"));
+    if (files.length) await attachImages("add", files);
+    if (files.length < all.length) alertLine("Only images can be attached; the other files were left out.");
   }
 
   function pasteImages(key, e) {

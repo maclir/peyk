@@ -60,6 +60,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /sw.js", serviceWorker)
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
+	mux.HandleFunc("POST "+SharePath, shareFallback)
 	mux.HandleFunc("GET /{$}", a.home)
 	return securityHeaders(a.firebase, mux)
 }
@@ -74,6 +75,14 @@ func (a *App) home(w http.ResponseWriter, _ *http.Request) {
 	if err := a.page.Execute(w, cfg); err != nil {
 		http.Error(w, "could not render page", http.StatusInternalServerError)
 	}
+}
+
+// shareFallback answers a share the service worker did not catch, which
+// happens only before it controls the page. The shared files are not kept:
+// storing them needs a signed-in browser, and this request carries no
+// identity.
+func shareFallback(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/#inbox", http.StatusSeeOther)
 }
 
 // OfflinePath is what the worker shows when a launch cannot reach the service.

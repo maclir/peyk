@@ -31,8 +31,34 @@ type webManifest struct {
 	Display         string `json:"display"`
 	BackgroundColor string `json:"background_color"`
 	// There is deliberately no theme_color. See the colour below.
-	Lang  string         `json:"lang"`
-	Icons []manifestIcon `json:"icons"`
+	Lang        string         `json:"lang"`
+	Icons       []manifestIcon `json:"icons"`
+	ShareTarget shareTarget    `json:"share_target"`
+}
+
+// SharePath is where Android's share sheet posts what is shared into the
+// installed app. The service worker answers it; see sw.js.
+const SharePath = "/share"
+
+// Only images are accepted because an attachment is one Firestore document
+// and the laptop hands it to Claude as an image.
+type shareTarget struct {
+	Action  string      `json:"action"`
+	Method  string      `json:"method"`
+	Enctype string      `json:"enctype"`
+	Params  shareParams `json:"params"`
+}
+
+type shareParams struct {
+	Title string      `json:"title"`
+	Text  string      `json:"text"`
+	URL   string      `json:"url"`
+	Files []shareFile `json:"files"`
+}
+
+type shareFile struct {
+	Name   string   `json:"name"`
+	Accept []string `json:"accept"`
 }
 
 type manifestIcon struct {
@@ -73,6 +99,10 @@ func manifest(w http.ResponseWriter, _ *http.Request) {
 			{Src: "/static/icon-192.png", Sizes: "192x192", Type: "image/png"},
 			{Src: "/static/icon-512.png", Sizes: "512x512", Type: "image/png"},
 			{Src: "/static/icon-maskable-512.png", Sizes: "512x512", Type: "image/png", Purpose: "maskable"},
+		},
+		ShareTarget: shareTarget{
+			Action: SharePath, Method: "POST", Enctype: "multipart/form-data",
+			Params: shareParams{Title: "title", Text: "text", URL: "url", Files: []shareFile{{Name: "images", Accept: []string{"image/*"}}}},
 		},
 	}, "", "  ")
 	if err != nil {

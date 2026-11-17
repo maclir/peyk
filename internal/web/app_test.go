@@ -130,6 +130,32 @@ func TestPageIsInstallable(t *testing.T) {
 	}
 }
 
+func TestAndroidShareSheetPostsImagesToTheWorker(t *testing.T) {
+	srv := httptest.NewServer(newTestApp().Handler())
+	defer srv.Close()
+	var m webManifest
+	if err := json.Unmarshal([]byte(get(t, srv.URL+ManifestPath)), &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	st := m.ShareTarget
+	if st.Action != SharePath || st.Method != "POST" || st.Enctype != "multipart/form-data" {
+		t.Errorf("share_target = %+v, want a multipart POST to %s", st, SharePath)
+	}
+	if len(st.Params.Files) != 1 || st.Params.Files[0].Name != "images" {
+		t.Errorf("share_target files = %+v, want the images field sw.js reads", st.Params.Files)
+	}
+	if sw := get(t, srv.URL+"/sw.js"); !strings.Contains(sw, `const SHARE = "`+SharePath+`"`) || !strings.Contains(sw, `form.getAll("images")`) {
+		t.Error("sw.js does not answer the manifest's share_target")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, SharePath, strings.NewReader(""))
+	rec := httptest.NewRecorder()
+	newTestApp().Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/#inbox" {
+		t.Errorf("POST %s without the worker = %d to %q, want 303 to /#inbox", SharePath, rec.Code, rec.Header().Get("Location"))
+	}
+}
+
 // An installed icon has no browser chrome behind it, so a launch with no signal
 // has to reach the app rather than the browser's error page. The document the
 // worker falls back to is its own page, never a cached copy of one that shows
