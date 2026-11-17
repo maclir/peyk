@@ -369,7 +369,7 @@ test.describe('signed in', () => {
     await sheet.getByRole('radio', { name: /knip/ }).click();
     await expect(sheet).toHaveCount(0);
     await page.getByLabel('New task').fill('Add --json output');
-    await page.getByRole('button', { name: 'Add task' }).click();
+    await page.getByLabel('New task').press('Meta+Enter');
     await expect(page.getByLabel('New task')).toHaveValue('');
 
     const task = page.locator('.task', { hasText: 'Add --json output' });
@@ -384,7 +384,7 @@ test.describe('signed in', () => {
     await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /hamta/ }).click();
     await expect(editor.getByRole('button', { name: 'Project: hamta' })).toBeVisible();
     await expect(editor.getByLabel('Task text')).toHaveValue('Add --json and --csv output');
-    await editor.getByRole('button', { name: 'Save' }).click();
+    await editor.getByLabel('Task text').press('Control+Enter');
     const edited = page.locator('.task', { hasText: 'Add --json and --csv output' });
     await expect(edited.locator('.proj')).toContainText('hamta');
     await expect(edited.getByText('needs input')).toBeVisible();

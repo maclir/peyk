@@ -182,6 +182,16 @@ async function start(cfg) {
   window.addEventListener("pageshow", (e) => {
     if (e.persisted && state.user) reconnect();
   });
+  // Going through the form's own submit button keeps a busy, disabled button
+  // from sending twice.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.isComposing) return;
+    const form = e.target.closest?.("form");
+    const submit = form?.querySelector('button[type="submit"]');
+    if (!submit) return;
+    e.preventDefault();
+    if (!submit.disabled) form.requestSubmit(submit);
+  });
   document.addEventListener("click", (e) => {
     if (String(state.menu).startsWith("worker:") && !e.target.closest(".wmenu")) { state.menu = null; render(); }
   });
