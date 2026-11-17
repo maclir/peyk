@@ -142,22 +142,16 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if err != nil {
 			return err
 		}
-		switch s.State {
-		case session.Working, session.NeedsInput:
-			return fmt.Errorf("%s is %s; /clear would land in its turn", s.Title, s.State.Label())
-		}
-		if s.Cleared {
-			return nil
-		}
-		t, err := act.Clear(ctx, s.ID, s.Transcript)
-		if err != nil {
-			return err
-		}
-		return a.cleared(ctx, s.ID, t)
+		return a.clear(ctx, act, s)
 	case command.Stop:
 		s, err := a.session(p.Session)
 		if err != nil {
 			return err
+		}
+		if p.Clear {
+			if err := a.clear(ctx, act, s); err != nil {
+				return err
+			}
 		}
 		return act.Stop(ctx, s.ID)
 	case command.Start:
@@ -256,4 +250,21 @@ func (a *Agent) dropHeld(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// clear starts an idle session on a fresh conversation. A session that is
+// working or asking would read /clear as part of its turn, so it is refused.
+func (a *Agent) clear(ctx context.Context, act Actions, s session.Snapshot) error {
+	switch s.State {
+	case session.Working, session.NeedsInput:
+		return fmt.Errorf("%s is %s; /clear would land in its turn", s.Title, s.State.Label())
+	}
+	if s.Cleared {
+		return nil
+	}
+	t, err := act.Clear(ctx, s.ID, s.Transcript)
+	if err != nil {
+		return err
+	}
+	return a.cleared(ctx, s.ID, t)
 }

@@ -91,8 +91,8 @@ type Payload struct {
 	// Question is the tool call id of the dialog an answer is for, so an
 	// answer cannot land on a later question.
 	Question string `json:"question,omitempty"`
-	// Clear asks a dispatch to start the worker on a fresh conversation
-	// first, unless it already has one.
+	// Clear asks a dispatch or stop to start the worker on a fresh
+	// conversation first, unless it already has one.
 	Clear bool `json:"clear,omitempty"`
 	// Images are a dispatch's or reply's attachments, each named by the SHA-256 of its
 	// bytes, so the signature covers the images as well as the text.
