@@ -587,3 +587,41 @@ func TestBackgroundedReadsOnlyTheSessionsOwnTranscript(t *testing.T) {
 		t.Fatal("unrecorded transcript reported a background task")
 	}
 }
+
+func TestResumePointsTheSessionAtTheConversationAndRelaunchesIt(t *testing.T) {
+	claude, work := t.TempDir(), "/w"
+	dir := TranscriptDir(claude, work)
+	writeTranscript(t, claude, work, "older", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
+	for _, tt := range []struct {
+		stopped bool
+		want    string
+	}{
+		{false, "session set-session-id k older|session restart k"},
+		{true, "session set-session-id k older|session start k"},
+	} {
+		var calls []string
+		run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+			calls = append(calls, strings.Join(args[2:], " "))
+			return nil, nil
+		}
+		if err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", dir, "older", tt.stopped); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(calls, "|"); got != tt.want {
+			t.Errorf("stopped=%v: calls = %s", tt.stopped, got)
+		}
+	}
+}
+
+func TestResumeRefusesAConversationFromAnotherProject(t *testing.T) {
+	claude := t.TempDir()
+	writeTranscript(t, claude, "/elsewhere", "other", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
+	run := func(context.Context, string, string, ...string) ([]byte, error) {
+		t.Fatal("aoe was asked to resume a conversation this session cannot reach")
+		return nil, nil
+	}
+	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", TranscriptDir(claude, "/w"), "other", false)
+	if err == nil || !strings.Contains(err.Error(), "no conversation other") {
+		t.Fatalf("err = %v", err)
+	}
+}

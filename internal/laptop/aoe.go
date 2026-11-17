@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,6 +128,21 @@ func (a Aoe) Start(ctx context.Context, id string) error {
 func (a Aoe) Restart(ctx context.Context, id string) error {
 	_, err := a.cmd(ctx, "session", "restart", id)
 	return err
+}
+
+// Resume points a session at conversation, a transcript in dir, and
+// relaunches it there, or launches it if stopped.
+func (a Aoe) Resume(ctx context.Context, id, dir, conversation string, stopped bool) error {
+	if _, err := os.Stat(filepath.Join(dir, conversation+".jsonl")); err != nil {
+		return fmt.Errorf("no conversation %s for this session: %w", conversation, err)
+	}
+	if _, err := a.cmd(ctx, "session", "set-session-id", id, conversation); err != nil {
+		return err
+	}
+	if stopped {
+		return a.Start(ctx, id)
+	}
+	return a.Restart(ctx, id)
 }
 
 // Create adds a stopped session for a directory and returns its id; Send

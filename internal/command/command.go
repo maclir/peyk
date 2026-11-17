@@ -31,7 +31,9 @@ const (
 	// the same conversation, as aoe's restart does.
 	Start   = "start"
 	Restart = "restart"
-	Push    = "push"
+	// Resume relaunches a session on an earlier conversation of its project.
+	Resume = "resume"
+	Push   = "push"
 	// Answer replies to a session's open multiple-choice dialog.
 	Answer = "answer"
 	// CheckUpdate fetches the laptop's checkout so the phone can see whether
@@ -101,7 +103,8 @@ type Payload struct {
 	Projects []string `json:"projects,omitempty"`
 	// Conversation and After name the transcript and its latest message a
 	// reply was written for. A reply that names a conversation outlives
-	// Expires: the laptop sends it late only if neither has changed.
+	// Expires: the laptop sends it late only if neither has changed. A
+	// resume names the conversation to resume.
 	Conversation string `json:"conversation,omitempty"`
 	After        string `json:"after,omitempty"`
 	// Expires is Unix milliseconds.

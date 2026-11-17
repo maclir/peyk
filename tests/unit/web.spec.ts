@@ -219,9 +219,9 @@ describe('passkey helpers', () => {
 });
 
 describe('task lifecycle', () => {
-  it('finds the task a session is on and lists finished tasks newest first', async () => {
+  it('finds the task a session is on and lists sent tasks newest first', async () => {
     // @ts-expect-error plain browser module
-    const { currentTask, doneTasks, sentTasks } = await import('../../internal/web/static/board.js');
+    const { currentTask, sentTasks } = await import('../../internal/web/static/board.js');
     const tasks = [
       { id: 'a', status: 'dispatched', session_id: 'k', dispatched_at: new Date(2026, 0, 1), text: 'old' },
       { id: 'b', status: 'dispatched', session_id: 'k', dispatched_at: new Date(2026, 0, 2), text: 'new' },
@@ -230,8 +230,24 @@ describe('task lifecycle', () => {
     ];
     expect(currentTask(tasks, 'k').id).toBe('b');
     expect(currentTask(tasks, 'h')).toBe(null);
-    expect(doneTasks(tasks).map((t: any) => t.id)).toEqual(['d', 'c']);
     expect(sentTasks(tasks).map((t: any) => t.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('resume', () => {
+  it('offers a done task\'s conversation to a free worker, clearing the one it has', async () => {
+    // @ts-expect-error plain browser module
+    const { resumeAction } = await import('../../internal/web/static/board.js');
+    const t = { conversation_id: 'old' };
+    const free = { session_id: 'k', free: true, busy: '' };
+    expect(resumeAction({}, free, { conversation: 'now' })).toBe(null);
+    expect(resumeAction(t, { free: true }, null)).toBe(null);
+    expect(resumeAction(t, free, { conversation: 'old' })).toEqual({ current: true });
+    expect(resumeAction(t, free, { conversation: 'now', state: 'idle' })).toEqual({ clear: true, busy: '' });
+    expect(resumeAction(t, free, { conversation: 'now', cleared: true, state: 'idle' })).toEqual({ clear: false, busy: '' });
+    expect(resumeAction(t, free, { conversation: 'now', state: 'stopped' })).toEqual({ clear: false, busy: '' });
+    expect(resumeAction(t, { session_id: 'k', free: false, busy: 'working' }, { conversation: 'now', state: 'working' }))
+      .toEqual({ clear: true, busy: 'working' });
   });
 });
 

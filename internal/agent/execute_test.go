@@ -50,6 +50,14 @@ func (f *fakeActions) Restart(_ context.Context, s string) error {
 	f.calls = append(f.calls, "restart "+s)
 	return nil
 }
+func (f *fakeActions) Resume(_ context.Context, s string, _ session.Transcript, conversation string, stopped bool) error {
+	how := "restart"
+	if stopped {
+		how = "start"
+	}
+	f.calls = append(f.calls, "resume "+s+" in "+conversation+" by "+how)
+	return nil
+}
 func (f *fakeActions) Push(_ context.Context, dir string) error {
 	f.calls = append(f.calls, "push "+dir)
 	return nil
@@ -105,7 +113,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 	t.Helper()
 	c := &fakeCollector{}
 	c.set(
-		session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle},
+		session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, Transcript: session.Transcript{ID: "now"}},
 		session.Snapshot{ID: "h", Title: "hamta", Path: "/c/hamta", State: session.Working},
 		session.Snapshot{ID: "z", Title: "zynk", Path: "/c/zynk", State: session.Unpushed, Git: &session.Git{Unpushed: 1}},
 		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
@@ -155,6 +163,13 @@ func TestExecuteCommands(t *testing.T) {
 		{"start a running session", command.Payload{Type: command.Start, Session: "h"}, "", "hamta is already running"},
 		{"restart a running session", command.Payload{Type: command.Restart, Session: "h"}, "restart h", ""},
 		{"restart a stopped session", command.Payload{Type: command.Restart, Session: "s"}, "", "sleepy is stopped; start it instead"},
+		{"resume a free session", command.Payload{Type: command.Resume, Session: "k", Conversation: "older"}, "resume k in older by restart", ""},
+		{"resume a stopped session", command.Payload{Type: command.Resume, Session: "s", Conversation: "older"}, "resume s in older by start", ""},
+		{"resume the conversation already open", command.Payload{Type: command.Resume, Session: "k", Conversation: "now"}, "", ""},
+		{"resume a working session", command.Payload{Type: command.Resume, Session: "h", Conversation: "older"}, "", "hamta is not free: working"},
+		{"resume a session asking a question", command.Payload{Type: command.Resume, Session: "q", Conversation: "older"}, "", "quiz is not free: needs input"},
+		{"resume a session with uncommitted changes", command.Payload{Type: command.Resume, Session: "d", Conversation: "older"}, "", "dorna is not free: uncommitted changes"},
+		{"resume without a conversation", command.Payload{Type: command.Resume, Session: "k"}, "", "resume needs a conversation"},
 		{"push without a signature", command.Payload{Type: command.Push, Session: "z"}, "push /c/zynk", ""},
 		{"push to an unknown session", command.Payload{Type: command.Push, Session: "nope"}, "", "no session nope"},
 		{"answer the open question", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1", Text: "Colour: Blue"}, "answer q in conv to toolu_1: Colour: Blue", ""},
@@ -320,7 +335,7 @@ func TestDispatchedTaskIsMarkedDoneWhenItsSessionFinishes(t *testing.T) {
 	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Add --json"}, a.Now())); err != nil {
 		t.Fatal(err)
 	}
-	if got := mem.Updated(store.Tasks, "t1"); got["session_id"] != "k" {
+	if got := mem.Updated(store.Tasks, "t1"); got["session_id"] != "k" || got["conversation_id"] != "now" {
 		t.Fatalf("task after dispatch = %v", got)
 	}
 	c := a.Collect.(*fakeCollector)
@@ -342,6 +357,49 @@ func TestDispatchedTaskIsMarkedDoneWhenItsSessionFinishes(t *testing.T) {
 	got := mem.Updated(store.Tasks, "t1")
 	if got["status"] != store.TaskDone || got["commit"] != "3f2a1c4" {
 		t.Fatalf("task = %v", got)
+	}
+}
+
+func TestTaskRecordsTheConversationItWasSentInto(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	_ = mem.Put(ctx, store.Tasks, "t1", store.Task{Project: "knip", Text: "x", Status: store.TaskQueued})
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x", Clear: true}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1")["conversation_id"]; got != "cleared-k" {
+		t.Fatalf("conversation after clear = %v", got)
+	}
+
+	_ = mem.Put(ctx, store.Tasks, "t2", store.Task{Project: "sakku", Text: "Fix login", Status: store.TaskQueued})
+	if err := a.execute(ctx, ph.command("c2", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t2", Text: "Fix login"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := mem.Updated(store.Tasks, "t2")["conversation_id"]; ok {
+		t.Fatalf("a new session's task has conversation %v before Claude Code starts", got)
+	}
+	later := a.Now().Add(time.Hour)
+	a.Collect.(*fakeCollector).set(session.Snapshot{ID: "new-sakku", Title: "sakku", Path: "/c/sakku", State: session.Idle,
+		Transcript: session.Transcript{ID: "first"}, Message: &session.Message{At: later}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t2"); got["status"] != store.TaskDone || got["conversation_id"] != "first" {
+		t.Fatalf("task = %v", got)
+	}
+}
+
+func TestResumeShowsTheResumedConversationAtOnce(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Resume, Session: "k", Conversation: "older"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := mem.Get(store.Sessions, "k")
+	if got := v.(session.Snapshot).Transcript.ID; got != "older" {
+		t.Fatalf("published conversation = %q", got)
 	}
 }
 

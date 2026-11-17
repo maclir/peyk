@@ -112,7 +112,7 @@ async function seed(page: Page) {
   await put(page, 'projects/knip', { name: 'knip', path: '/c/knip', session_id: 'k', free: true, busy: '', active: minutesAgo(12) });
   await put(page, 'projects/hamta', { name: 'hamta', path: '/c/hamta', session_id: 'h', free: false, busy: 'needs input', active: minutesAgo(4) });
   await put(page, 'tasks/sent', { project: 'hamta', text: 'Add CSV export', status: 'dispatched', session_id: 'h', created_at: minutesAgo(60), dispatched_at: minutesAgo(30) });
-  await put(page, 'tasks/old', { project: 'knip', text: 'Detect unused exports', status: 'done', session_id: 'k', created_at: minutesAgo(90), done_at: minutesAgo(12), commit: '3f2a1c4' });
+  await put(page, 'tasks/old', { project: 'knip', text: 'Detect unused exports', status: 'done', session_id: 'k', conversation_id: 'c-old', created_at: minutesAgo(90), done_at: minutesAgo(12), commit: '3f2a1c4' });
 }
 
 test.describe('signed in', () => {
@@ -436,7 +436,7 @@ test.describe('signed in', () => {
     await expect(page.getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
 
     await expect(page.locator('.task.done')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Done 1' }).click();
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /More actions/ }).click();
     await edited.getByRole('button', { name: /Delete task/ }).click();
@@ -774,6 +774,37 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
+  test("a worker's inbox sheet reads its done tasks only when opened, and resumes one's conversation", async () => {
+    const conversation = (id: string) => page.request.patch(`${FIRESTORE}/sessions/k?updateMask.fieldPaths=conversation&updateMask.fieldPaths=cleared`,
+      { headers: admin, data: { fields: { conversation: { stringValue: id }, cleared: { booleanValue: false } } } });
+    await conversation('c-now');
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    await page.getByRole('button', { name: /^Inbox/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'knip inbox' });
+    await expect(sheet.locator('.task.done')).toHaveCount(0);
+    const fold = sheet.getByRole('button', { name: 'Done', exact: true });
+    await fold.click();
+    const old = sheet.locator('.task.done', { hasText: 'Detect unused exports' });
+    await expect(old).toContainText('3f2a1c4');
+
+    await old.getByRole('button', { name: 'Clear and resume: Detect unused exports' }).click();
+    await expect(sheet.getByRole('status')).toHaveText('Resume knip: waiting for the laptop…');
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'resume')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'resume', session: 'k', conversation: 'c-old' });
+    expect(cmd.fields.grant).toBeDefined();
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(sheet.getByRole('status')).toHaveText('Resume knip: done.');
+
+    await conversation('c-old');
+    await expect(old).toContainText('current conversation');
+    await expect(old.getByRole('button', { name: /resume/i })).toHaveCount(0);
+    await fold.click();
+    await expect(sheet.locator('.task.done')).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 
   test('a sheet goes away with a drag down its top or a tap on its bar, and stays for a short pull', async () => {

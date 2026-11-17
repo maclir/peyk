@@ -24,6 +24,9 @@ type Actions interface {
 	Stop(ctx context.Context, session string) error
 	Start(ctx context.Context, session string) error
 	Restart(ctx context.Context, session string) error
+	// Resume relaunches a session on conversation, an earlier transcript in
+	// t's directory, starting it if stopped.
+	Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error
 	Push(ctx context.Context, dir string) error
 	// Answer closes a session's open dialog for question and sends text as
 	// the answer.
@@ -91,6 +94,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return err
 		}
 		id := proj.SessionID
+		conversation := a.sessions[id].Transcript.ID
 		if id == "" {
 			if id, err = act.Create(ctx, proj.Path, proj.Name); err != nil {
 				return err
@@ -103,14 +107,19 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			if err := a.cleared(ctx, id, t); err != nil {
 				return err
 			}
+			conversation = t
 		}
 		sentAt := a.Now()
 		if err := act.Send(ctx, id, text); err != nil {
 			return err
 		}
-		return a.Store.Update(ctx, store.Tasks, p.Task, map[string]any{
-			"status": store.TaskDispatched, "dispatched_at": sentAt, "session_id": id,
-		})
+		fields := map[string]any{"status": store.TaskDispatched, "dispatched_at": sentAt, "session_id": id}
+		// A new session has no conversation until Claude Code starts; the
+		// task takes it when it finishes.
+		if conversation != "" {
+			fields["conversation_id"] = conversation
+		}
+		return a.Store.Update(ctx, store.Tasks, p.Task, fields)
 	case command.Reply:
 		s, err := a.session(p.Session)
 		if err != nil {
@@ -176,6 +185,26 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			return fmt.Errorf("%s is stopped; start it instead", s.Title)
 		}
 		return act.Restart(ctx, s.ID)
+	case command.Resume:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		if p.Conversation == "" {
+			return errors.New("resume needs a conversation")
+		}
+		// A worker that is not free would lose its turn or its uncommitted
+		// work's conversation.
+		if proj := a.projects[s.Title]; !proj.Free {
+			return fmt.Errorf("%s is not free: %s", s.Title, proj.Busy)
+		}
+		if s.Transcript.ID == p.Conversation {
+			return nil
+		}
+		if err := act.Resume(ctx, s.ID, s.Transcript, p.Conversation, s.AoeStatus == "stopped"); err != nil {
+			return err
+		}
+		return a.cleared(ctx, s.ID, p.Conversation)
 	case command.Push:
 		s, err := a.session(p.Session)
 		if err != nil {

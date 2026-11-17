@@ -92,7 +92,10 @@ type Task struct {
 	Status       string    `firestore:"status" json:"status"`
 	DispatchedAt time.Time `firestore:"dispatched_at,omitempty" json:"dispatched_at,omitempty"`
 	SessionID    string    `firestore:"session_id,omitempty" json:"session_id,omitempty"`
-	DoneAt       time.Time `firestore:"done_at,omitempty" json:"done_at,omitempty"`
+	// ConversationID is the Claude Code conversation the task was sent into,
+	// which Resume returns its worker to.
+	ConversationID string    `firestore:"conversation_id,omitempty" json:"conversation_id,omitempty"`
+	DoneAt         time.Time `firestore:"done_at,omitempty" json:"done_at,omitempty"`
 	// Commit is the session's last commit when the task finished, if it was
 	// made after the task was sent.
 	Commit string `firestore:"commit,omitempty" json:"commit,omitempty"`

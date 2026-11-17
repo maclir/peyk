@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, doneTasks, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
+import { STATES, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -135,10 +135,12 @@ async function start(cfg) {
         render();
       }, failed),
       // Metadata changes report when the server confirms a write, which
-      // ends a task's saving mark.
-      fs.onSnapshot(fs.collection(db, "tasks"), { includeMetadataChanges: true }, (snap) => {
+      // ends a task's saving mark. A task that leaves this query finished or
+      // was deleted, so the Done lists read again.
+      fs.onSnapshot(fs.query(fs.collection(db, "tasks"), fs.where("status", "in", ["queued", "dispatched"])), { includeMetadataChanges: true }, (snap) => {
         state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data(), saving: d.metadata.hasPendingWrites }));
         state.loaded.add("tasks");
+        if (snap.docChanges().some((c) => c.type === "removed")) refreshDone();
         render();
       }, failed),
       // Replies the laptop has not finished. One that leaves this list was
@@ -544,7 +546,6 @@ async function start(cfg) {
       ? list.map((t, i) => (state.editing === t.id ? editor(t) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
       : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
     const sent = sentTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
-    const finished = doneTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
     return h("div", { class: "inbox" },
       filters, strip,
       h("p", { class: "alert", id: "alert", role: "status" }),
@@ -553,19 +554,9 @@ async function start(cfg) {
         h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
         ...sent.map((t) => sentCard(t, now)),
       ] : null,
-      finished.length && state.filter !== "waiting" && !state.arranging ? [
-        h("h2", { class: "group" },
-          h("button", { type: "button", class: "fold", "aria-expanded": String(state.showDone), onclick: () => { state.showDone = !state.showDone; render(); } },
-            "Done", h("span", { class: "n" }, String(finished.length)), icon("chevron"))),
-        ...(state.showDone ? finished : []).map((t) =>
-          h("div", { class: "task done" },
-            h("div", { class: "thead" }, face(projectNamed(t.project), t.project, "sm"),
-              h("span", { class: "proj" }, `${t.project} · done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}`),
-              h("span", { class: "grow" }),
-              h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
-            h("div", { class: "ttext" }, t.text),
-            taskImages(t),
-          )),
+      state.filter !== "waiting" && !state.arranging ? [
+        doneFold(state.showDone, () => { state.showDone = !state.showDone; render(); }, state.only ?? ""),
+        ...(state.showDone ? doneList(state.only ?? "", now) : []),
       ] : null,
       composer(),
       state.picking ? picker(projects) : null,
@@ -887,12 +878,101 @@ async function start(cfg) {
     );
   }
 
-  // A task's images go with it, unless another task shares one.
-  function remove(t) {
-    const batch = fs.writeBatch(db);
-    batch.delete(fs.doc(db, "tasks", t.id));
-    for (const id of orphanedImages(state.tasks, [t])) batch.delete(fs.doc(db, "attachments", id));
-    batch.commit().catch((err) => alertLine(`Could not delete: ${err.message}`));
+  // A task's images go with it, unless another task shares one. Done tasks
+  // are not all on the phone, so the tasks sharing an image are asked for.
+  async function remove(t) {
+    try {
+      const imgs = t.images ?? [];
+      const sharing = imgs.length
+        ? (await fs.getDocs(fs.query(fs.collection(db, "tasks"), fs.where("images", "array-contains-any", imgs)))).docs.map((d) => ({ id: d.id, ...d.data() }))
+        : [];
+      const batch = fs.writeBatch(db);
+      batch.delete(fs.doc(db, "tasks", t.id));
+      for (const id of orphanedImages([...state.tasks, ...sharing], [t])) batch.delete(fs.doc(db, "attachments", id));
+      await batch.commit();
+      for (const d of done.values()) d.tasks = d.tasks.filter((x) => x.id !== t.id);
+      render();
+    } catch (err) {
+      alertLine(`Could not delete: ${err.message}`);
+    }
+  }
+
+  // Done tasks only grow, so they are never listened to. A Done list reads a
+  // page when it opens and again when a task leaves the active ones. Lists
+  // are keyed by project, "" for all projects.
+  const DONE_PAGE = 10;
+  const done = new Map();
+
+  async function loadDone(key) {
+    let d = done.get(key);
+    if (!d) done.set(key, (d = { tasks: [], cursor: null, more: true, loading: false, error: "" }));
+    if (d.loading || !d.more) return;
+    d.loading = true;
+    const q = fs.query(fs.collection(db, "tasks"), fs.where("status", "==", "done"),
+      ...(key ? [fs.where("project", "==", key)] : []), fs.orderBy("done_at", "desc"),
+      ...(d.cursor ? [fs.startAfter(d.cursor)] : []), fs.limit(DONE_PAGE));
+    try {
+      const snap = await fs.getDocs(q);
+      if (done.get(key) !== d) return;
+      d.tasks.push(...snap.docs.map((x) => ({ id: x.id, ...x.data() })));
+      d.cursor = snap.docs.at(-1) ?? d.cursor;
+      d.more = snap.docs.length === DONE_PAGE;
+    } catch (err) {
+      d.error = err.message;
+      d.more = false;
+    } finally {
+      d.loading = false;
+      render();
+    }
+  }
+
+  function refreshDone() {
+    done.clear();
+    render();
+  }
+
+  function doneFold(open, toggle, key) {
+    return h("h2", { class: "group" },
+      h("button", { type: "button", class: "fold", "aria-expanded": String(open), onclick: () => {
+        if (done.get(key)?.error) done.delete(key);
+        toggle();
+      } }, "Done", icon("chevron")));
+  }
+
+  // An open list with nothing read yet starts reading as it is drawn.
+  function doneList(key, now, inProject = false) {
+    const d = done.get(key);
+    if (!d) {
+      queueMicrotask(() => loadDone(key));
+      return [loading("Loading done tasks…")];
+    }
+    return [
+      ...d.tasks.map((t) => doneCard(t, now, inProject)),
+      d.error ? h("p", { class: "empty" }, `Could not load done tasks: ${d.error}`) : null,
+      !d.tasks.length && !d.loading && !d.error ? h("p", { class: "empty" }, "Nothing done yet.") : null,
+      d.loading ? loading("Loading done tasks…")
+        : d.more ? h("button", { type: "button", class: "link more", onclick: () => loadDone(key) }, "Show more") : null,
+    ].filter(Boolean);
+  }
+
+  function doneCard(t, now, inProject) {
+    const p = projectNamed(t.project);
+    const worker = p?.session_id ? state.sessions.get(p.session_id) : null;
+    const r = resumeAction(t, p, worker);
+    const label = r?.clear ? "Clear and resume" : "Resume conversation";
+    return h("div", { class: "task done" },
+      h("div", { class: "thead" },
+        inProject ? null : face(p, t.project, "sm"),
+        h("span", { class: "proj" }, `${inProject ? "" : `${t.project} · `}done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
+        h("span", { class: "grow" }),
+        r && !r.current ? busyButton(`resume:${t.id}`, {
+          type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
+          onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, `Resume ${t.project}`, `resume:${t.id}`, alertLine),
+        }, icon(r.clear ? "clearresume" : "resume")) : null,
+        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
+      h("div", { class: "ttext" }, t.text),
+      taskImages(t),
+    );
   }
 
   // The inbox opens on ready tasks; one queued for a busy project would
@@ -1476,7 +1556,11 @@ async function start(cfg) {
       ? tasks.map((t, i) => (state.editing === t.id ? editor(t, false)
         : sheet.arranging ? arrangeRow(tasks, t, i, { inProject: true })
           : taskCard(t, now, { inProject: true, sendWith: sheetSend })))
-      : [h("p", { class: "empty" }, "Nothing queued.")]));
+      : [h("p", { class: "empty" }, "Nothing queued.")]),
+    ...(sheet.arranging ? [] : [
+      doneFold(sheet.showDone, () => { sheet.showDone = !sheet.showDone; render(); }, sheet.project),
+      ...(sheet.showDone ? doneList(sheet.project, now, true) : []),
+    ]));
     syncThumbs(sheet.form, sheet.key);
   }
 
@@ -1699,6 +1783,8 @@ const ICONS = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
   restart: '<path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
+  resume: '<path d="M3.5 6v12l8-6z"/><path d="M15.5 6v12M20 6v12"/>',
+  clearresume: '<g transform="scale(.7) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><path d="M13.5 14.5v7l4-3.5z"/><path d="M19.5 14.5v7M22.5 14.5v7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   push: '<path d="M12 20V8"/><path d="M6.5 13.5 12 8l5.5 5.5"/><path d="M5 4h14"/>',
   noremote: '<path d="M7 18h10a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 9 4.5 4.5 0 0 0 7 18z"/><path d="M4 4l16 16"/>',

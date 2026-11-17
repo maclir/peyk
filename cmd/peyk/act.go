@@ -55,6 +55,10 @@ func (a actions) Restart(ctx context.Context, session string) error {
 	return a.aoe.Restart(ctx, session)
 }
 
+func (a actions) Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error {
+	return a.aoe.Resume(ctx, session, t.Dir, conversation, stopped)
+}
+
 func (a actions) Push(ctx context.Context, dir string) error {
 	return laptop.Push(ctx, laptop.Exec, dir)
 }

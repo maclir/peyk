@@ -209,6 +209,9 @@ func (m *Memory) DispatchedTasks(context.Context) (map[string]Task, error) {
 		if sid, ok := u["session_id"].(string); ok {
 			t.SessionID = sid
 		}
+		if cid, ok := u["conversation_id"].(string); ok {
+			t.ConversationID = cid
+		}
 		if t.Status == TaskDispatched {
 			out[id] = t
 		}

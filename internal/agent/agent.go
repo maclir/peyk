@@ -480,6 +480,9 @@ func (a *Agent) finishTasks(ctx context.Context) error {
 		if commit != "" {
 			fields["commit"] = commit
 		}
+		if t.ConversationID == "" && s.Transcript.ID != "" {
+			fields["conversation_id"] = s.Transcript.ID
+		}
 		if err := a.Store.Update(ctx, store.Tasks, id, fields); err != nil {
 			return err
 		}

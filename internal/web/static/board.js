@@ -219,12 +219,14 @@ export function sentTasks(tasks) {
     .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at));
 }
 
-// Finished tasks, newest first.
-export function doneTasks(tasks, limit = 10) {
-  return tasks
-    .filter((t) => t.status === "done")
-    .sort((a, b) => toDate(b.done_at) - toDate(a.done_at))
-    .slice(0, limit);
+// What a done task offers for returning its worker to the task's
+// conversation: nothing without a conversation or a worker, a note when the
+// worker is already in it, and otherwise a resume that leaves the worker's
+// current conversation, if it has one, and waits for the worker to be free.
+export function resumeAction(t, project, worker) {
+  if (!t.conversation_id || !project?.session_id || !worker) return null;
+  if (worker.conversation === t.conversation_id) return { current: true };
+  return { clear: !worker.cleared && worker.state !== "stopped", busy: project.free ? "" : project.busy || "busy" };
 }
 
 // answerText turns picks on the phone into the prompt the session gets after

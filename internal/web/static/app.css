@@ -260,6 +260,7 @@ button.send .ico svg { width: 14px; height: 14px; }
 button.step { width: 40px; height: 40px; background: var(--paper); color: var(--ink); }
 .task.done { opacity: 0.75; }
 .task.done .proj { font-weight: 500; color: var(--muted); }
+button.link.more { align-self: center; }
 
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
 .thumb { position: relative; display: inline-flex; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
