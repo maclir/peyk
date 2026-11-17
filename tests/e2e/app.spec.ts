@@ -892,17 +892,12 @@ test.describe('signed in', () => {
     await expect(page.locator('.card', { hasText: 'hamta' }).locator('.flag')).toHaveCount(0);
   });
 
-  test('Clear and stop needs a second tap and sends one signed stop that clears', async () => {
+  test('Clear and stop sends one signed stop that clears', async () => {
     await put(page, 'sessions/c', { id: 'c', title: 'cleo', path: '/c/cleo', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false });
     await page.goto('/#s-c');
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear and stop' }).click();
-    await expect(page.getByRole('menuitem', { name: 'Tap again to clear' })).toBeVisible();
-    expect((await list(page, 'commands')).filter((c) => JSON.parse(c.fields.payload.stringValue).session === 'c')).toHaveLength(0);
-    await expect(page.getByRole('menuitem', { name: 'Clear and stop' })).toBeVisible({ timeout: 5000 });
-    await page.getByRole('menuitem', { name: 'Clear and stop' }).click();
-    await page.getByRole('menuitem', { name: 'Tap again to clear' }).click();
     await expect(page.getByRole('menu')).toHaveCount(0);
     await expect(page.getByText('Clear and stop cleo: waiting for the laptop…')).toBeVisible();
     const sent = (await list(page, 'commands')).filter((c) => JSON.parse(c.fields.payload.stringValue).session === 'c');

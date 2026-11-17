@@ -105,7 +105,7 @@ async function start(cfg) {
   }
 
   const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
-    filter: "ready", only: null, arranging: false, showDone: false, menu: null, armed: null, picking: false, pickFor: null, pickQuery: "",
+    filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", undoHide: null,
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
@@ -1321,31 +1321,19 @@ async function start(cfg) {
 
   // Clear, start, restart and stop share a menu so the worker's name and
   // state keep the header's width on a phone.
-  // Clear and stop discards the conversation, so its first tap only arms it
-  // and a second tap within a few seconds sends it.
-  let unarm = null;
   function workerMenu(s, busy) {
     const key = `worker:${s.id}`;
     const open = state.menu === key;
-    if (!open && state.armed) state.armed = null;
     const run = (cmd, label, fields = {}) => {
       state.menu = null;
-      state.armed = null;
       sendCommand(cmd, { session: s.id, ...fields }, `${label} ${s.title}`, `${cmd}:${s.id}`);
     };
     const item = (cmd, ico, label, cls) => busyButton(`${cmd}:${s.id}`, { type: "button", role: "menuitem", class: cls,
       onclick: () => run(cmd, `${cmd[0].toUpperCase()}${cmd.slice(1)}`) },
     icon(ico), label);
-    const armed = state.armed === key;
-    const clearStop = h("button", { type: "button", role: "menuitem", class: armed ? "danger armed" : "danger",
-      onclick: () => {
-        clearTimeout(unarm);
-        if (armed) return run("stop", "Clear and stop", { clear: true });
-        state.armed = key;
-        unarm = setTimeout(() => { if (state.armed === key) { state.armed = null; render(); } }, 3000);
-        render();
-      } },
-    icon("trash"), armed ? "Tap again to clear" : "Clear and stop");
+    const clearStop = h("button", { type: "button", role: "menuitem", class: "danger",
+      onclick: () => run("stop", "Clear and stop", { clear: true }) },
+    icon("trash"), "Clear and stop");
     const stopped = s.aoe_status === "stopped";
     const pending = ["clear", "start", "restart", "stop"].some((c) => state.busy.has(`${c}:${s.id}`));
     return h("div", { class: "wmenu" },
