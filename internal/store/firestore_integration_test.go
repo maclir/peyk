@@ -119,3 +119,68 @@ func TestFirestoreCommandsAndPairing(t *testing.T) {
 		t.Fatalf("pairing = %+v", p)
 	}
 }
+
+func TestFirestoreDeliversWaitingRepliesInOrderAndListsHeldOnes(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("run with make test-integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	s, err := NewFirestore(ctx, "peyk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	// Ids sort the other way round from when the replies were written.
+	for i, id := range []string{"it-order-c", "it-order-b", "it-order-a"} {
+		c := command.Command{Type: command.Reply, Payload: `{}`, Status: command.Pending, CreatedAt: at.Add(time.Duration(i) * time.Minute)}
+		if err := s.Put(ctx, Commands, id, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Put(ctx, Commands, "it-held", command.Command{Type: command.Reply, Payload: `{"session":"k"}`, Status: command.Held, CreatedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	listenCtx, stop := context.WithCancel(ctx)
+	out := make(chan Incoming)
+	errs := make(chan error, 1)
+	go func() { errs <- s.Commands(listenCtx, out) }()
+	var order []string
+	for len(order) < 3 {
+		select {
+		case in := <-out:
+			if len(in.ID) > 9 && in.ID[:9] == "it-order-" {
+				order = append(order, in.ID)
+			}
+		case <-ctx.Done():
+			t.Fatalf("delivered only %v", order)
+		}
+	}
+	if order[0] != "it-order-c" || order[1] != "it-order-b" || order[2] != "it-order-a" {
+		t.Fatalf("order = %v", order)
+	}
+	for _, id := range order {
+		if err := s.Update(ctx, Commands, id, map[string]any{"status": command.Done}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop()
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := s.HeldReplies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := held["it-held"]; !ok || c.Payload != `{"session":"k"}` {
+		t.Fatalf("held = %+v", held)
+	}
+	for id := range held {
+		if id != "it-held" {
+			t.Fatalf("held lists %s", id)
+		}
+	}
+}

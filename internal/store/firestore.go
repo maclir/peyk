@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/option"
@@ -52,6 +53,7 @@ func (s *Firestore) Commands(ctx context.Context, out chan<- Incoming) error {
 		if err != nil {
 			return fmt.Errorf("listen for commands: %w", err)
 		}
+		var added []Incoming
 		for _, ch := range snap.Changes {
 			if ch.Kind != firestore.DocumentAdded {
 				continue
@@ -60,8 +62,14 @@ func (s *Firestore) Commands(ctx context.Context, out chan<- Incoming) error {
 			if err := ch.Doc.DataTo(&c); err != nil {
 				return fmt.Errorf("decode command %s: %w", ch.Doc.Ref.ID, err)
 			}
+			added = append(added, Incoming{ID: ch.Doc.Ref.ID, Command: c})
+		}
+		// Replies queued while the laptop was away arrive together and
+		// must reach their session in the order they were written.
+		sort.SliceStable(added, func(i, j int) bool { return added[i].Command.CreatedAt.Before(added[j].Command.CreatedAt) })
+		for _, in := range added {
 			select {
-			case out <- Incoming{ID: ch.Doc.Ref.ID, Command: c}:
+			case out <- in:
 			case <-ctx.Done():
 				return nil
 			}
@@ -101,6 +109,22 @@ func (s *Firestore) DispatchedTasks(ctx context.Context) (map[string]Task, error
 			return nil, fmt.Errorf("decode task %s: %w", d.Ref.ID, err)
 		}
 		out[d.Ref.ID] = t
+	}
+	return out, nil
+}
+
+func (s *Firestore) HeldReplies(ctx context.Context) (map[string]command.Command, error) {
+	docs, err := s.client.Collection(Commands).Where("status", "==", command.Held).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("list held replies: %w", err)
+	}
+	out := make(map[string]command.Command, len(docs))
+	for _, d := range docs {
+		var c command.Command
+		if err := d.DataTo(&c); err != nil {
+			return nil, fmt.Errorf("decode command %s: %w", d.Ref.ID, err)
+		}
+		out[d.Ref.ID] = c
 	}
 	return out, nil
 }

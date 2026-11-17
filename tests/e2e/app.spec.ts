@@ -564,6 +564,44 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 
+  test('a reply written while the laptop is away waits for it', async () => {
+    await put(page, 'laptop/status', { online: false, seen_at: new Date(Date.now() - 3600_000) });
+    const bound = await page.request.patch(`${FIRESTORE}/sessions/k?updateMask.fieldPaths=conversation&updateMask.fieldPaths=latest`, {
+      headers: admin, data: { fields: { conversation: encode('conv'), latest: encode('m1') } },
+    });
+    expect(bound.ok()).toBe(true);
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    const reply = page.locator('form.composer.respond');
+    await reply.getByLabel('Reply', { exact: true }).fill('Also add --csv');
+    await reply.getByRole('button', { name: 'Send reply' }).click();
+    await expect(page.getByText('Reply to knip: queued. It goes out when the laptop is back online.')).toBeVisible();
+    await expect(page.getByText('Queued until the laptop is back online')).toBeVisible();
+
+    // A second reply joins the queued one rather than waiting behind it.
+    await reply.getByLabel('Reply', { exact: true }).fill('And --yaml');
+    await reply.getByRole('button', { name: 'Send reply' }).click();
+    await expect(page.locator('.reply.queued')).toHaveCount(1);
+    await expect(page.locator('.reply.queued')).toContainText('And --yaml');
+    const mine = (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'reply' && c.fields.payload.stringValue.includes('--csv'));
+    expect(mine.map((c) => c.fields.status.stringValue).sort()).toEqual(['cancelled', 'pending']);
+    const waiting = mine.find((c) => c.fields.status.stringValue === 'pending')!;
+    expect(JSON.parse(waiting.fields.payload.stringValue)).toMatchObject({ session: 'k', text: 'Also add --csv\n\nAnd --yaml', conversation: 'conv', after: 'm1' });
+
+    // The laptop came back to a conversation that moved on, so it asks first.
+    await put(page, `commands/${waiting.name.split('/').pop()}`, { ...plain(waiting.fields), status: 'held' });
+    await expect(page.getByText('Held: the conversation moved on since you wrote this')).toBeVisible();
+    await page.goto('/#');
+    await expect(page.locator('.card', { hasText: 'knip' })).toContainText('reply held');
+    await page.goto('/#s-k');
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await expect(page.locator('.reply.queued')).toHaveCount(0);
+    expect((await get(page, `commands/${waiting.name.split('/').pop()}`)).status.stringValue).toBe('cancelled');
+
+    for (const c of mine) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
+    await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+  });
+
   test('the inbox filters by state and project, and keeps the order you set', async () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });

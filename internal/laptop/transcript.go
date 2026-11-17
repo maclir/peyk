@@ -92,6 +92,7 @@ func newestFirst(dir string) []string {
 }
 
 type entry struct {
+	UUID        string    `json:"uuid"`
 	Type        string    `json:"type"`
 	IsSidechain bool      `json:"isSidechain"`
 	Timestamp   time.Time `json:"timestamp"`
@@ -220,7 +221,7 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		if cleared == nil && bytes.Contains(lines[i], clearMarker) {
 			var e entry
 			if json.Unmarshal(lines[i], &e) == nil && e.Type == "user" && !e.IsSidechain {
-				cleared = &session.Message{Text: session.ClearCommand, At: e.Timestamp}
+				cleared = &session.Message{ID: e.UUID, Text: session.ClearCommand, At: e.Timestamp}
 			}
 			continue
 		}
@@ -239,9 +240,9 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		}
 		switch {
 		case isReply && e.Type == "assistant":
-			reply = &session.Message{Text: text, At: e.Timestamp}
+			reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
 		case isPrompt && e.Type == "user" && e.Origin.Kind == "human":
-			prompt = &session.Message{Text: text, At: e.Timestamp}
+			prompt = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
 		}
 	}
 	if prompt == nil {

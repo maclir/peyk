@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, pushLabel, sortSessions, usageLeft, onDefaultBranch } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, flags, laptopOnline, mergeReply, pushLabel, replyFields, sortSessions, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -274,5 +274,36 @@ describe('onDefaultBranch', () => {
     expect(onDefaultBranch({ branch: 'master' })).toBe(true);
     expect(onDefaultBranch({ branch: 'usage-header' })).toBe(false);
     expect(onDefaultBranch({ branch: '' })).toBe(false);
+  });
+});
+
+describe('queued replies', () => {
+  const doc = (over: Record<string, unknown>) => ({
+    id: 'c1', type: 'reply', status: 'pending', created_at: new Date(2026, 10, 14, 9),
+    payload: JSON.stringify({ id: 'c1', type: 'reply', session: 'k', text: 'go on', conversation: 'conv', after: 'm1' }), ...over,
+  });
+
+  it('lists pending and held replies oldest first', () => {
+    const got = waitingReplies([
+      doc({ id: 'late', status: 'held', created_at: new Date(2026, 10, 14, 10) }),
+      doc({ id: 'early' }),
+      doc({ id: 'sent', status: 'done' }),
+      doc({ id: 'stop', type: 'stop' }),
+      doc({ id: 'bad', payload: '{' }),
+    ]);
+    expect(got.map((r: { id: string }) => r.id)).toEqual(['early', 'late']);
+    expect(got[0]).toMatchObject({ session: 'k', text: 'go on', images: [], conversation: 'conv', after: 'm1' });
+  });
+
+  it('binds a reply to the conversation and message it answers', () => {
+    expect(replyFields({ id: 'k', conversation: 'conv', latest: 'm1' }, 'go on', [])).toEqual({ session: 'k', text: 'go on', conversation: 'conv', after: 'm1' });
+    expect(replyFields({ id: 'k' }, 'go on', ['i1'])).toEqual({ session: 'k', text: 'go on', images: ['i1'] });
+  });
+
+  it('folds a new reply into the queued one', () => {
+    const queued = { text: 'first', images: ['a'] };
+    expect(mergeReply(queued, 'second', ['a', 'b'], 4)).toEqual({ text: 'first\n\nsecond', images: ['a', 'b'] });
+    expect(mergeReply({ text: '', images: ['a'] }, 'only', [], 4)).toEqual({ text: 'only', images: ['a'] });
+    expect(mergeReply(queued, 'x', ['b', 'c', 'd', 'e'], 4)).toBeNull();
   });
 });

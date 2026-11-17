@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maclir/peyk/internal/command"
 	"github.com/maclir/peyk/internal/notify"
 )
 
@@ -52,7 +53,15 @@ func (m *Memory) Updated(collection, id string) map[string]any {
 }
 
 // Send queues a command as if the phone had written it.
-func (m *Memory) Send(in Incoming) { m.commands <- in }
+func (m *Memory) Send(in Incoming) {
+	m.mu.Lock()
+	if m.docs[Commands] == nil {
+		m.docs[Commands] = map[string]any{}
+	}
+	m.docs[Commands][in.ID] = in.Command
+	m.mu.Unlock()
+	m.commands <- in
+}
 
 // Pair answers a waiting Pairing call as if the phone had written it.
 func (m *Memory) Pair(p Pairing) { m.pairings <- p }
@@ -163,6 +172,23 @@ func (m *Memory) Subscriptions(context.Context) ([]notify.Subscription, error) {
 		out = append(out, sub)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// HeldReplies applies Update's status to commands Send stored.
+func (m *Memory) HeldReplies(context.Context) (map[string]command.Command, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]command.Command{}
+	for id, v := range m.docs[Commands] {
+		c := v.(command.Command)
+		if st, ok := m.updates[Commands][id]["status"].(string); ok {
+			c.Status = st
+		}
+		if c.Status == command.Held {
+			out[id] = c
+		}
+	}
 	return out, nil
 }
 

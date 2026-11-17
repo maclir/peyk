@@ -214,3 +214,37 @@ export function awaitingReply(s) {
 export function pendingLabel(s) {
   return s.state === "working" ? "Working…" : s.state === "needs_input" ? "Waiting for you…" : "Not replied yet";
 }
+
+// waitingReplies turns reply commands the laptop has not finished, pending
+// or held, into what the phone shows and resends, oldest first.
+export function waitingReplies(docs) {
+  const out = [];
+  for (const d of docs) {
+    if (d.type !== "reply" || !["pending", "held"].includes(d.status)) continue;
+    let p;
+    try {
+      p = JSON.parse(d.payload);
+    } catch {
+      continue;
+    }
+    out.push({ id: d.id, status: d.status, at: d.created_at, session: p.session, text: p.text ?? "", images: p.images ?? [],
+      conversation: p.conversation ?? "", after: p.after ?? "" });
+  }
+  return out.sort((x, y) => (toDate(x.at) ?? Infinity) - (toDate(y.at) ?? Infinity));
+}
+
+// replyFields is what a reply to s signs: its text and images, and the
+// conversation and message it answers, so the laptop can send it late.
+export function replyFields(s, text, images) {
+  return { session: s.id, text, ...(images.length ? { images } : {}), ...(s.conversation ? { conversation: s.conversation, after: s.latest ?? "" } : {}) };
+}
+
+// mergeReply folds a new reply into one still queued for the same session,
+// so a session has one queued reply: two bound to the same message would
+// leave the second held once the first goes out. It returns null when the
+// images would not fit in one message.
+export function mergeReply(queued, text, images, max) {
+  const all = [...new Set([...queued.images, ...images])];
+  if (all.length > max) return null;
+  return { text: [queued.text, text].filter(Boolean).join("\n\n"), images: all };
+}

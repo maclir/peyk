@@ -48,6 +48,13 @@ const (
 	Pending = "pending"
 	Done    = "done"
 	Failed  = "failed"
+	// Held is a late reply whose conversation moved on before the laptop
+	// saw it. It waits for the phone to send it again or cancel it.
+	Held = "held"
+	// Cancelled is a reply the phone withdrew while it was pending or held.
+	// Commands are never deleted, so a signed payload cannot be replayed
+	// into its id.
+	Cancelled = "cancelled"
 )
 
 // Signed says whether a command type needs a passkey signature. Push sends
@@ -92,9 +99,21 @@ type Payload struct {
 	Images []string `json:"images,omitempty"`
 	// Projects are the projects a hide or show applies to.
 	Projects []string `json:"projects,omitempty"`
+	// Conversation and After name the transcript and its latest message a
+	// reply was written for. A reply that names a conversation outlives
+	// Expires: the laptop sends it late only if neither has changed.
+	Conversation string `json:"conversation,omitempty"`
+	After        string `json:"after,omitempty"`
 	// Expires is Unix milliseconds.
 	Expires int64 `json:"expires"`
 }
+
+// Bound says whether a payload is a reply tied to the conversation it was
+// written for.
+func (p Payload) Bound() bool { return p.Type == Reply && p.Conversation != "" }
+
+// Late says whether the laptop sees the payload after it expired.
+func (p Payload) Late(now time.Time) bool { return !now.Before(time.UnixMilli(p.Expires)) }
 
 // Assertion is a WebAuthn assertion, each field base64url without padding.
 type Assertion struct {
@@ -118,8 +137,14 @@ func Check(id string, c Command, keys []Key, origin, rpID string, now time.Time)
 		return p, errors.New("payload type does not match the command")
 	}
 	exp := time.UnixMilli(p.Expires)
-	if !now.Before(exp) {
-		return p, errors.New("command expired before the laptop saw it")
+	// A late bound reply was signed while its grant lasted: the grant
+	// is judged at the payload's expiry, which the session key signed.
+	signedBy := now
+	if p.Late(now) {
+		if !p.Bound() {
+			return p, errors.New("command expired before the laptop saw it")
+		}
+		signedBy = exp
 	}
 	if exp.Sub(now) > MaxAge {
 		return p, errors.New("command expires too far in the future")
@@ -131,7 +156,7 @@ func Check(id string, c Command, keys []Key, origin, rpID string, now time.Time)
 	case c.Assertion != nil:
 		return p, Verify(keys, c.Payload, *c.Assertion, origin, rpID)
 	case c.Grant != nil:
-		return p, c.Grant.verify(keys, c.Payload, origin, rpID, now)
+		return p, c.Grant.verify(keys, c.Payload, origin, rpID, signedBy)
 	}
 	return p, errors.New("command is not signed")
 }

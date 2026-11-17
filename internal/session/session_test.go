@@ -100,3 +100,27 @@ func TestFinished(t *testing.T) {
 		})
 	}
 }
+
+func TestLatestIsTheNewerOfReplyAndPrompt(t *testing.T) {
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	reply := &Message{ID: "r", At: at}
+	later := &Message{ID: "p", At: at.Add(time.Minute)}
+	earlier := &Message{ID: "p", At: at.Add(-time.Minute)}
+	tests := []struct {
+		reply, prompt *Message
+		want          string
+	}{
+		{nil, nil, ""},
+		{reply, nil, "r"},
+		{nil, later, "p"},
+		{reply, earlier, "r"},
+		{reply, later, "p"},
+	}
+	for _, tt := range tests {
+		var s Snapshot
+		s.SetExchange(tt.reply, tt.prompt)
+		if s.Latest != tt.want {
+			t.Errorf("SetExchange(%+v, %+v).Latest = %q, want %q", tt.reply, tt.prompt, s.Latest, tt.want)
+		}
+	}
+}

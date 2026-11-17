@@ -236,6 +236,24 @@ describe('commands', () => {
     await assertFails(deleteDoc(doc(owner(), 'commands/c1')));
   });
 
+  it('the owner cancels a reply only while it waits for the laptop', async () => {
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c1'), cmd()));
+    await assertFails(updateDoc(doc(owner(), 'commands/c1'), { status: 'cancelled', payload: '{"id":"c1","text":"other"}' }));
+    await assertFails(updateDoc(doc(owner(), 'commands/c1'), { status: 'held' }));
+    await assertFails(updateDoc(doc(stranger(), 'commands/c1'), { status: 'cancelled' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'commands/c1'), { status: 'cancelled' }));
+    await assertFails(updateDoc(doc(owner(), 'commands/c1'), { status: 'pending' }));
+    await assertSucceeds(setDoc(doc(owner(), 'commands/c2'), cmd({ type: 'stop' })));
+    await assertFails(updateDoc(doc(owner(), 'commands/c2'), { status: 'cancelled' }));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'commands/held'), { ...cmd(), status: 'held' });
+      await setDoc(doc(ctx.firestore(), 'commands/sent'), { ...cmd(), status: 'done' });
+    });
+    await assertSucceeds(updateDoc(doc(owner(), 'commands/held'), { status: 'cancelled' }));
+    await assertFails(updateDoc(doc(owner(), 'commands/sent'), { status: 'cancelled' }));
+    await assertFails(deleteDoc(doc(owner(), 'commands/held')));
+  });
+
   it('rejects malformed commands', async () => {
     await assertFails(setDoc(doc(owner(), 'commands/x1'), cmd({ type: 'shell' })));
     await assertFails(setDoc(doc(owner(), 'commands/x2'), cmd({ status: 'done' })));

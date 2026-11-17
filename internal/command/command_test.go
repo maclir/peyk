@@ -304,3 +304,49 @@ func TestCheckRejectsBadSessions(t *testing.T) {
 		})
 	}
 }
+
+func boundReply(id string, expires time.Time) string {
+	b, _ := json.Marshal(Payload{ID: id, Type: Reply, Session: "s1", Text: "go on", Conversation: "conv", After: "m1", Expires: expires.UnixMilli()})
+	return string(b)
+}
+
+func TestLateReplyBoundToItsConversationIsAccepted(t *testing.T) {
+	s := ecSigner(t, "pixel")
+	// Signed a day ago, with a grant that ran out since.
+	signed := now.Add(-24 * time.Hour)
+	ss := newSession(t, s, GrantStatement{Expires: signed.Add(time.Hour).UnixMilli()})
+	p := boundReply("c1", signed.Add(time.Minute))
+	got, err := Check("c1", Command{Type: Reply, Payload: p, Grant: ptr(ss.sign(p))}, []Key{s.key}, origin, rpID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Late(now) || got.Conversation != "conv" || got.After != "m1" {
+		t.Fatalf("payload = %+v", got)
+	}
+}
+
+func TestLateCommandsOtherThanBoundRepliesExpire(t *testing.T) {
+	s := ecSigner(t, "pixel")
+	ss := newSession(t, s, GrantStatement{})
+	unbound := payload("c1", Reply, now.Add(-time.Second))
+	b, _ := json.Marshal(Payload{ID: "c1", Type: Stop, Session: "s1", Conversation: "conv", Expires: now.Add(-time.Second).UnixMilli()})
+	stop := string(b)
+	for _, c := range []Command{
+		{Type: Reply, Payload: unbound, Grant: ptr(ss.sign(unbound))},
+		{Type: Stop, Payload: stop, Grant: ptr(ss.sign(stop))},
+	} {
+		if _, err := Check("c1", c, []Key{s.key}, origin, rpID, now); err == nil || !strings.Contains(err.Error(), "expired") {
+			t.Fatalf("%s: err = %v", c.Type, err)
+		}
+	}
+}
+
+func TestLateReplyStillNeedsAGrantValidWhenSigned(t *testing.T) {
+	s := ecSigner(t, "pixel")
+	signed := now.Add(-24 * time.Hour)
+	ss := newSession(t, s, GrantStatement{Expires: signed.UnixMilli()})
+	p := boundReply("c1", signed.Add(time.Minute))
+	if _, err := Check("c1", Command{Type: Reply, Payload: p, Grant: ptr(ss.sign(p))}, []Key{s.key}, origin, rpID, now); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("err = %v", err)
+	}
+}

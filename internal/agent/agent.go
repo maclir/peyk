@@ -207,6 +207,11 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if err := a.finishTasks(ctx); err != nil {
 		return err
 	}
+	if conversationsChanged(prev, a.sessions) {
+		if err := a.dropHeld(ctx); err != nil {
+			return err
+		}
+	}
 	if a.Refreshed != nil {
 		a.Refreshed(a.Now(), snaps)
 	}
@@ -273,7 +278,25 @@ func (a *Agent) cleared(ctx context.Context, id, transcript string) error {
 	for id, s := range a.sessions {
 		docs[id] = s
 	}
-	return a.sync(ctx, store.Sessions, docs)
+	if err := a.sync(ctx, store.Sessions, docs); err != nil {
+		return err
+	}
+	return a.dropHeld(ctx)
+}
+
+// conversationsChanged says whether any session ended, or moved to another
+// conversation. On the first refresh it is true, since held replies may have
+// outlived their conversation while the agent was stopped.
+func conversationsChanged(prev, next map[string]session.Snapshot) bool {
+	if prev == nil {
+		return true
+	}
+	for id, p := range prev {
+		if n, ok := next[id]; !ok || n.Transcript.ID != p.Transcript.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // ciRun is what the agent knows about one pushed commit's workflow runs.

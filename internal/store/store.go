@@ -102,12 +102,17 @@ type Store interface {
 
 // Listener delivers what the phone leaves for the laptop.
 type Listener interface {
-	// Commands sends every pending command, including ones already waiting,
-	// until ctx ends or listening fails.
+	// Commands sends every pending command, including ones already waiting
+	// in the order they were made, until ctx ends or listening fails.
 	Commands(ctx context.Context, out chan<- Incoming) error
 	// Pairing waits for the phone to write the pairing with this code.
 	Pairing(ctx context.Context, code string) (Pairing, error)
 	Subscriptions(ctx context.Context) ([]notify.Subscription, error)
+}
+
+// HeldReader finds the replies held for the phone to send again or cancel.
+type HeldReader interface {
+	HeldReplies(ctx context.Context) (map[string]command.Command, error)
 }
 
 // TaskReader finds tasks the agent is waiting on.

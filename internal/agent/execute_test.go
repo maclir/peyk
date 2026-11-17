@@ -78,7 +78,9 @@ func newPhone(t *testing.T) phone {
 // WebAuthn assertion over it unless the type needs none.
 func (ph phone) command(id string, p command.Payload, now time.Time) store.Incoming {
 	p.ID = id
-	p.Expires = now.Add(time.Minute).UnixMilli()
+	if p.Expires == 0 {
+		p.Expires = now.Add(time.Minute).UnixMilli()
+	}
 	payload, _ := json.Marshal(p)
 	c := command.Command{Type: p.Type, Payload: string(payload), Status: command.Pending}
 	if command.Signed(p.Type) {
@@ -394,5 +396,108 @@ func TestHideNeedsAStore(t *testing.T) {
 	}
 	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed {
 		t.Fatalf("result = %v", res)
+	}
+}
+
+// lateReplyAgent has one session, knip, in conversation conv at message m1,
+// and a reply to it that waited a day for the laptop.
+func lateReplyAgent(t *testing.T) (*Agent, *fakeCollector, *store.Memory, *fakeActions, func(id, conversation, after string) store.Incoming) {
+	t.Helper()
+	ph := newPhone(t)
+	c := &fakeCollector{replies: map[string]*session.Message{"conv": {ID: "m1", Text: "Done."}}}
+	c.set(knipIn(c, "conv"))
+	mem := store.NewMemory()
+	acts := &fakeActions{}
+	a := newAgent(c, mem)
+	a.Commands = &Commands{Act: acts, Keys: func() ([]command.Key, error) { return []command.Key{ph.key}, nil }, Origin: testOrigin, RPID: testRP}
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reply := func(id, conversation, after string) store.Incoming {
+		signed := a.Now().Add(-24 * time.Hour)
+		return ph.command(id, command.Payload{Type: command.Reply, Session: "k", Text: "go on",
+			Conversation: conversation, After: after, Expires: signed.Add(time.Minute).UnixMilli()}, signed)
+	}
+	return a, c, mem, acts, reply
+}
+
+func knipIn(c *fakeCollector, conversation string) session.Snapshot {
+	s := session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, Transcript: session.Transcript{ID: conversation}}
+	c.Transcribe(&s)
+	return s
+}
+
+func TestLateReplyIsSentWhileItsConversationStands(t *testing.T) {
+	a, _, mem, acts, reply := lateReplyAgent(t)
+	in := reply("c1", "conv", "m1")
+	mem.Send(in)
+	if err := a.execute(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Done || strings.Join(acts.calls, "|") != "send k: go on" {
+		t.Fatalf("status = %v, calls = %v", res, acts.calls)
+	}
+}
+
+func TestLateReplyIsHeldOnceTheConversationMovedOn(t *testing.T) {
+	a, _, mem, acts, reply := lateReplyAgent(t)
+	in := reply("c1", "conv", "m0")
+	mem.Send(in)
+	if err := a.execute(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Held || len(acts.calls) != 0 {
+		t.Fatalf("status = %v, calls = %v", res, acts.calls)
+	}
+}
+
+func TestLateReplyToAClearedConversationFails(t *testing.T) {
+	a, _, mem, acts, reply := lateReplyAgent(t)
+	in := reply("c1", "old", "m1")
+	mem.Send(in)
+	if err := a.execute(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed || !strings.Contains(res["error"].(string), "cleared") || len(acts.calls) != 0 {
+		t.Fatalf("status = %v, calls = %v", res, acts.calls)
+	}
+}
+
+func TestHeldRepliesAreDroppedWhenTheirConversationIsCleared(t *testing.T) {
+	ctx := context.Background()
+	a, c, mem, _, reply := lateReplyAgent(t)
+	in := reply("c1", "conv", "m0")
+	mem.Send(in)
+	if err := a.execute(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Held {
+		t.Fatalf("an unchanged conversation dropped the held reply: %v", res)
+	}
+	c.set(knipIn(c, "new"))
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed || !strings.Contains(res["error"].(string), "cleared") {
+		t.Fatalf("status = %v", res)
+	}
+}
+
+func TestClearFromThePhoneDropsHeldReplies(t *testing.T) {
+	ctx := context.Background()
+	a, _, mem, _, reply := lateReplyAgent(t)
+	in := reply("c1", "conv", "m0")
+	mem.Send(in)
+	if err := a.execute(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.cleared(ctx, "k", "cleared-k"); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed {
+		t.Fatalf("status = %v", res)
 	}
 }

@@ -94,6 +94,8 @@ const MaxPending = 20
 
 // Message is the agent's latest reply, kept as the Markdown it wrote.
 type Message struct {
+	// ID is the transcript entry's uuid.
+	ID   string    `firestore:"id" json:"id,omitempty"`
 	Text string    `firestore:"text" json:"text"`
 	At   time.Time `firestore:"at" json:"at"`
 }
@@ -112,6 +114,11 @@ type Snapshot struct {
 	// Cleared is true while the session's conversation is empty: just
 	// started, or just cleared with /clear.
 	Cleared bool `firestore:"cleared" json:"cleared"`
+	// Conversation is the transcript id, and Latest the id of the newer of
+	// Message and Prompt. A reply names both, so a reply the laptop picks up
+	// late lands only where it was written for.
+	Conversation string `firestore:"conversation" json:"conversation,omitempty"`
+	Latest       string `firestore:"latest" json:"latest,omitempty"`
 	// Prototypes are the pages the conversation published, newest first.
 	Prototypes []Prototype `firestore:"prototypes" json:"prototypes,omitempty"`
 	// Question is what the agent is asking with its multiple-choice dialog,
@@ -165,6 +172,14 @@ const ClearCommand = "/clear"
 func (s *Snapshot) SetExchange(reply, prompt *Message) {
 	s.Message, s.Prompt = reply, prompt
 	s.Cleared = s.Transcript.ID != "" && reply == nil && (prompt == nil || prompt.Text == ClearCommand)
+	s.Conversation = s.Transcript.ID
+	s.Latest = ""
+	switch {
+	case reply != nil && (prompt == nil || !prompt.At.After(reply.At)):
+		s.Latest = reply.ID
+	case prompt != nil:
+		s.Latest = prompt.ID
+	}
 }
 
 // Transcript locates a Claude Code transcript: the directory for the

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -45,6 +46,9 @@ type Commands struct {
 // failing to record the outcome stops the agent.
 func (a *Agent) execute(ctx context.Context, in store.Incoming) error {
 	err := a.run(ctx, in)
+	if errors.Is(err, errHeld) {
+		return a.Store.Update(ctx, store.Commands, in.ID, map[string]any{"status": command.Held})
+	}
 	fields := map[string]any{"status": command.Done, "finished_at": a.Now()}
 	if err != nil {
 		fields["status"], fields["error"] = command.Failed, err.Error()
@@ -110,6 +114,11 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		}
 		if p.Text == "" && len(p.Images) == 0 {
 			return errors.New("reply needs text or an image")
+		}
+		if p.Late(a.Now()) {
+			if err := lateReply(s, p); err != nil {
+				return err
+			}
 		}
 		text, err := a.attach(ctx, p.Text, p.Images)
 		if err != nil {
@@ -201,4 +210,50 @@ func (a *Agent) session(id string) (session.Snapshot, error) {
 		return s, fmt.Errorf("no session %s", id)
 	}
 	return s, nil
+}
+
+// errHeld leaves a reply for the phone to send again or cancel.
+var errHeld = errors.New("the conversation moved on since this reply was written")
+
+// errConversationGone fails a reply whose conversation was cleared or
+// replaced: it was written for a context the session no longer has.
+var errConversationGone = errors.New("the conversation was cleared before the laptop could send this reply")
+
+// lateReply says whether a reply that waited for the laptop still fits its
+// session: the same conversation, still at the message it answers.
+func lateReply(s session.Snapshot, p command.Payload) error {
+	if s.Transcript.ID != p.Conversation {
+		return errConversationGone
+	}
+	if s.Latest != p.After {
+		return errHeld
+	}
+	return nil
+}
+
+// dropHeld fails the held replies whose session or conversation is gone,
+// so a clear empties the session's reply queue.
+func (a *Agent) dropHeld(ctx context.Context) error {
+	hr, ok := a.Store.(store.HeldReader)
+	if !ok {
+		return nil
+	}
+	held, err := hr.HeldReplies(ctx)
+	if err != nil {
+		return err
+	}
+	for id, c := range held {
+		var p command.Payload
+		if json.Unmarshal([]byte(c.Payload), &p) == nil {
+			if s, ok := a.sessions[p.Session]; ok && s.Transcript.ID == p.Conversation {
+				continue
+			}
+		}
+		if err := a.Store.Update(ctx, store.Commands, id, map[string]any{
+			"status": command.Failed, "error": errConversationGone.Error(), "finished_at": a.Now(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

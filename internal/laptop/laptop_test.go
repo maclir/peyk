@@ -257,6 +257,20 @@ func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
 	}
 }
 
+func TestExchangeNamesItsTranscriptEntries(t *testing.T) {
+	claude := t.TempDir()
+	work := "/w"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		`{"type":"user","uuid":"p1","timestamp":"2026-11-14T09:00:00Z","origin":{"kind":"human"},"message":{"content":"Add a --json flag"}}`,
+		`{"type":"assistant","uuid":"r1","timestamp":"2026-11-14T09:00:05Z","message":{"content":[{"type":"text","text":"Done."}]}}`,
+	)
+	s := session.Snapshot{Transcript: session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"}}
+	s.SetExchange(LastExchange(s.Transcript))
+	if s.Prompt.ID != "p1" || s.Message.ID != "r1" || s.Latest != "r1" || s.Conversation != "s" {
+		t.Fatalf("snapshot = %+v", s)
+	}
+}
+
 func clearEntry(ts string) string {
 	return `{"type":"user","isSidechain":false,"timestamp":"` + ts + `","message":{"role":"user","content":"<command-name>/clear</command-name>\n            <command-message>clear</command-message>"}}`
 }

@@ -115,8 +115,15 @@ service cloud.firestore {
     // The laptop checks every command's passkey signature against keys it
     // holds locally; these rules only keep the documents well-formed and
     // write-once, so a signed payload cannot be replayed into a reused id.
+    // The one change the phone makes is to withdraw a reply still waiting
+    // for the laptop; the payload stays as it was signed.
     match /commands/{id} {
       allow read: if isOwner();
+      allow update: if isOwner()
+        && resource.data.type == 'reply'
+        && resource.data.status in ['pending', 'held']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status == 'cancelled';
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'grant', 'status', 'created_at'])
         && request.resource.data.type in ['dispatch', 'reply', 'answer', 'clear', 'stop', 'start', 'restart', 'push', 'check', 'update', 'hide', 'show']

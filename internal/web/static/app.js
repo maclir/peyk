@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, searchProjects, sentTasks, sortProjects, sortSessions } from "./board.js";
+import { STATES, ago, onDefaultBranch, usageLeft, answerText, ciStatus, awaitingReply, currentTask, doneTasks, filterQueue, flags, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, rankAt, replyFields, searchProjects, sentTasks, sortProjects, sortSessions, waitingReplies } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 
@@ -88,7 +88,7 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", undoHide: null,
@@ -121,6 +121,15 @@ async function start(cfg) {
       fs.onSnapshot(fs.collection(db, "tasks"), { includeMetadataChanges: true }, (snap) => {
         state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data(), saving: d.metadata.hasPendingWrites }));
         state.loaded.add("tasks");
+        render();
+      }, failed),
+      // Replies the laptop has not finished. One that leaves this list was
+      // sent, failed or withdrawn, so its images are no longer needed.
+      fs.onSnapshot(fs.query(fs.collection(db, "commands"), fs.where("status", "in", ["pending", "held"])), (snap) => {
+        const next = waitingReplies(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const left = state.replies.filter((r) => !next.some((n) => n.id === r.id));
+        state.replies = next;
+        if (left.length) dropUnused(left);
         render();
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "status"), (snap) => {
@@ -335,10 +344,12 @@ async function start(cfg) {
   // none), stores it, and reports each step and what the laptop made of it
   // through report. key stays busy until the laptop answers, so the same
   // action cannot be sent twice meanwhile. Resolves once the command is
-  // stored, to whether it was.
-  async function sendCommand(type, fields, label, key, report = setStatus, onDone = null) {
+  // stored, to whether it was. With queue, the command is stored while the
+  // laptop is offline too, for it to pick up when it is back; cancel names
+  // a waiting reply this one replaces, withdrawn in the same write.
+  async function sendCommand(type, fields, label, key, report = setStatus, onDone = null, { queue = false, cancel = null } = {}) {
     if (state.busy.has(key)) return false;
-    if (!laptopOnline(state.laptop, Date.now())) {
+    if (!queue && !laptopOnline(state.laptop, Date.now())) {
       report(`${label}: the laptop is offline, so nothing was sent.`);
       return false;
     }
@@ -356,19 +367,30 @@ async function start(cfg) {
     try {
       if (type !== "push" && type !== "check") data.grant = await passkey.signCommand(payload, () => report(`${label}: approve with your passkey…`, true));
       report(`${label}: sending…`, true);
-      await fs.setDoc(ref, data);
+      if (cancel) {
+        const batch = fs.writeBatch(db);
+        batch.set(ref, data);
+        batch.update(fs.doc(db, "commands", cancel), { status: "cancelled" });
+        await batch.commit();
+      } else {
+        await fs.setDoc(ref, data);
+      }
     } catch (err) {
       finish(err.name === "NotAllowedError"
         ? `${label}: not sent. The passkey prompt was cancelled, or this device has no paired passkey (run make pair on the laptop).`
         : `${label}: not sent. ${err.message}`);
       return false;
     }
+    if (queue && !laptopOnline(state.laptop, Date.now())) {
+      finish(`${label}: queued. It goes out when the laptop is back online.`);
+      return true;
+    }
     report(`${label}: waiting for the laptop…`, true);
     // The payload expires after a minute, so a laptop that has not answered
-    // by then will refuse it.
+    // by then will refuse it, unless it is a queued reply.
     const timer = setTimeout(() => {
       unsub();
-      finish(`${label}: the laptop did not answer.`);
+      finish(queue ? `${label}: queued. The laptop has not picked it up yet.` : `${label}: the laptop did not answer.`);
     }, 75_000);
     const unsub = fs.onSnapshot(ref, (snap) => {
       const c = snap.data();
@@ -376,7 +398,10 @@ async function start(cfg) {
       clearTimeout(timer);
       unsub();
       if (c.status === "failed" && String(c.error).startsWith("session approval:")) passkey.forgetGrant();
-      finish(c.status === "done" ? `${label}: done.` : `${label} failed: ${c.error}`);
+      finish(c.status === "done" ? `${label}: done.`
+        : c.status === "held" ? `${label}: held, because the conversation moved on. Send it anyway or discard it.`
+        : c.status === "cancelled" ? `${label}: cancelled.`
+        : `${label} failed: ${c.error}`);
       if (c.status === "done") onDone?.();
     }, (err) => {
       clearTimeout(timer);
@@ -1065,6 +1090,7 @@ async function start(cfg) {
               h("span", {}, pushLabel(s.git)),
               ciMeta(s.git),
               s.git && s.git.dirty ? h("span", {}, `${s.git.dirty} changed`) : null,
+              waitingLabel(s.id),
             ),
           ),
         ),
@@ -1115,6 +1141,7 @@ async function start(cfg) {
         h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
         msg,
       ),
+      waitingReplyList(s),
       s.question ? questionCard(s) : null,
       h("details", { class: "facts" }, h("summary", {}, "Details"),
         h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
@@ -1356,25 +1383,63 @@ async function start(cfg) {
           return;
         }
       }
-      // The laptop has saved a reply's images by the time it answers, so
-      // only images a task still names are kept.
-      const report = (msg, busy = false) => {
-        setStatus(msg, busy);
-        if (!busy) dropUnused(ids);
-      };
-      if (await sendCommand("reply", { session: s.id, text: v, ...(ids.length ? { images: ids } : {}) }, label, key, report)) {
+      const queued = state.replies.find((r) => r.session === s.id && r.status === "pending");
+      const merged = queued ? mergeReply(queued, v, ids, MAX_IMAGES) : { text: v, images: ids };
+      if (!merged) {
+        setStatus(`${label}: not sent. With the reply already queued, that is more than ${MAX_IMAGES} images.`);
+        dropUnused([{ images: ids }]);
+        return;
+      }
+      if (await sendCommand("reply", replyFields(s, merged.text, merged.images), label, key, setStatus, null, { queue: true, cancel: queued?.id })) {
         // A redraw while sending replaces this textarea, so clear the one on screen.
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
         dropDraft(key);
         render();
+      } else {
+        dropUnused([{ images: ids }]);
       }
     };
     return composerForm({ key, id: `reply-${s.id}`, label: "Reply", placeholder: `Reply to ${s.title}…`, rows: "1", cls: "respond", submitLabel: "Send reply", send: reply });
   }
 
-  function dropUnused(ids) {
-    const unused = orphanedImages(state.tasks, [{ images: ids }]);
+  function waitingLabel(id) {
+    const mine = state.replies.filter((r) => r.session === id);
+    if (!mine.length) return null;
+    return h("span", { class: "waitmeta" }, mine.some((r) => r.status === "held") ? "reply held" : "reply queued");
+  }
+
+  // Replies waiting for the laptop: queued while it is away, or held because
+  // the conversation moved on before it saw them, which needs your say.
+  function waitingReplyList(s) {
+    const mine = state.replies.filter((r) => r.session === s.id);
+    if (!mine.length) return null;
+    const online = laptopOnline(state.laptop, Date.now());
+    const withdraw = (r, what) => track(`withdraw:${r.id}`, () =>
+      fs.updateDoc(fs.doc(db, "commands", r.id), { status: "cancelled" })
+        .then(() => setStatus(`${what}.`))
+        .catch((err) => setStatus(`Could not withdraw the reply: ${err.message}`)));
+    return h("div", { class: "convo waiting" }, mine.map((r) => {
+      const body = h("div", { class: "reply sent queued" });
+      body.innerHTML = r.text ? renderMarkdown(r.text) : "";
+      if (r.images.length) body.append(h("p", {}, `${r.images.length} image${r.images.length === 1 ? "" : "s"}`));
+      const held = r.status === "held";
+      const actions = held
+        ? [busyButton(`resend:${r.id}`, { type: "button", class: "link", onclick: () =>
+            sendCommand("reply", replyFields(s, r.text, r.images), `Reply to ${s.title}`, `resend:${r.id}`, setStatus, null, { queue: true, cancel: r.id }) }, "Send anyway"),
+          busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "Reply discarded") }, "Discard")]
+        : [busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "Reply cancelled") }, "Cancel")];
+      return h("div", { class: "waitrow" },
+        h("span", { class: "who mine", role: "status" },
+          held ? "Held: the conversation moved on since you wrote this" : online ? "Sending…" : "Queued until the laptop is back online"),
+        body,
+        h("div", { class: "waitacts" }, actions));
+    }));
+  }
+
+  // Images no task or waiting reply names once gone are deleted.
+  function dropUnused(gone) {
+    const unused = orphanedImages([...state.tasks, ...state.replies], gone);
     if (!unused.length) return;
     const batch = fs.writeBatch(db);
     for (const id of unused) batch.delete(fs.doc(db, "attachments", id));
