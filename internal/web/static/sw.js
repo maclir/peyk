@@ -74,40 +74,123 @@ self.addEventListener("push", (event) => {
 // subscription otherwise, and Chrome shows a generic one in its place. A note
 // for the worker already on screen is shown silently and closed at once.
 async function notify(note) {
-  const watched = Boolean(note.session) && (await watching(note.session));
-  await self.registration.showNotification(note.title, {
-    body: note.body,
-    tag: note.session || undefined,
-    renotify: Boolean(note.session) && !watched,
-    silent: watched,
-    badge: "/static/notification-badge.png",
-    icon: note.icon || undefined,
-    data: { url: note.url },
-  });
+  const visible = await visibleWindows();
+  const watched = Boolean(note.session) && (await watching(visible, note.session));
+  await log("push", { session: note.session, watched, windows: describe(visible) });
+  try {
+    await self.registration.showNotification(note.title, {
+      body: note.body,
+      tag: note.session || undefined,
+      renotify: Boolean(note.session) && !watched,
+      silent: watched,
+      badge: "/static/notification-badge.png",
+      icon: note.icon || undefined,
+      data: { url: note.url },
+    });
+  } catch (err) {
+    await log("show failed", { session: note.session, error: String(err) });
+    throw err;
+  }
   if (watched) (await self.registration.getNotifications({ tag: note.session })).forEach((n) => n.close());
+}
+
+async function visibleWindows() {
+  return (await self.clients.matchAll({ type: "window" })).filter((w) => w.visibilityState === "visible");
 }
 
 // A window's url here does not follow its hash, so only the page knows which
 // worker it shows. A frozen page never answers.
-async function watching(session) {
-  const wins = (await self.clients.matchAll({ type: "window" })).filter((w) => w.visibilityState === "visible");
-  const answers = wins.map((w) => new Promise((resolve) => {
-    const { port1, port2 } = new MessageChannel();
-    port1.onmessage = (e) => resolve(e.data === true);
-    setTimeout(() => resolve(false), 500);
-    w.postMessage({ type: "showing", session }, [port2]);
-  }));
-  return (await Promise.all(answers)).some(Boolean);
+async function watching(wins, session) {
+  return (await Promise.all(wins.map((w) => ask(w, { type: "showing", session }, 500)))).some((a) => a === true);
 }
+
+function ask(win, message, ms) {
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = (e) => resolve(e.data);
+    setTimeout(() => resolve(undefined), ms);
+    win.postMessage(message, [port2]);
+  });
+}
+
+const describe = (wins) => wins.map((w) => ({ url: w.url, visibility: w.visibilityState, focused: w.focused }));
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
-      const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
-      if (win) return win.navigate(url).then((w) => (w || win).focus());
-      return self.clients.openWindow(url);
-    }),
-  );
+  event.waitUntil(open(event.notification.data?.url || "/", event.notification.tag));
+});
+
+// The page routes by its hash, so an open window is told where to go rather
+// than reloaded. Focus comes first: browsers allow it only briefly after the
+// click, and a navigation can outlast that or never settle for a hash-only
+// change. A page that does not answer, frozen or from an older release, is
+// navigated instead.
+async function open(path, tag) {
+  const url = new URL(path, self.location.origin).href;
+  const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const win = wins.find((w) => w.focused) || wins.find((w) => w.visibilityState === "visible") || wins[0];
+  const entry = { tag, url, windows: describe(wins) };
+  try {
+    if (!win) {
+      entry.opened = Boolean(await self.clients.openWindow(url));
+      return;
+    }
+    entry.focused = await win.focus().then(() => true, (err) => String(err));
+    entry.answered = (await ask(win, { type: "open", url }, 1000)) === true;
+    if (!entry.answered) entry.navigated = Boolean(await win.navigate(url));
+  } catch (err) {
+    entry.error = String(err);
+  } finally {
+    await log("click", entry);
+  }
+}
+
+// What each push and click found, kept on the device because a phone's
+// service worker has no console anyone can read. The page adds its own
+// entries and reads them back through messages, since only the worker opens
+// this database.
+const LOG_LIMIT = 200;
+
+function logDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("peyk-log", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("events", { autoIncrement: true });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function logTx(mode, work) {
+  const db = await logDB();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("events", mode);
+      const result = work(tx.objectStore("events"));
+      tx.oncomplete = () => resolve(result.result);
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function log(event, detail) {
+  try {
+    await logTx("readwrite", (store) => {
+      const add = store.add({ at: new Date().toISOString(), release: SHELL, event, ...detail });
+      add.onsuccess = () => store.delete(IDBKeyRange.upperBound(add.result - LOG_LIMIT));
+      return add;
+    });
+  } catch {
+    // A log that cannot be written must not cost the user a notification.
+  }
+}
+
+self.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (data.type === "log") event.waitUntil(log(data.event, data.detail));
+  if (data.type === "read log") {
+    event.waitUntil(logTx("readonly", (store) => store.getAll()).catch((err) => [{ event: "log unreadable", error: String(err) }])
+      .then((entries) => event.ports[0]?.postMessage(entries)));
+  }
 });

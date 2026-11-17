@@ -220,6 +220,21 @@ test.describe('signed in', () => {
     });
   });
 
+  test("a notification click shows its worker in the open window and is logged", async () => {
+    await page.goto('/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await expect(page.locator('.card', { hasText: 'knip' })).toBeVisible();
+    const [worker] = page.context().serviceWorkers();
+    await worker.evaluate(() => (self as any).open('/#s-k', 'k'));
+    await expect(page).toHaveURL(/#s-k$/);
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+
+    await page.evaluate(() => { location.hash = '#log'; });
+    const click = page.locator('.notelog li', { hasText: '"event":"click"' });
+    await expect(click).toContainText('"answered":true');
+    await expect(page.locator('.notelog li', { hasText: '"event":"opened"' })).toContainText('#s-k');
+  });
+
   // A phone that freezes the app leaves its Firestore connection dead without
   // an offline event, and the SDK's next retry can be a minute away. Held
   // requests stand in for that dead connection.
@@ -583,8 +598,10 @@ test.describe('signed in', () => {
     await reply.getByRole('button', { name: 'Send reply' }).click();
     await expect(page.locator('.reply.queued')).toHaveCount(1);
     await expect(page.locator('.reply.queued')).toContainText('And --yaml');
-    const mine = (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'reply' && c.fields.payload.stringValue.includes('--csv'));
-    expect(mine.map((c) => c.fields.status.stringValue).sort()).toEqual(['cancelled', 'pending']);
+    // The page draws its own batch before the emulator has committed it.
+    const queuedReplies = async () => (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'reply' && c.fields.payload.stringValue.includes('--csv'));
+    await expect.poll(async () => (await queuedReplies()).map((c) => c.fields.status.stringValue).sort()).toEqual(['cancelled', 'pending']);
+    const mine = await queuedReplies();
     const waiting = mine.find((c) => c.fields.status.stringValue === 'pending')!;
     expect(JSON.parse(waiting.fields.payload.stringValue)).toMatchObject({ session: 'k', text: 'Also add --csv\n\nAnd --yaml', conversation: 'conv', after: 'm1' });
 

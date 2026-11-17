@@ -9,6 +9,21 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
+// Adds to the service worker's notification log, which #log shows.
+const noteLog = (event, detail) => navigator.serviceWorker?.controller?.postMessage({ type: "log", event, detail });
+
+// A notification click asks the open window to show its worker. This answers
+// before sign-in finishes, so a page still starting is not navigated away.
+navigator.serviceWorker?.addEventListener("message", (e) => {
+  if (e.data?.type !== "open") return;
+  const url = new URL(e.data.url, location.href);
+  noteLog("opened", { url: url.href, from: location.hash, hidden: document.hidden });
+  e.ports[0]?.postMessage(true);
+  if (url.pathname !== location.pathname) location.assign(url.href);
+  else if (url.hash !== location.hash) location.hash = url.hash;
+  else window.dispatchEvent(new HashChangeEvent("hashchange"));
+});
+
 const app = document.getElementById("app");
 const hstatEl = document.getElementById("hstat");
 const laptopEl = document.getElementById("laptop");
@@ -269,6 +284,7 @@ async function start(cfg) {
     );
     const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
+    else if (location.hash === "#log") app.replaceChildren(logView());
     else if (s) app.replaceChildren(status, detail(s));
     else if (view === "inbox") app.replaceChildren(tabs, status, inbox());
     else app.replaceChildren(tabs, status, board());
@@ -281,12 +297,23 @@ async function start(cfg) {
   }
 
   // Notifications are tagged with their worker's id; seeing the worker
-  // answers them.
+  // answers them. Every render of a worker gets here, so the log records a
+  // dismissal that found nothing once per visit, and every one that found or
+  // failed something.
+  const dismissLogged = new Set();
+  document.addEventListener("visibilitychange", () => dismissLogged.clear());
+  window.addEventListener("hashchange", () => dismissLogged.clear());
   function dismissNotes(id) {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.ready
-      .then((reg) => reg.getNotifications({ tag: id }))
-      .then((notes) => notes.forEach((n) => n.close()), () => {});
+      .then((reg) => reg.getNotifications())
+      .then((notes) => {
+        const mine = notes.filter((n) => n.tag === id);
+        mine.forEach((n) => n.close());
+        if (mine.length || !dismissLogged.has(id)) noteLog("dismiss", { session: id, closed: mine.length, others: notes.filter((n) => n.tag !== id).map((n) => n.tag) });
+        dismissLogged.add(id);
+      })
+      .catch((err) => noteLog("dismiss failed", { session: id, error: String(err) }));
   }
   // The service worker asks before showing a note whether its worker is on
   // screen; a window's url as the worker sees it lacks the hash.
@@ -1068,6 +1095,20 @@ async function start(cfg) {
     }
   }
 
+  // The notification log, newest first, read again on every render.
+  function logView() {
+    const list = h("ol", { class: "notelog" }, h("li", { class: "hint" }, "Loading…"));
+    const ctl = navigator.serviceWorker?.controller;
+    if (!ctl) list.replaceChildren(h("li", { class: "hint" }, "No service worker controls this page."));
+    else {
+      const { port1, port2 } = new MessageChannel();
+      port1.onmessage = (e) => list.replaceChildren(...(e.data.length ? e.data.reverse().map((x) => h("li", {}, JSON.stringify(x))) : [h("li", { class: "hint" }, "Nothing logged yet.")]));
+      ctl.postMessage({ type: "read log" }, [port2]);
+    }
+    return h("div", {}, h("p", {}, h("a", { href: "#" }, "Back")), h("h2", { class: "group" }, "Notification log"),
+      h("p", { class: "hint" }, `Permission: ${"Notification" in window ? Notification.permission : "unsupported"} · subscribed here: ${state.push}`), list);
+  }
+
   function board() {
     const now = Date.now();
     const list = sortSessions([...state.sessions.values()]);
@@ -1106,6 +1147,7 @@ async function start(cfg) {
         ),
       );
     }
+    if (state.push === "on") out.push(h("p", { class: "hint loglink" }, h("a", { href: "#log" }, "Notification log")));
     return h("div", { class: "board" }, out);
   }
 

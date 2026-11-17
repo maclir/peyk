@@ -38,6 +38,9 @@ html.locked { overflow: hidden; }
 .meter.low i { background: var(--bad); }
 .notice { color: var(--muted); margin-top: 2rem; }
 .hint { color: var(--muted); }
+.loglink { font-size: 0.8rem; text-align: center; }
+.notelog { padding-left: 1.2em; font: 0.72rem/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
+.notelog li { margin-bottom: 6px; }
 
 button { font: inherit; font-weight: 600; padding: 0.6rem 1rem; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
