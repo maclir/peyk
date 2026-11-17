@@ -4,6 +4,7 @@ package session
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,33 @@ func (s State) Rank() int {
 		}
 	}
 	return 99
+}
+
+// Activity is when the card last changed in the way its group cares about:
+// the newest commit for work waiting to be pushed, otherwise the newer of the
+// latest reply and prompt.
+func (s Snapshot) Activity() time.Time {
+	if s.State == Unpushed && s.Git != nil && s.Git.Last != nil {
+		return s.Git.Last.At
+	}
+	var t time.Time
+	for _, m := range []*Message{s.Message, s.Prompt} {
+		if m != nil && m.At.After(t) {
+			t = m.At
+		}
+	}
+	return t
+}
+
+// Compare orders the board: by state, then most recent activity, then title.
+func Compare(a, b Snapshot) int {
+	if d := a.State.Rank() - b.State.Rank(); d != 0 {
+		return d
+	}
+	if c := b.Activity().Compare(a.Activity()); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Title, b.Title)
 }
 
 // Label is the state in the words the phone shows.

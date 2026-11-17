@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -127,5 +128,30 @@ func TestLatestIsTheNewerOfReplyAndPrompt(t *testing.T) {
 		if s.Latest != tt.want {
 			t.Errorf("SetExchange(%+v, %+v).Latest = %q, want %q", tt.reply, tt.prompt, s.Latest, tt.want)
 		}
+	}
+}
+
+func TestCompareOrdersByStateThenRecentActivityThenTitle(t *testing.T) {
+	at := func(m int) time.Time { return time.Date(2026, 11, 17, 12, m, 0, 0, time.UTC) }
+	msg := func(m int) *Message { return &Message{At: at(m)} }
+	commit := func(m int) *Git { return &Git{Last: &Commit{At: at(m)}} }
+	in := []Snapshot{
+		{Title: "old question", State: NeedsInput, Message: msg(1)},
+		{Title: "dirty", State: Dirty, Message: msg(9)},
+		{Title: "new question", State: NeedsInput, Message: msg(1), Prompt: msg(5)},
+		{Title: "old commit", State: Unpushed, Message: msg(9), Git: commit(1)},
+		{Title: "new commit", State: Unpushed, Message: msg(0), Git: commit(2)},
+		{Title: "b", State: Idle},
+		{Title: "a", State: Idle},
+		{Title: "recent idle", State: Idle, Message: msg(3)},
+	}
+	slices.SortStableFunc(in, Compare)
+	var got []string
+	for _, s := range in {
+		got = append(got, s.Title)
+	}
+	want := []string{"new question", "old question", "dirty", "new commit", "old commit", "recent idle", "a", "b"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

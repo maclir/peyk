@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,7 +70,7 @@ func (Collector) Exchange(t session.Transcript) (reply, prompt *session.Message)
 	return LastExchange(t)
 }
 
-// All describes every live Claude Code session, the ones needing attention first.
+// All describes every live Claude Code session in board order.
 func (c Collector) All(ctx context.Context) ([]session.Snapshot, error) {
 	sessions, err := c.Aoe.Sessions(ctx)
 	if err != nil {
@@ -80,12 +80,7 @@ func (c Collector) All(ctx context.Context) ([]session.Snapshot, error) {
 	for _, s := range sessions {
 		out = append(out, c.Snapshot(ctx, s))
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].State.Rank() != out[j].State.Rank() {
-			return out[i].State.Rank() < out[j].State.Rank()
-		}
-		return out[i].Title < out[j].Title
-	})
+	slices.SortStableFunc(out, session.Compare)
 	return out, nil
 }
 

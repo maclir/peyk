@@ -47,7 +47,7 @@ describe('renderMarkdown', () => {
 });
 
 describe('board', () => {
-  it('sorts by what needs attention, then by title', () => {
+  it('sorts by what needs attention, then by title when nothing has happened', () => {
     const got = sortSessions([
       { title: 'b', state: 'idle' },
       { title: 'z', state: 'needs_input' },
@@ -55,6 +55,19 @@ describe('board', () => {
       { title: 'a', state: 'idle' },
     ]).map((s: any) => `${s.state}:${s.title}`);
     expect(got).toEqual(['needs_input:z', 'unpushed:a', 'idle:a', 'idle:b']);
+  });
+
+  it('sorts within a state by most recent activity, and unpushed work by its newest commit', () => {
+    const got = sortSessions([
+      { title: 'a', state: 'needs_input', message: { at: '2026-11-17T12:01:00Z' } },
+      { title: 'b', state: 'needs_input', message: { at: '2026-11-17T12:01:00Z' }, prompt: { at: '2026-11-17T12:05:00Z' } },
+      { title: 'c', state: 'error', message: { at: '2026-11-17T12:09:00Z' } },
+      { title: 'd', state: 'unpushed', message: { at: '2026-11-17T12:09:00Z' }, git: { last: { at: '2026-11-17T12:01:00Z' } } },
+      { title: 'e', state: 'unpushed', git: { last: { at: '2026-11-17T12:02:00Z' } } },
+      { title: 'f', state: 'idle' },
+      { title: 'g', state: 'idle', message: { at: new Date('2026-11-17T12:03:00Z') } },
+    ]).map((s: any) => s.title);
+    expect(got).toEqual(['b', 'a', 'c', 'e', 'd', 'g', 'f']);
   });
 
   it('treats a laptop not seen for longer than the heartbeat explains as offline', () => {

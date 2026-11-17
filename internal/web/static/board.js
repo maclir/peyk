@@ -11,10 +11,21 @@ export const STATES = {
 };
 const ORDER = Object.keys(STATES);
 
+// Mirrors session.Compare: state, then most recent activity, then title.
 export function sortSessions(sessions) {
   return [...sessions].sort(
-    (a, b) => rank(a.state) - rank(b.state) || String(a.title).localeCompare(String(b.title)),
+    (a, b) => rank(a.state) - rank(b.state) || activity(b) - activity(a) || String(a.title).localeCompare(String(b.title)),
   );
+}
+
+function activity(s) {
+  if (s.state === "unpushed" && s.git?.last) return time(s.git.last.at);
+  return Math.max(time(s.message?.at), time(s.prompt?.at));
+}
+
+function time(v) {
+  const d = toDate(v);
+  return d && !isNaN(d) ? d.getTime() : 0;
 }
 
 function rank(state) {
