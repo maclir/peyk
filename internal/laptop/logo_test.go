@@ -102,3 +102,42 @@ func TestLogosReuseAFindUntilItIsStale(t *testing.T) {
 		t.Fatal("a stale result was reused")
 	}
 }
+
+func TestFindLogoTakesAFileNamedAfterTheRepository(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "eqo")
+	writeFile(t, filepath.Join(root, "eqo.png"), pngOf(t, 1024, color.NRGBA{0x10, 0x80, 0x40, 0xff}))
+	writeFile(t, filepath.Join(root, "other.png"), pngOf(t, 8, color.Black))
+
+	mime, raw := decodeURI(t, findLogo(root))
+	if mime != "image/png" {
+		t.Fatalf("mime = %s", mime)
+	}
+	img, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, g, b, _ := img.At(5, 5).RGBA(); r>>8 != 0x10 || g>>8 != 0x80 || b>>8 != 0x40 {
+		t.Fatalf("got colour %x %x %x, want eqo.png", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestFindLogoFallsBackToAPagesInlineFavicon(t *testing.T) {
+	root := t.TempDir()
+	page := `<html><head>
+<link rel="stylesheet" href="data:text/css,a{}">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='%23333'/%3E%3C/svg%3E">
+</head></html>`
+	writeFile(t, filepath.Join(root, "internal", "templates", "dashboard.html"), []byte(page))
+
+	mime, raw := decodeURI(t, findLogo(root))
+	if want := `<svg xmlns='http://www.w3.org/2000/svg'><rect fill='#333'/></svg>`; mime != "image/svg+xml" || string(raw) != want {
+		t.Fatalf("got %s %q, want %q", mime, raw, want)
+	}
+
+	// An image file is the project's mark before a browser tab's icon.
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
+	writeFile(t, filepath.Join(root, "logo.svg"), svg)
+	if _, raw := decodeURI(t, findLogo(root)); !bytes.Equal(raw, svg) {
+		t.Fatalf("got %q, want logo.svg", raw)
+	}
+}

@@ -8,8 +8,10 @@ import (
 	"image/png"
 	"io/fs"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -70,11 +72,23 @@ const (
 	moldMarker = "A mold: replace it with your own mark"
 )
 
+// namedLogos ranks the names a repository's mark goes by. A file named after
+// the repository itself ranks with logo.png.
+func namedLogos(root string) []string {
+	base := strings.ToLower(filepath.Base(root))
+	at := slices.Index(logoNames, "logo.png") + 1
+	return slices.Insert(slices.Clone(logoNames), at, base+".svg", base+".png")
+}
+
 func findLogo(root string) string {
 	type candidate struct {
 		path        string
 		rank, depth int
 	}
+	names := namedLogos(root)
+	// A page's inline favicon ranks below every file: it is drawn for a
+	// browser tab, not as the project's mark.
+	pageRank := len(names)
 	var found []candidate
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -88,8 +102,11 @@ func findLogo(root string) string {
 			}
 			return nil
 		}
-		if rank := slices.Index(logoNames, strings.ToLower(d.Name())); rank >= 0 {
+		name := strings.ToLower(d.Name())
+		if rank := slices.Index(names, name); rank >= 0 {
 			found = append(found, candidate{path, rank, depth})
+		} else if strings.HasSuffix(name, ".html") {
+			found = append(found, candidate{path, pageRank, depth})
 		}
 		return nil
 	})
@@ -103,12 +120,75 @@ func findLogo(root string) string {
 		return strings.Compare(a.path, b.path)
 	})
 	for _, c := range found {
-		if isMold(filepath.Dir(c.path)) {
-			continue
+		var uri string
+		switch {
+		case c.rank == pageRank:
+			uri = pageIconURI(c.path)
+		case !isMold(filepath.Dir(c.path)):
+			uri = logoURI(c.path)
 		}
-		if uri := logoURI(c.path); uri != "" {
+		if uri != "" {
 			return uri
 		}
+	}
+	return ""
+}
+
+var (
+	linkTag  = regexp.MustCompile(`(?is)<link\b[^>]*>`)
+	relIcon  = regexp.MustCompile(`(?i)\brel\s*=\s*["'][^"']*\bicon\b`)
+	dataHref = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"(data:[^"]*)"|'(data:[^']*)')`)
+)
+
+// pageIconURI returns the inline favicon a page links, which is a project's
+// only mark when it has no image file.
+func pageIconURI(path string) string {
+	page, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, tag := range linkTag.FindAll(page, -1) {
+		if !relIcon.Match(tag) {
+			continue
+		}
+		m := dataHref.FindSubmatch(tag)
+		if m == nil {
+			continue
+		}
+		href := string(m[1]) + string(m[2])
+		if uri := dataLogoURI(href); uri != "" {
+			return uri
+		}
+	}
+	return ""
+}
+
+func dataLogoURI(href string) string {
+	meta, payload, ok := strings.Cut(strings.TrimPrefix(href, "data:"), ",")
+	if !ok {
+		return ""
+	}
+	var data []byte
+	if b64, ok := strings.CutSuffix(meta, ";base64"); ok {
+		meta = b64
+		raw, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return ""
+		}
+		data = raw
+	} else {
+		raw, err := url.PathUnescape(payload)
+		if err != nil {
+			return ""
+		}
+		data = []byte(raw)
+	}
+	mime, _, _ := strings.Cut(strings.ToLower(meta), ";")
+	switch mime {
+	case "image/svg+xml":
+		return encodeLogo(data, false)
+	case "image/png":
+		return encodeLogo(data, true)
 	}
 	return ""
 }
@@ -123,8 +203,12 @@ func logoURI(path string) string {
 	if err != nil {
 		return ""
 	}
+	return encodeLogo(data, strings.HasSuffix(strings.ToLower(path), ".png"))
+}
+
+func encodeLogo(data []byte, isPNG bool) string {
 	mime := "image/svg+xml"
-	if strings.HasSuffix(strings.ToLower(path), ".png") {
+	if isPNG {
 		img, err := png.Decode(bytes.NewReader(data))
 		if err != nil {
 			return ""
