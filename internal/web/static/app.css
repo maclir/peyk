@@ -252,9 +252,7 @@ button.go.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); 
 .thead button.icon { margin: -6px -6px -6px 0; }
 .ttext { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; line-height: 1.4; }
 .ttext.one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-.menu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.menu button { padding: 8px 10px; font-size: 0.82rem; font-weight: 500; background: var(--bg); }
-.menu button.danger { color: var(--bad); border-color: var(--bad-soft); background: var(--bad-soft); }
+.thead .wmenu .pop { top: 34px; }
 .tfoot { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .tstatus { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--muted); }
 .task.waiting .tstatus:not([data-tone]) { color: var(--warn); }

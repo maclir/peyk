@@ -214,7 +214,7 @@ async function start(cfg) {
     if (!submit.disabled) form.requestSubmit(submit);
   });
   document.addEventListener("click", (e) => {
-    if (String(state.menu).startsWith("worker:") && !e.target.closest(".wmenu")) { state.menu = null; render(); }
+    if (state.menu && !e.target.closest(".wmenu")) { state.menu = null; render(); }
   });
   window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
   tuckComposerOnScroll();
@@ -631,11 +631,12 @@ async function start(cfg) {
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         h("span", { class: "grow" }),
-        h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-expanded": String(open),
-          onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more"))),
+        h("div", { class: "wmenu" },
+          h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-haspopup": "menu", "aria-expanded": String(open),
+            onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more")),
+          open ? taskMenu(t, clears, sendWith) : null)),
       h("div", { class: "ttext" }, t.text),
       taskImages(t),
-      open ? taskMenu(t, clears, sendWith) : null,
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
@@ -645,10 +646,13 @@ async function start(cfg) {
   }
 
   function taskMenu(t, clears, sendWith) {
-    return h("div", { class: "menu" },
-      clears && !state.busy.has(`send:${t.id}`) ? h("button", { type: "button", onclick: () => sendWith(t, false) }, "Send without clearing") : null,
-      h("button", { type: "button", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, "Edit"),
-      h("button", { type: "button", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, "Delete"),
+    return h("div", { class: "pop", role: "menu", onkeydown: (e) => { if (e.key === "Escape") { state.menu = null; render(); } } },
+      clears && !state.busy.has(`send:${t.id}`)
+        ? h("button", { type: "button", role: "menuitem", onclick: () => { state.menu = null; sendWith(t, false); } }, icon("prompt"), "Send without clearing")
+        : null,
+      h("button", { type: "button", role: "menuitem", "aria-label": `Edit task: ${t.text}`, onclick: () => startEdit(t) }, icon("edit"), "Edit"),
+      h("hr"),
+      h("button", { type: "button", role: "menuitem", class: "danger", "aria-label": `Delete task: ${t.text}`, onclick: () => { state.menu = null; remove(t); } }, icon("trash"), "Delete"),
     );
   }
 

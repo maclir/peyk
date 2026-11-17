@@ -353,7 +353,7 @@ test.describe('signed in', () => {
     await expect(page.getByRole('button', { name: 'Laptop offline, seen just now. Check for updates' })).toBeVisible();
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
     await task.getByRole('button', { name: /More actions/ }).click();
-    await task.getByRole('button', { name: 'Send without clearing' }).click();
+    await task.getByRole('menuitem', { name: 'Send without clearing' }).click();
     await expect(task.getByRole('status')).toHaveText('Send to knip: the laptop is offline, so nothing was sent.');
     await page.request.delete(`${FIRESTORE}/tasks/proto`, { headers: admin });
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
@@ -391,8 +391,11 @@ test.describe('signed in', () => {
 
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
     await task.getByRole('button', { name: /More actions/ }).click();
-    await expect(task.getByRole('button', { name: 'Edit task: Start fresh' })).toBeVisible();
-    await expect(task.getByRole('button', { name: 'Send without clearing' })).toHaveCount(0);
+    await expect(task.getByRole('menuitem', { name: 'Edit task: Start fresh' })).toBeVisible();
+    await expect(task.getByRole('menuitem', { name: 'Send without clearing' })).toHaveCount(0);
+    // A tap outside the menu closes it.
+    await task.locator('.ttext').click();
+    await expect(task.getByRole('menu')).toHaveCount(0);
     await expect(task.locator('button.send .ico.broom')).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
   });
@@ -422,7 +425,7 @@ test.describe('signed in', () => {
     await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 
     await task.getByRole('button', { name: /More actions/ }).click();
-    await task.getByRole('button', { name: /Edit task/ }).click();
+    await task.getByRole('menuitem', { name: /Edit task/ }).click();
     const editor = page.locator('form.composer.edit');
     await editor.getByLabel('Task text').fill('Add --json and --csv output');
     await editor.getByRole('button', { name: 'Project: knip' }).click();
@@ -439,7 +442,7 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(page.locator('.task.done', { hasText: 'Detect unused exports' })).toContainText('3f2a1c4');
     await edited.getByRole('button', { name: /More actions/ }).click();
-    await edited.getByRole('button', { name: /Delete task/ }).click();
+    await edited.getByRole('menuitem', { name: /Delete task/ }).click();
     await expect(edited).toHaveCount(0);
   });
 
@@ -563,7 +566,7 @@ test.describe('signed in', () => {
     // An edit takes images the same way, and drops the ones removed.
     const edit = async () => {
       await task.getByRole('button', { name: /More actions/ }).click();
-      await task.getByRole('button', { name: /Edit task/ }).click();
+      await task.getByRole('menuitem', { name: /Edit task/ }).click();
       return page.locator('form.composer.edit');
     };
     let editor = await edit();
@@ -586,7 +589,7 @@ test.describe('signed in', () => {
     expect(JSON.parse(cmd.fields.payload.stringValue).images).toEqual([id]);
 
     await task.getByRole('button', { name: /More actions/ }).click();
-    await task.getByRole('button', { name: /Delete task/ }).click();
+    await task.getByRole('menuitem', { name: /Delete task/ }).click();
     await expect(task).toHaveCount(0);
     const gone = await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin });
     expect(gone.status()).toBe(404);
