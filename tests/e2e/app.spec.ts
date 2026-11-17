@@ -796,9 +796,13 @@ test.describe('signed in', () => {
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'resume', session: 'k', conversation: 'c-old' });
     expect(cmd.fields.grant).toBeDefined();
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
-    await expect(sheet.getByRole('status')).toHaveText('Resume knip: done.');
+    await expect(sheet).toBeHidden();
+    await expect(page.locator('#status')).toHaveText('Resume knip: done.');
+    await expect(page.locator('#status')).toHaveAttribute('data-tone', 'ok');
 
     await conversation('c-old');
+    await page.getByRole('button', { name: /^Inbox/ }).click();
+    await expect(sheet.locator('.alert')).toBeEmpty();
     await expect(old).toContainText('current conversation');
     await expect(old.getByRole('button', { name: /resume/i })).toHaveCount(0);
     await fold.click();

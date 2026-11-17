@@ -104,10 +104,10 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, version: null, user: null, picked: null, status: "", statusBusy: false, statusTone: "", busy: new Set(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
     filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
-    hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", undoHide: null,
+    hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
     sheetSent: null,
     // Picks for open questions by question id, kept across redraws.
@@ -241,7 +241,7 @@ async function start(cfg) {
     state.user = user;
     listen();
     receiveShare().catch((err) => alertLine(`Could not attach what was shared: ${err.message}`));
-    checkPush().then(render, (err) => setStatus(`Cannot check notifications: ${err.message}`));
+    checkPush().then(render, (err) => setStatus(`Cannot check notifications: ${err.message}`, false, "bad"));
   });
 
   function renderLaptop() {
@@ -290,7 +290,7 @@ async function start(cfg) {
       h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(activeCount()))),
       h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", readyCount() ? h("span", { class: "n" }, String(readyCount())) : null),
     );
-    const status = h("p", { class: "status", id: "status", role: "status" }, state.statusBusy ? spinner() : null, state.status);
+    const status = h("p", { class: "status", id: "status", role: "status", "data-tone": state.statusTone || null }, state.statusBusy ? spinner() : null, state.status);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
     else if (location.hash === "#log") app.replaceChildren(logView());
     else if (s) app.replaceChildren(status, detail(s));
@@ -358,10 +358,18 @@ async function start(cfg) {
     }, { passive: true });
   }
 
-  function setStatus(text, busy = false) {
-    state.status = text;
-    state.statusBusy = busy;
-    document.getElementById("status")?.replaceChildren(...(busy ? [spinner()] : []), text);
+  // A tone is "ok", "warn", or "bad"; none leaves the text muted.
+  function setStatus(text, busy = false, tone = "") {
+    Object.assign(state, { status: text, statusBusy: busy, statusTone: tone });
+    const el = document.getElementById("status");
+    if (!el) return;
+    el.replaceChildren(...(busy ? [spinner()] : []), text);
+    toneOf(el, tone);
+  }
+
+  function toneOf(el, tone) {
+    if (tone) el.dataset.tone = tone;
+    else delete el.dataset.tone;
   }
 
   // track marks key busy while work runs; buttons drawn with busyButton show
@@ -384,18 +392,19 @@ async function start(cfg) {
 
   // Tapping the laptop asks it to fetch its checkout; the version it then
   // publishes says whether an update is waiting.
-  laptopEl.addEventListener("click", () => sendCommand("check", {}, "Check for updates", "check", (text, busy) => {
+  laptopEl.addEventListener("click", () => sendCommand("check", {}, "Check for updates", "check", (text, busy, tone) => {
     if (text === "Check for updates: done.") {
       const n = state.version?.behind ?? 0;
       text = n ? `The laptop has ${n} new commit${n === 1 ? "" : "s"} to update to.` : "The laptop is up to date.";
+      tone = n ? "warn" : "ok";
     }
-    setStatus(text, busy);
+    setStatus(text, busy, tone);
   }));
   updateEl.addEventListener("click", () => sendCommand("update", {}, "Update the laptop", "update"));
 
   // sendCommand signs the payload with this device's session key (push needs
   // none), stores it, and reports each step and what the laptop made of it
-  // through report. key stays busy until the laptop answers, so the same
+  // through report, with the tone setStatus takes. key stays busy until the laptop answers, so the same
   // action cannot be sent twice meanwhile. Resolves once the command is
   // stored, to whether it was. With queue, the command is stored while the
   // laptop is offline too, for it to pick up when it is back; cancel names
@@ -403,13 +412,13 @@ async function start(cfg) {
   async function sendCommand(type, fields, label, key, report = setStatus, onDone = null, { queue = false, cancel = null } = {}) {
     if (state.busy.has(key)) return false;
     if (!queue && !laptopOnline(state.laptop, Date.now())) {
-      report(`${label}: the laptop is offline, so nothing was sent.`);
+      report(`${label}: the laptop is offline, so nothing was sent.`, false, "bad");
       return false;
     }
     state.busy.add(key);
-    const finish = (text) => {
+    const finish = (text, tone) => {
       state.busy.delete(key);
-      report(text, false);
+      report(text, false, tone);
       render();
     };
     const ref = fs.doc(fs.collection(db, "commands"));
@@ -431,11 +440,11 @@ async function start(cfg) {
     } catch (err) {
       finish(err.name === "NotAllowedError"
         ? `${label}: not sent. The passkey prompt was cancelled, or this device has no paired passkey (run make pair on the laptop).`
-        : `${label}: not sent. ${err.message}`);
+        : `${label}: not sent. ${err.message}`, "bad");
       return false;
     }
     if (queue && !laptopOnline(state.laptop, Date.now())) {
-      finish(`${label}: queued. It goes out when the laptop is back online.`);
+      finish(`${label}: queued. It goes out when the laptop is back online.`, "warn");
       return true;
     }
     report(`${label}: waiting for the laptop…`, true);
@@ -443,7 +452,7 @@ async function start(cfg) {
     // by then will refuse it, unless it is a queued reply.
     const timer = setTimeout(() => {
       unsub();
-      finish(queue ? `${label}: queued. The laptop has not picked it up yet.` : `${label}: the laptop did not answer.`);
+      finish(queue ? `${label}: queued. The laptop has not picked it up yet.` : `${label}: the laptop did not answer.`, queue ? "warn" : "bad");
     }, 75_000);
     const unsub = fs.onSnapshot(ref, (snap) => {
       const c = snap.data();
@@ -451,14 +460,15 @@ async function start(cfg) {
       clearTimeout(timer);
       unsub();
       if (c.status === "failed" && String(c.error).startsWith("session approval:")) passkey.forgetGrant();
-      finish(c.status === "done" ? `${label}: done.`
-        : c.status === "held" ? `${label}: held, because the conversation moved on. Send it anyway or discard it.`
-        : c.status === "cancelled" ? `${label}: cancelled.`
-        : `${label} failed: ${c.error}`);
+      const [text, tone] = c.status === "done" ? [`${label}: done.`, "ok"]
+        : c.status === "held" ? [`${label}: held, because the conversation moved on. Send it anyway or discard it.`, "warn"]
+        : c.status === "cancelled" ? [`${label}: cancelled.`, ""]
+        : [`${label} failed: ${c.error}`, "bad"];
+      finish(text, tone);
       if (c.status === "done") onDone?.();
     }, (err) => {
       clearTimeout(timer);
-      finish(`${label}: cannot follow the result: ${err.message}`);
+      finish(`${label}: cannot follow the result: ${err.message}`, "bad");
     });
     return true;
   }
@@ -587,8 +597,8 @@ async function start(cfg) {
   // A send's outcome stays on its task, which may have moved since, rather
   // than in a status line scrolled out of view.
   function send(t, clear) {
-    const report = (text, busy = false) => {
-      state.sends.set(t.id, { text, busy });
+    const report = (text, busy = false, tone = "") => {
+      state.sends.set(t.id, { text, busy, tone });
       render();
     };
     state.menu = null;
@@ -612,7 +622,7 @@ async function start(cfg) {
     const open = state.menu === t.id;
     const sent = state.sends.get(t.id);
     const status = sent
-      ? h("span", { class: "tstatus", role: "status" }, sent.text)
+      ? h("span", { class: "tstatus", role: "status", "data-tone": sent.tone || null }, sent.text)
       : h("span", { class: "tstatus" }, t.ready
         ? (projectNamed(t.project)?.session_id ? (clears ? "Free · clears the conversation first" : "Free") : "Starts a new worker")
         : `Waiting · ${t.why}`);
@@ -772,10 +782,12 @@ async function start(cfg) {
       else state.picked = name;
       close();
     };
-    const report = (text) => {
-      state.pickStatus = text;
+    const report = (text, busy, tone = "") => {
+      Object.assign(state, { pickStatus: text, pickTone: tone });
       const el = document.getElementById("pick-status");
-      if (el) el.textContent = text;
+      if (!el) return;
+      el.textContent = text;
+      toneOf(el, tone);
     };
     const hide = (names) => {
       const label = names.length === 1 ? `Hide ${names[0]}` : `Hide ${names.length} projects`;
@@ -853,12 +865,12 @@ async function start(cfg) {
           h("button", { type: "button", class: "link", onclick: close }, "Cancel")));
     const foot = state.hiding
       ? h("div", { class: "sheetfoot pickfoot" },
-        h("span", { class: "grow hint", id: "pick-status", role: "status" }, state.pickStatus || (n ? `${n} selected` : "Tick the projects to hide")),
+        h("span", { class: "grow hint", id: "pick-status", role: "status", "data-tone": state.pickStatus && state.pickTone || null }, state.pickStatus || (n ? `${n} selected` : "Tick the projects to hide")),
         h("button", { type: "button", class: "danger", disabled: n && !state.busy.has("hide") ? null : "", onclick: () => hide([...state.hideSel]) },
           n ? `Hide ${n}` : "Hide"))
       : state.undoHide || state.pickStatus
         ? h("div", { class: "sheetfoot pickfoot" },
-          h("span", { class: "grow hint", id: "pick-status", role: "status" }, state.undoHide
+          h("span", { class: "grow hint", id: "pick-status", role: "status", "data-tone": !state.undoHide && state.pickTone || null }, state.undoHide
             ? `Hid ${state.undoHide.length === 1 ? state.undoHide[0] : `${state.undoHide.length} projects`}.`
             : state.pickStatus),
           state.undoHide ? h("button", { type: "button", class: "link", onclick: () => show(state.undoHide, "Undo") }, "Undo") : null)
@@ -968,7 +980,7 @@ async function start(cfg) {
         h("span", { class: "grow" }),
         r && !r.current ? busyButton(`resume:${t.id}`, {
           type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
-          onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, `Resume ${t.project}`, `resume:${t.id}`, alertLine),
+          onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, `Resume ${t.project}`, `resume:${t.id}`, resumed),
         }, icon(r.clear ? "clearresume" : "resume")) : null,
         h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
       h("div", { class: "ttext" }, t.text),
@@ -1040,7 +1052,7 @@ async function start(cfg) {
   async function attachImages(key, files) {
     const imgs = draft(key);
     const room = MAX_IMAGES - imgs.length;
-    if (files.length > room) alertLine(`At most ${MAX_IMAGES} images go with one message; the rest were left out.`);
+    if (files.length > room) alertLine(`At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
     for (const file of files.slice(0, Math.max(0, room))) {
       try {
         const img = await prepareImage(file);
@@ -1065,7 +1077,7 @@ async function start(cfg) {
     const all = shared.files || [];
     const files = all.filter((f) => f.type.startsWith("image/"));
     if (files.length) await attachImages("add", files);
-    if (files.length < all.length) alertLine("Only images can be attached; the other files were left out.");
+    if (files.length < all.length) alertLine("Only images can be attached; the other files were left out.", "warn");
   }
 
   function pasteImages(key, e) {
@@ -1155,9 +1167,19 @@ async function start(cfg) {
     return form;
   }
 
-  function alertLine(text) {
-    const el = document.getElementById("alert");
-    if (el) el.textContent = text;
+  // The closed sheet stays in the page, hidden, with its own alert line.
+  function alertLine(text, tone = "bad") {
+    const el = (sheet?.open ? sheet.scrim : app).querySelector(".alert");
+    if (!el) return setStatus(text, false, tone);
+    el.textContent = text;
+    toneOf(el, tone);
+  }
+
+  // A resume that went through closes the inbox sheet, as a sent task does,
+  // so its outcome moves to the worker's status line.
+  function resumed(text, busy, tone) {
+    if (tone === "ok" && sheet?.open) closeSheet();
+    alertLine(text, tone);
   }
 
   // Whether this browser already receives notifications, checked once per
@@ -1179,7 +1201,7 @@ async function start(cfg) {
   async function turnOnPush() {
     try {
       if ((await Notification.requestPermission()) !== "granted") {
-        setStatus("Notifications are blocked for this site in the browser settings.");
+        setStatus("Notifications are blocked for this site in the browser settings.", false, "bad");
         return;
       }
       const key = await fs.getDoc(fs.doc(db, "laptop", "push"));
@@ -1199,10 +1221,10 @@ async function start(cfg) {
         endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, created_at: fs.serverTimestamp(),
       });
       state.push = "on";
-      setStatus("Notifications are on for this device.");
+      setStatus("Notifications are on for this device.", false, "ok");
       render();
     } catch (err) {
-      setStatus(`Could not turn on notifications: ${err.message}`);
+      setStatus(`Could not turn on notifications: ${err.message}`, false, "bad");
     }
   }
 
@@ -1330,14 +1352,14 @@ async function start(cfg) {
       whole.data = snap.exists() ? snap.data() : null;
       whole.nodes = null;
       render();
-    }, (err) => setStatus(`Cannot read the conversation: ${err.message}`));
+    }, (err) => setStatus(`Cannot read the conversation: ${err.message}`, false, "bad"));
     requestHistory(whole);
     render();
   }
 
   function requestHistory(whole) {
     fs.setDoc(fs.doc(db, "history", whole.id), { requested_at: fs.serverTimestamp() }, { merge: true })
-      .catch((err) => setStatus(`Cannot ask the laptop for the conversation: ${err.message}`));
+      .catch((err) => setStatus(`Cannot ask the laptop for the conversation: ${err.message}`, false, "bad"));
   }
 
   function closeHistory() {
@@ -1478,6 +1500,7 @@ async function start(cfg) {
     if (!sheet?.open) return;
     sheet.open = false;
     sheet.scrim.hidden = true;
+    sheet.scrim.querySelector(".alert").textContent = "";
     state.menu = null;
     state.sheetSent = null;
     if (state.editing && sheet.list.contains(document.getElementById(`edit-${state.editing}`))) {
@@ -1660,14 +1683,14 @@ async function start(cfg) {
           ids = await storeImages(batch, imgs);
           await batch.commit();
         } catch (err) {
-          setStatus(`${label}: not sent. ${err.message}`);
+          setStatus(`${label}: not sent. ${err.message}`, false, "bad");
           return;
         }
       }
       const queued = state.replies.find((r) => r.session === s.id && r.status === "pending");
       const merged = queued ? mergeReply(queued, v, ids, MAX_IMAGES) : { text: v, images: ids };
       if (!merged) {
-        setStatus(`${label}: not sent. With the reply already queued, that is more than ${MAX_IMAGES} images.`);
+        setStatus(`${label}: not sent. With the reply already queued, that is more than ${MAX_IMAGES} images.`, false, "bad");
         dropUnused([{ images: ids }]);
         return;
       }
@@ -1701,7 +1724,7 @@ async function start(cfg) {
     const withdraw = (r, what) => track(`withdraw:${r.id}`, () =>
       fs.updateDoc(fs.doc(db, "commands", r.id), { status: "cancelled" })
         .then(() => setStatus(`${what}.`))
-        .catch((err) => setStatus(`Could not withdraw the reply: ${err.message}`)));
+        .catch((err) => setStatus(`Could not withdraw the reply: ${err.message}`, false, "bad")));
     return h("div", { class: "convo waiting" }, mine.map((r) => {
       const body = h("div", { class: "reply sent queued" });
       body.innerHTML = r.text ? renderMarkdown(r.text) : "";

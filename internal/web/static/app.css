@@ -239,7 +239,7 @@ button.go { background: var(--ink); color: var(--bg); -webkit-touch-callout: non
 .sface { flex: none; width: 42px; height: 42px; padding: 0; border-radius: 12px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; }
 .sface[aria-pressed="true"] { border-color: var(--accent); }
 .strip:has([aria-pressed="true"]) .sface:not([aria-pressed="true"]) { opacity: 0.45; }
-.alert { margin: 0; min-height: 0; font-size: 0.85rem; color: var(--bad); }
+.alert { margin: 0; min-height: 0; font-size: 0.85rem; color: var(--muted); }
 .alert:empty { display: none; }
 .tasks { display: flex; flex-direction: column; gap: 8px; }
 .task { display: flex; flex-direction: column; gap: 8px; padding: 12px 12px 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
@@ -254,7 +254,7 @@ button.go { background: var(--ink); color: var(--bg); -webkit-touch-callout: non
 .menu button.danger { color: var(--bad); border-color: var(--bad-soft); background: var(--bad-soft); }
 .tfoot { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .tstatus { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--muted); }
-.task.waiting .tstatus { color: var(--warn); }
+.task.waiting .tstatus:not([data-tone]) { color: var(--warn); }
 button.send { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: 999px; font-size: 0.85rem; }
 button.send .ico svg { width: 14px; height: 14px; }
 .task.arrange { flex-direction: row; align-items: center; gap: 10px; padding: 6px 6px 6px 10px; }
@@ -302,7 +302,7 @@ button.link.more { align-self: center; }
 .pstat.ok { color: var(--ok); } .pstat.busy { color: var(--warn); }
 /* A worker's inbox: its project's queued tasks, with a composer that adds to it. */
 .sheethead h2 { display: flex; align-items: center; gap: 8px; }
-.sheet > .alert { padding: 0 16px; }
+.sheet > .alert { padding: 4px 16px 10px; }
 .tlist { flex: 1 1 auto; min-height: 0; padding-top: 4px; padding-bottom: 12px; }
 .sheetfoot { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
 .sheetfoot .composer { position: static; margin: 0; box-shadow: none; background: var(--bg); }
@@ -338,3 +338,7 @@ button.busy .ico { display: none; }
 button.chipbtn { padding: 4px 12px; border-radius: 999px; font-size: 0.8rem; }
 button.danger { background: var(--bad); border-color: var(--bad); color: var(--card); }
 .pickfoot { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+/* A status line's tone follows its outcome; without one it stays muted. */
+[data-tone="ok"] { color: var(--ok); }
+[data-tone="warn"] { color: var(--warn); }
+[data-tone="bad"] { color: var(--bad); }
