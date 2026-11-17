@@ -1,4 +1,4 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, Locator, Page, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
 // The test server runs against the Auth and Firestore emulators (make
@@ -611,6 +611,40 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
+  test('a sheet goes away with a drag down its top or a tap on its bar, and stays for a short pull', async () => {
+    await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date() });
+    const pull = async (from: Locator, to: number) => {
+      const box = (await from.boundingBox())!;
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, to < 0 ? page.viewportSize()!.height - 2 : y + to, { steps: 10 });
+      await page.mouse.up();
+    };
+
+    await page.goto('/#inbox');
+    const open = () => page.getByRole('button', { name: /^Project: / }).first().click();
+    const picker = page.getByRole('dialog', { name: 'Choose a project' });
+    await open();
+    await pull(picker.locator('.sheethead h2'), 20);
+    await expect(picker).toBeVisible();
+    expect(await picker.evaluate((el) => (el as HTMLElement).style.transform)).toBe('');
+    await pull(picker.locator('.sheethead h2'), -1);
+    await expect(picker).toHaveCount(0);
+    await open();
+    await picker.locator('.grabber').click();
+    await expect(picker).toHaveCount(0);
+
+    await page.goto('/#s-k');
+    await page.getByRole('button', { name: 'Inbox, 1 queued' }).click();
+    const sheet = page.getByRole('dialog', { name: 'knip inbox' });
+    await expect(sheet).toBeVisible();
+    await pull(sheet.locator('.grabber'), -1);
+    await expect(sheet).toBeHidden();
+
+    await page.request.delete(`${FIRESTORE}/tasks/one`, { headers: admin });
   });
 
   test('the composer tucks while scrolling down and returns at the end without changing the page length', async () => {

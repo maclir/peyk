@@ -29,6 +29,37 @@ const h = (tag, attrs = {}, ...children) => {
   return el;
 };
 
+// A sheet's top, its bar and head, follows a downward drag and lets the sheet
+// go once the drag took it a quarter of the way down or left fast enough; a
+// tap on the bar lets it go too. The body is left out because it scrolls.
+function sheetTop(head, close) {
+  const top = h("div", { class: "sheettop" }, h("div", { class: "grabber", "aria-hidden": "true" }), head);
+  let drag = null;
+  top.addEventListener("pointerdown", (e) => {
+    if (e.button || e.target.closest("button, a, input, textarea, select, label")) return;
+    const panel = top.closest(".sheet");
+    drag = { id: e.pointerId, y: e.clientY, at: e.timeStamp, dy: 0, panel, onBar: Boolean(e.target.closest(".grabber")) };
+    top.setPointerCapture(e.pointerId);
+  });
+  top.addEventListener("pointermove", (e) => {
+    if (drag?.id !== e.pointerId) return;
+    drag.dy = Math.max(0, e.clientY - drag.y);
+    drag.panel.style.transform = drag.dy ? `translateY(${drag.dy}px)` : "";
+  });
+  const letGo = (e) => {
+    if (drag?.id !== e.pointerId) return;
+    const d = drag;
+    drag = null;
+    d.panel.style.transform = "";
+    const flicked = d.dy > 24 && d.dy / Math.max(1, e.timeStamp - d.at) > 0.5;
+    const tapped = d.onBar && d.dy <= 6 && e.type === "pointerup";
+    if (d.dy > d.panel.offsetHeight / 4 || flicked || tapped) close();
+  };
+  top.addEventListener("pointerup", letGo);
+  top.addEventListener("pointercancel", letGo);
+  return top;
+}
+
 const spinner = () => h("span", { class: "spin", "aria-hidden": "true" });
 
 function notice(text, ...extra) {
@@ -693,8 +724,7 @@ async function start(cfg) {
     const body = h("div", { class: "sheetbody" }, results());
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Choose a project", onkeydown: (e) => e.key === "Escape" && close() },
-        h("div", { class: "grabber" }),
-        h("div", { class: "sheethead" }, h("h2", {}, "Send to"), h("button", { type: "button", class: "link", onclick: close }, "Cancel")),
+        sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Send to"), h("button", { type: "button", class: "link", onclick: close }, "Cancel")), close),
         h("label", { class: "search" }, icon("search"),
           h("input", { type: "search", id: "pick-search", placeholder: `Search ${projects.length} projects`, "aria-label": "Search projects", value: state.pickQuery || "",
             oninput: (e) => { state.pickQuery = e.target.value; body.replaceChildren(...results()); } })),
@@ -1109,8 +1139,7 @@ async function start(cfg) {
     const list = h("div", { class: "sheetbody tlist tasks" });
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && closeSheet() },
       h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": `${project} inbox`, onkeydown: (e) => e.key === "Escape" && closeSheet() },
-        h("div", { class: "grabber" }),
-        head,
+        sheetTop(head, closeSheet),
         h("p", { class: "alert", id: "alert", role: "status" }),
         list,
         h("div", { class: "sheetfoot" }, form)));

@@ -253,7 +253,11 @@ button.step { width: 40px; height: 40px; background: var(--paper); color: var(--
 /* Project picker: a sheet over the inbox. */
 .scrim { position: fixed; inset: 0; z-index: 10; background: rgba(10, 14, 20, 0.45); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 40rem; max-height: 88vh; display: flex; flex-direction: column; background: var(--card); border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18); }
-.grabber { width: 40px; height: 5px; border-radius: 999px; background: var(--line-strong); margin: 8px auto 2px; }
+/* The top takes a downward drag, so the browser's scroll and pull-to-refresh must not claim it first. */
+.sheettop { touch-action: none; }
+/* The bar is five pixels tall; what a finger can tap is wider and taller. */
+.grabber { width: 40px; padding: 8px 24px 4px; margin: 0 auto; box-sizing: content-box; }
+.grabber::before { content: ""; display: block; height: 5px; border-radius: 999px; background: var(--line-strong); }
 .sheethead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 16px 8px; }
 .sheethead h2 { margin: 0; font-size: 1.1rem; }
 .search { display: flex; align-items: center; gap: 8px; height: 42px; margin: 0 16px 8px; padding: 0 12px; border-radius: 12px; background: var(--paper); color: var(--muted); }
