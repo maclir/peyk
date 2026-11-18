@@ -277,6 +277,23 @@ describe('pending reply', () => {
   });
 });
 
+describe('delivered reply', () => {
+  it('stands in for the prompt until the session publishes its own', async () => {
+    // @ts-expect-error plain browser module
+    const { withDelivered, awaitingReply } = await import('../../internal/web/static/board.js');
+    const at = new Date(2026, 0, 2);
+    const s = { id: 'k', state: 'idle', prompt: { id: 'p1', text: 'old', at: new Date(2026, 0, 1) }, message: { text: 'done', at: new Date(2026, 0, 1, 1) } };
+    expect(withDelivered(s, undefined)).toBe(s);
+    const shown = withDelivered(s, { text: 'next', images: 0, at, after: 'p1' });
+    expect(shown).toMatchObject({ state: 'working', prompt: { text: 'next', at } });
+    expect(awaitingReply(shown)).toBe(true);
+    expect(withDelivered(s, { text: '', images: 2, at, after: 'p1' }).prompt.text).toBe('2 images');
+    expect(withDelivered({ id: 'k', cleared: true }, { text: 'go', images: 0, at, after: '' }).cleared).toBe(false);
+    const moved = { ...s, prompt: { id: 'p2', text: 'next', at } };
+    expect(withDelivered(moved, { text: 'next', images: 0, at, after: 'p1' })).toBe(moved);
+  });
+});
+
 describe('task images', () => {
   it('names an image by its SHA-256 and keeps one a remaining task shares', async () => {
     // @ts-expect-error plain browser module

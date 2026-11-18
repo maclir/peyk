@@ -689,6 +689,17 @@ test.describe('signed in', () => {
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
     await expect(page.getByText('Reply to knip: done.')).toBeVisible();
     await expect.poll(async () => (await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
+
+    // The delivered reply is the prompt until the laptop publishes its own.
+    await expect(page.locator('.reply.sent')).toHaveText('1 image');
+    await expect(page.locator('.reply.pending')).toHaveText('Working…');
+    const promptOnly = `${FIRESTORE}/sessions/k?updateMask.fieldPaths=prompt`;
+    const before = await get(page, 'sessions/k');
+    const patched = await page.request.patch(promptOnly, { headers: admin, data: { fields: { prompt: encode({ id: 'p-shot', text: '[Image #1]', at: new Date() }) } } });
+    expect(patched.ok()).toBe(true);
+    await expect(page.locator('.reply.sent')).toHaveText('[Image #1]');
+    const restored = await page.request.patch(promptOnly, { headers: admin, data: { fields: { prompt: before.prompt } } });
+    expect(restored.ok()).toBe(true);
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 

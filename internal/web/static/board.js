@@ -276,6 +276,16 @@ export function pendingLabel(s) {
   return s.state === "working" ? "Working…" : s.state === "needs_input" ? "Waiting for you…" : "Not replied yet";
 }
 
+// withDelivered shows a reply the laptop has typed into a session as its
+// prompt, with the agent working on it, until the session's own prompt
+// changes. The laptop publishes that prompt only after the next full refresh.
+export function withDelivered(s, d) {
+  if (!d || (s.prompt?.id ?? "") !== d.after) return s;
+  const n = d.images;
+  const text = d.text || `${n} image${n === 1 ? "" : "s"}`;
+  return { ...s, prompt: { text, at: d.at }, state: "working", cleared: false };
+}
+
 // waitingReplies turns reply commands the laptop has not finished, pending
 // or held, into what the phone shows and resends, oldest first.
 export function waitingReplies(docs) {

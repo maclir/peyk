@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -114,7 +114,10 @@ async function start(cfg) {
     // Picks for open questions by question id, kept across redraws.
     answers: new Map(),
     // The worker whose whole conversation is open: { id, latest, data, nodes, unsub }.
-    history: null };
+    history: null,
+    // Replies the laptop has typed into a session whose prompt it has not
+    // published yet, by session id: { text, images, at, after }.
+    delivered: new Map() };
   let unsubscribe = [];
 
   const signIn = () =>
@@ -127,6 +130,10 @@ async function start(cfg) {
     unsubscribe = [
       fs.onSnapshot(fs.collection(db, "sessions"), (snap) => {
         state.sessions = new Map(snap.docs.map((d) => [d.id, d.data()]));
+        for (const [id, d] of state.delivered) {
+          const s = state.sessions.get(id);
+          if (!s || withDelivered(s, d) === s) state.delivered.delete(id);
+        }
         state.loaded.add("sessions");
         render();
       }, failed),
@@ -333,7 +340,7 @@ async function start(cfg) {
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
     const id = shownSession();
-    const s = id && state.sessions.get(id);
+    const s = id && shownWorker(id);
     followHistory(s);
     const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
     const tabs = h("nav", { class: "tabs" },
@@ -1315,7 +1322,7 @@ async function start(cfg) {
 
   function board() {
     const now = Date.now();
-    const list = sortSessions([...state.sessions.values()]);
+    const list = sortSessions([...state.sessions.keys()].map(shownWorker));
     const pushRow = state.push === "off"
       ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), busyButton("notify", { type: "button", onclick: () => track("notify", turnOnPush) }, "Turn on notifications"))
       : null;
@@ -1377,7 +1384,9 @@ async function start(cfg) {
     else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     const whole = state.history?.id === s.id ? state.history : null;
     const convo = whole
-      ? h("div", { class: "convo" }, historyView(s, whole, now), pending ? msg : null)
+      ? h("div", { class: "convo" }, historyView(s, whole, now),
+        state.delivered.has(s.id) ? [h("span", { class: "who mine" }, "You", ` · ${ago(s.prompt.at, now)}`), sent] : null,
+        pending ? msg : null)
       : h("div", { class: "convo" },
         s.prompt || s.message
           ? h("button", { type: "button", class: "link earlier", onclick: () => openHistory(s) }, icon("up"), "Whole conversation")
@@ -1740,6 +1749,20 @@ async function start(cfg) {
       h("div", { class: "qfoot" }, h("span", { class: "hint" }, "Closes the dialog on the laptop and sends these answers."), send));
   }
 
+  function shownWorker(id) {
+    const s = state.sessions.get(id);
+    return s && withDelivered(s, state.delivered.get(id));
+  }
+
+  // The reply stands in for the prompt from when the laptop has typed it.
+  function delivered(s, text, images) {
+    const after = state.sessions.get(s.id)?.prompt?.id ?? "";
+    return () => {
+      state.delivered.set(s.id, { text, images: images.length, at: new Date(), after });
+      render();
+    };
+  }
+
   function replyBox(s) {
     const key = `reply:${s.id}`;
     const label = `Reply to ${s.title}`;
@@ -1765,7 +1788,7 @@ async function start(cfg) {
         dropUnused([{ images: ids }]);
         return;
       }
-      if (await sendCommand("reply", replyFields(s, merged.text, merged.images), label, key, setStatus, null, { queue: true, cancel: queued?.id })) {
+      if (await sendCommand("reply", replyFields(s, merged.text, merged.images), label, key, setStatus, delivered(s, merged.text, merged.images), { queue: true, cancel: queued?.id })) {
         // A redraw while sending replaces this textarea, so clear the one on screen.
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
@@ -1803,7 +1826,7 @@ async function start(cfg) {
       const held = r.status === "held";
       const actions = held
         ? [busyButton(`resend:${r.id}`, { type: "button", class: "link", onclick: () =>
-            sendCommand("reply", replyFields(s, r.text, r.images), `Reply to ${s.title}`, `resend:${r.id}`, setStatus, null, { queue: true, cancel: r.id }) }, "Send anyway"),
+            sendCommand("reply", replyFields(s, r.text, r.images), `Reply to ${s.title}`, `resend:${r.id}`, setStatus, delivered(s, r.text, r.images), { queue: true, cancel: r.id }) }, "Send anyway"),
           busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "Reply discarded") }, "Discard")]
         : [busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "Reply cancelled") }, "Cancel")];
       return h("div", { class: "waitrow" },
