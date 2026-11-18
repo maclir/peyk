@@ -157,6 +157,15 @@ test.describe('signed in', () => {
     await expect(actions).toContainText('Most used: hamta 410 · knip 250');
     await page.keyboard.press('Escape');
     await expect(pop).toBeHidden();
+
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: viewport.height });
+    await usage.click();
+    const box = (await pop.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+    await page.keyboard.press('Escape');
+    await page.setViewportSize(viewport);
   });
 
   test('the board groups sessions and shows what each is doing', async () => {

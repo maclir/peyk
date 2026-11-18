@@ -19,7 +19,7 @@ html.locked { overflow: hidden; }
 .bar h1 { margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; }
 .bar h1 a { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
 [hidden] { display: none !important; }
-.hstat { display: flex; align-items: center; gap: 14px; }
+.hstat { position: relative; display: flex; align-items: center; gap: 14px; }
 .seen { font: 0.75rem var(--mono); color: var(--bad); }
 /* The laptop's state is the dot on its icon; text appears only when it is
    offline. The padding is the tap target; the negative margin keeps it from
@@ -37,7 +37,9 @@ html.locked { overflow: hidden; }
 .usage[aria-expanded="true"] { background: var(--run-soft); }
 .meter.gh { margin-top: 2px; }
 .meter.gh i { background: var(--accent); }
-.upop { top: 34px; width: 280px; padding: 4px; }
+/* The bars sit mid-header, so the popover hangs from the status group's right edge to stay on screen. */
+.hstat > .wmenu:has(.upop) { position: static; }
+.upop { top: 34px; width: min(280px, calc(100vw - 32px)); padding: 4px; }
 .upop a { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
 .upop a:hover, .upop a:focus-visible { background: var(--paper); outline: none; }
 .upop strong { font-weight: 600; }
