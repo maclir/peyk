@@ -1165,26 +1165,24 @@ test('the footer checks the deployed revision on tap and reloads when another is
   await page.context().route('**/version', (route) => { checks++; return route.fallback(); });
   await page.goto('/');
   const rev = page.locator('#rev');
-  const status = page.locator('#revstatus');
   await expect(rev).toHaveText(deployed);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   expect(checks).toBe(0);
 
   await rev.click();
-  await expect(status).toHaveText('Up to date');
+  await expect.poll(() => checks).toBe(1);
+  await expect(rev).toBeEnabled();
   await expect(rev).not.toHaveClass(/stale/);
-  expect(checks).toBe(1);
+  await expect(rev).toHaveText(deployed);
 
   await page.context().unroute('**/version');
   await page.context().route('**/version', (route) => route.fulfill({ json: { revision: 'f00dfee' } }));
   await rev.click();
   await expect(rev).toHaveClass(/stale/);
-  await expect(status).toHaveText('f00dfee is deployed');
   await page.evaluate(() => caches.open('peyk-old').then((c) => c.put('/x', new Response('x'))));
 
   await page.context().unroute('**/version');
   await Promise.all([page.waitForEvent('load'), rev.click()]);
   await expect(rev).not.toHaveClass(/stale/);
-  await expect(status).toBeEmpty();
   expect(await page.evaluate(() => caches.has('peyk-old'))).toBe(false);
 });

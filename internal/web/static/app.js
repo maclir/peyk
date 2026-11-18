@@ -32,35 +32,32 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
 // the cached shell before reloading, since a plain reload would be answered
 // from that same cache.
 const revEl = document.getElementById("rev");
-const revStatusEl = document.getElementById("revstatus");
 revEl.textContent = revision;
+// The spinner sits outside the button's box, so the revision does not move.
+function revBusy(busy) {
+  revEl.disabled = busy;
+  revEl.toggleAttribute("aria-busy", busy);
+  if (busy) revEl.prepend(Object.assign(document.createElement("span"), { className: "spin", ariaHidden: "true" }));
+  else revEl.querySelector(".spin")?.remove();
+}
 async function checkRevision() {
-  revEl.disabled = true;
-  revStatusEl.dataset.tone = "";
-  revStatusEl.replaceChildren(Object.assign(document.createElement("span"), { className: "spin" }), " Checking");
-  let text = "Up to date", tone = "ok";
+  revBusy(true);
   try {
     const res = await fetch("/version", { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { revision: deployed } = await res.json();
-    if (deployed !== revision) {
-      revEl.classList.add("stale");
-      revEl.title = `${deployed} is deployed; tap to load it`;
-      text = `${deployed} is deployed`;
-      tone = "warn";
+    if (res.ok) {
+      const { revision: deployed } = await res.json();
+      if (deployed !== revision) {
+        revEl.classList.add("stale");
+        revEl.title = `${deployed} is deployed; tap to load it`;
+      }
     }
   } catch {
-    text = "Could not reach the server";
-    tone = "bad";
+    // Offline: the deployed revision is unknown, so the footer claims nothing.
   }
-  revEl.disabled = false;
-  revStatusEl.textContent = text;
-  revStatusEl.dataset.tone = tone;
-  clearTimeout(revStatusEl.timer);
-  if (tone === "ok") revStatusEl.timer = setTimeout(() => { revStatusEl.textContent = ""; }, 3000);
+  revBusy(false);
 }
 async function loadDeployed() {
-  revEl.disabled = true;
+  revBusy(true);
   try {
     await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
     await (await navigator.serviceWorker?.getRegistration())?.update();
