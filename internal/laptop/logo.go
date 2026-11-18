@@ -97,7 +97,7 @@ func findLogo(root string) string {
 		rel, _ := filepath.Rel(root, path)
 		depth := strings.Count(rel, string(filepath.Separator))
 		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()] || depth >= logoDepth) {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()] || depth >= logoDepth || isRepo(path)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -191,6 +191,14 @@ func dataLogoURI(href string) string {
 		return encodeLogo(data, true)
 	}
 	return ""
+}
+
+// isRepo reports whether dir is a repository of its own. A project directory
+// that holds other repositories is not one of them, so their marks are not
+// its own.
+func isRepo(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 func isMold(dir string) bool {

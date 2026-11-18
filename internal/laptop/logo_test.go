@@ -141,3 +141,18 @@ func TestFindLogoFallsBackToAPagesInlineFavicon(t *testing.T) {
 		t.Fatalf("got %q, want logo.svg", raw)
 	}
 }
+
+func TestFindLogoSkipsNestedRepositories(t *testing.T) {
+	root := t.TempDir()
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
+	writeFile(t, filepath.Join(root, "inner", ".git", "HEAD"), []byte("ref: refs/heads/main\n"))
+	writeFile(t, filepath.Join(root, "inner", "logo.svg"), svg)
+	if uri := findLogo(root); uri != "" {
+		t.Fatalf("got %.40q, want no mark from a nested repository", uri)
+	}
+
+	writeFile(t, filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/main\n"))
+	if uri := findLogo(filepath.Join(root, "inner")); uri == "" {
+		t.Fatal("a repository's own mark was skipped")
+	}
+}
