@@ -106,7 +106,7 @@ func collector() laptop.Collector {
 	return laptop.Collector{
 		Aoe:        laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
 		Run:        laptop.Exec,
-		ClaudeDir:  claudeDir(),
+		ClaudeDirs: claudeDirs(),
 		Root:       projectsRoot(),
 		Now:        time.Now,
 		Prototypes: &laptop.Prototypes{},
@@ -122,6 +122,21 @@ func claudeDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
+}
+
+// claudeDirs lists the agent's own Claude Code directory, then the home
+// directory's other .claude* profiles, which a project's .envrc can select.
+func claudeDirs() []string {
+	own := claudeDir()
+	dirs := []string{own}
+	home, _ := os.UserHomeDir()
+	matches, _ := filepath.Glob(filepath.Join(home, ".claude*"))
+	for _, m := range matches {
+		if info, err := os.Stat(filepath.Join(m, "projects")); err == nil && info.IsDir() && m != own {
+			dirs = append(dirs, m)
+		}
+	}
+	return dirs
 }
 
 // claudeConfig is Claude Code's global config file: inside CLAUDE_CONFIG_DIR

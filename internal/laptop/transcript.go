@@ -26,6 +26,42 @@ func TranscriptDir(claudeDir, workdir string) string {
 	return filepath.Join(claudeDir, "projects", unsafePathChars.ReplaceAllString(workdir, "-"))
 }
 
+// FindTranscript locates the conversation id for workdir among claudeDirs:
+// the directory holding that transcript, else the one with the directory's
+// newest transcript, else the first.
+func FindTranscript(claudeDirs []string, workdir, id string) session.Transcript {
+	t := session.Transcript{ID: id}
+	var latest time.Time
+	for _, c := range claudeDirs {
+		dir := TranscriptDir(c, workdir)
+		if t.Dir == "" {
+			t.Dir = dir
+		}
+		if id != "" {
+			if _, err := os.Stat(filepath.Join(dir, id+".jsonl")); err == nil {
+				t.Dir = dir
+				return t
+			}
+		}
+		if mod := newestMod(dir); mod.After(latest) {
+			latest, t.Dir = mod, dir
+		}
+	}
+	return t
+}
+
+func newestMod(dir string) time.Time {
+	paths := newestFirst(dir)
+	if len(paths) == 0 {
+		return time.Time{}
+	}
+	info, err := os.Stat(paths[0])
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
 // recentTranscripts is how many of a directory's newest transcripts are read
 // for a session whose own transcript aoe has not recorded.
 const recentTranscripts = 3

@@ -163,6 +163,28 @@ func TestTranscriptDir(t *testing.T) {
 	}
 }
 
+func TestFindTranscriptSearchesEveryProfile(t *testing.T) {
+	own, other := t.TempDir(), t.TempDir()
+	work := "/Users/me/code/other"
+	old := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	writeTranscript(t, own, work, "a", old, "")
+	writeTranscript(t, other, work, "b", old.Add(time.Hour), "")
+	dirs := []string{own, other}
+
+	if got := FindTranscript(dirs, work, "a"); got.Dir != TranscriptDir(own, work) {
+		t.Fatalf("own id: got %s", got.Dir)
+	}
+	if got := FindTranscript(dirs, work, "b"); got.Dir != TranscriptDir(other, work) || got.ID != "b" {
+		t.Fatalf("other profile's id: got %+v", got)
+	}
+	if got := FindTranscript(dirs, work, ""); got.Dir != TranscriptDir(other, work) {
+		t.Fatalf("no id: got %s, want the newest transcript's profile", got.Dir)
+	}
+	if got := FindTranscript(dirs, "/elsewhere", "x"); got.Dir != TranscriptDir(own, "/elsewhere") {
+		t.Fatalf("no transcript: got %s, want the agent's own profile", got.Dir)
+	}
+}
+
 func writeTranscript(t *testing.T, claudeDir, workdir, id string, mod time.Time, lines ...string) {
 	t.Helper()
 	dir := TranscriptDir(claudeDir, workdir)
@@ -366,7 +388,7 @@ func TestCollectorAllSortsByAttention(t *testing.T) {
 		return aoeRun(ctx, dir, name, args...)
 	}
 	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
-	c := Collector{Aoe: Aoe{Profile: "personal", Run: notGit}, Run: notGit, ClaudeDir: t.TempDir(), Now: func() time.Time { return now }}
+	c := Collector{Aoe: Aoe{Profile: "personal", Run: notGit}, Run: notGit, ClaudeDirs: []string{t.TempDir()}, Now: func() time.Time { return now }}
 	got, err := c.All(context.Background())
 	if err != nil {
 		t.Fatal(err)

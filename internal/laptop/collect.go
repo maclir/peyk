@@ -14,9 +14,12 @@ import (
 
 // Collector builds session snapshots from aoe, git and transcripts.
 type Collector struct {
-	Aoe       Aoe
-	Run       Runner
-	ClaudeDir string
+	Aoe Aoe
+	Run Runner
+	// ClaudeDirs are the Claude Code config directories, the agent's own
+	// first. A project's environment can run Claude Code under another
+	// profile than the agent, which keeps that project's transcripts there.
+	ClaudeDirs []string
 	// Root holds project repositories that can get a new session.
 	Root string
 	Now  func() time.Time
@@ -37,7 +40,7 @@ func (c Collector) Logo(dir string) string {
 // Snapshot describes one aoe session.
 func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot {
 	git := RepoState(ctx, c.Run, s.Path)
-	t := session.Transcript{Dir: TranscriptDir(c.ClaudeDir, s.Path), ID: s.AgentSessionID}
+	t := FindTranscript(c.ClaudeDirs, s.Path, s.AgentSessionID)
 	snap := session.Snapshot{
 		ID:         s.ID,
 		Title:      s.Title,
