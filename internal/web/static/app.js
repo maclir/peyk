@@ -316,6 +316,11 @@ async function start(cfg) {
         most ? h("span", { class: "hint" }, `Most used: ${most}`) : null));
     }
     usagePopEl.replaceChildren(...parts);
+    // The bars sit mid-header, so a popover hung from them can pass the
+    // screen's left edge; shift it right to the page gutter instead.
+    usagePopEl.style.right = "";
+    const past = usagePopEl.getBoundingClientRect().left - 16;
+    if (past < 0) usagePopEl.style.right = `${past}px`;
   }
 
   function render() {
