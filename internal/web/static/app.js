@@ -159,6 +159,8 @@ async function start(cfg) {
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
     // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
     sheetSent: null,
+    // Sent and done rows the viewer has opened, by task id.
+    openRows: new Set(),
     // Picks for open questions by question id, kept across redraws.
     answers: new Map(),
     // The worker whose whole conversation is open: { id, latest, data, nodes, unsub }.
@@ -703,7 +705,7 @@ async function start(cfg) {
       h("div", { class: "tasks" }, items),
       sent.length && state.filter !== "waiting" && !state.arranging ? [
         h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
-        ...sent.map((t) => sentCard(t, now)),
+        h("div", { class: "rows" }, sent.map((t) => sentRow(t, now))),
       ] : null,
       state.filter !== "waiting" && !state.arranging ? [
         doneFold(state.showDone, () => { state.showDone = !state.showDone; render(); }, state.only ?? ""),
@@ -714,25 +716,37 @@ async function start(cfg) {
     );
   }
 
+  // A sent or done task has had its turn, so it is one faded line that opens
+  // to its whole text and the rest of its controls.
+  function taskRow(t, kind, now, { inProject = false, stat, action = null, detail }) {
+    const open = state.openRows.has(t.id);
+    return h("div", { class: `task row ${kind}${open ? " open" : ""}` },
+      h("div", { class: "rhead" },
+        h("button", { type: "button", class: "rline", "aria-expanded": String(open),
+          onclick: () => { open ? state.openRows.delete(t.id) : state.openRows.add(t.id); render(); } },
+          inProject ? null : face(projectNamed(t.project), t.project, "xs"),
+          h("span", { class: "rtext" }, inProject ? null : [h("b", {}, t.project), " "], t.text),
+          h("span", { class: "rstat" }, stat)),
+        action),
+      h("div", { class: "rmore", hidden: open ? null : "" },
+        h("div", { class: "rfull" }, t.text),
+        taskImages(t),
+        h("div", { class: "rmeta" }, detail, h("span", { class: "grow" }),
+          h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x")))),
+    );
+  }
+
   // A sent task stays in the inbox until it is done. A new worker is only
   // published once the laptop sees it start, so until then the task has no
   // worker to link to.
-  function sentCard(t, now) {
+  function sentRow(t, now) {
     const s = state.sessions.get(t.session_id);
     const st = s && (STATES[s.state] || { label: s.state, tone: "idle" });
-    return h("article", { class: "task sent" },
-      h("div", { class: "thead" }, face(projectNamed(t.project), t.project, "sm"),
-        h("span", { class: "proj" }, t.project),
-        h("span", { class: "when" }, `sent ${ago(t.dispatched_at, now)} ago`),
-        h("span", { class: "grow" }),
-        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
-      h("div", { class: "ttext" }, t.text),
-      taskImages(t),
-      h("div", { class: "tfoot" },
-        s ? h("span", { class: `dot ${st.tone}` }) : spinner(),
-        s ? h("a", { class: "tstatus", href: `#s-${encodeURIComponent(s.id)}` }, `${s.title} · ${st.label}`)
-          : h("span", { class: "tstatus" }, "Starting the worker…")),
-    );
+    return taskRow(t, "sent", now, {
+      stat: [s ? h("span", { class: `dot ${st.tone}` }) : spinner(), `${s ? st.label : "starting"} · ${ago(t.dispatched_at, now)}`],
+      detail: s ? h("a", { href: `#s-${encodeURIComponent(s.id)}` }, `${s.title} · ${st.label}`)
+        : h("span", {}, "Starting the worker…"),
+    });
   }
 
   // A send's outcome stays on its task, which may have moved since, rather
@@ -1121,7 +1135,7 @@ async function start(cfg) {
       return [loading("Loading done tasks…")];
     }
     return [
-      ...d.tasks.map((t) => doneCard(t, now, inProject)),
+      d.tasks.length ? h("div", { class: "rows" }, d.tasks.map((t) => doneRow(t, now, inProject))) : null,
       d.error ? h("p", { class: "empty" }, d.error) : null,
       d.error ? h("button", { type: "button", class: "link more", onclick: () => { done.delete(key); render(); } }, "Try again") : null,
       !d.tasks.length && !d.loading && !d.error ? h("p", { class: "empty" }, "Nothing done yet.") : null,
@@ -1130,24 +1144,20 @@ async function start(cfg) {
     ].filter(Boolean);
   }
 
-  function doneCard(t, now, inProject) {
+  function doneRow(t, now, inProject) {
     const p = projectNamed(t.project);
     const worker = p?.session_id ? state.sessions.get(p.session_id) : null;
     const r = resumeAction(t, p, worker);
     const label = r?.clear ? "Clear and resume" : "Resume conversation";
-    return h("div", { class: "task done" },
-      h("div", { class: "thead" },
-        inProject ? null : face(p, t.project, "sm"),
-        h("span", { class: "proj" }, `${inProject ? "" : `${t.project} · `}done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
-        h("span", { class: "grow" }),
-        r && !r.current ? busyButton(`resume:${t.id}`, {
-          type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
-          onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, "Resume", `resume:${t.id}`, resumed, null, { done: null }),
-        }, icon(r.clear ? "clearresume" : "resume")) : null,
-        h("button", { type: "button", class: "icon", "aria-label": `Delete task: ${t.text}`, onclick: () => remove(t) }, icon("x"))),
-      h("div", { class: "ttext" }, t.text),
-      taskImages(t),
-    );
+    return taskRow(t, "done", now, {
+      inProject,
+      stat: r?.current ? `current · ${ago(t.done_at, now)}` : ago(t.done_at, now),
+      action: r && !r.current ? busyButton(`resume:${t.id}`, {
+        type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
+        onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, "Resume", `resume:${t.id}`, resumed, null, { done: null }),
+      }, icon(r.clear ? "clearresume" : "resume")) : null,
+      detail: h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
+    });
   }
 
   // The inbox opens on ready tasks; one queued for a busy project would

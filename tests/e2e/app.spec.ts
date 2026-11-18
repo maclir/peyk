@@ -601,8 +601,12 @@ test.describe('signed in', () => {
     await page.goto('/#inbox');
     await expect(page.getByRole('heading', { name: 'Sent 2' })).toBeVisible();
     const starting = page.locator('.task.sent', { hasText: 'Set up the repo' });
-    await expect(starting).toContainText('Starting the worker…');
-    await page.locator('.task.sent', { hasText: 'Add CSV export' }).getByRole('link', { name: 'hamta · needs input' }).click();
+    await expect(starting.locator('.rstat')).toHaveText('starting · 1m');
+    const csv = page.locator('.task.sent', { hasText: 'Add CSV export' });
+    await expect(csv.getByRole('link', { name: 'hamta · needs input' })).toBeHidden();
+    await csv.getByRole('button', { name: /^hamta Add CSV export/ }).click();
+    await expect(csv.getByRole('button', { name: /^hamta Add CSV export/ })).toHaveAttribute('aria-expanded', 'true');
+    await csv.getByRole('link', { name: 'hamta · needs input' }).click();
     await expect(page).toHaveURL(/#s-h$/);
     await page.request.delete(`${FIRESTORE}/tasks/starting`, { headers: admin });
   });
@@ -638,7 +642,7 @@ test.describe('signed in', () => {
     await editor.getByRole('button', { name: 'Save' }).click();
     await expect(editor).toHaveCount(0);
     await expect(task.locator('.thumb')).toHaveCount(0);
-    expect((await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
+    await expect.poll(async () => (await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
     editor = await edit();
     await editor.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
     await expect(editor.locator('.thumb img')).toHaveCount(1);
@@ -654,8 +658,7 @@ test.describe('signed in', () => {
     await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('menuitem', { name: /Delete task/ }).click();
     await expect(task).toHaveCount(0);
-    const gone = await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin });
-    expect(gone.status()).toBe(404);
+    await expect.poll(async () => (await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
   });
 
   test("Android's share sheet attaches a screenshot to a new task", async () => {
@@ -756,7 +759,7 @@ test.describe('signed in', () => {
     await page.goto('/#s-k');
     await page.getByRole('button', { name: 'Discard' }).click();
     await expect(page.locator('.reply.queued')).toHaveCount(0);
-    expect((await get(page, `commands/${waiting.name.split('/').pop()}`)).status.stringValue).toBe('cancelled');
+    await expect.poll(async () => (await get(page, `commands/${waiting.name.split('/').pop()}`)).status.stringValue).toBe('cancelled');
 
     for (const c of mine) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
