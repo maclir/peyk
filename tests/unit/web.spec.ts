@@ -79,11 +79,12 @@ describe('board', () => {
   it('sorts by what needs attention, then by title when nothing has happened', () => {
     const got = sortSessions([
       { title: 'b', state: 'idle' },
+      { title: 'w', state: 'working' },
       { title: 'z', state: 'needs_input' },
       { title: 'a', state: 'unpushed' },
       { title: 'a', state: 'idle' },
     ]).map((s: any) => `${s.state}:${s.title}`);
-    expect(got).toEqual(['needs_input:z', 'unpushed:a', 'idle:a', 'idle:b']);
+    expect(got).toEqual(['needs_input:z', 'unpushed:a', 'idle:a', 'idle:b', 'working:w']);
   });
 
   it('sorts within a state by most recent activity, and unpushed work by its newest commit', () => {

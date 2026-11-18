@@ -23,7 +23,7 @@ const (
 
 // Rank orders states for the board: lower comes first.
 func (s State) Rank() int {
-	for i, v := range []State{NeedsInput, Error, Dirty, Unpushed, Working, Idle, Stopped} {
+	for i, v := range []State{NeedsInput, Error, Dirty, Unpushed, Idle, Working, Stopped} {
 		if v == s {
 			return i
 		}

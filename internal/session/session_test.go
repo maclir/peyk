@@ -41,7 +41,7 @@ func TestDerive(t *testing.T) {
 }
 
 func TestRankPutsAttentionFirst(t *testing.T) {
-	order := []State{NeedsInput, Error, Dirty, Unpushed, Working, Idle, Stopped}
+	order := []State{NeedsInput, Error, Dirty, Unpushed, Idle, Working, Stopped}
 	for i := 1; i < len(order); i++ {
 		if order[i-1].Rank() >= order[i].Rank() {
 			t.Fatalf("%s should rank before %s", order[i-1], order[i])

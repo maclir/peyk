@@ -5,8 +5,8 @@ export const STATES = {
   error: { label: "error", tone: "bad", group: "Needs you" },
   dirty: { label: "uncommitted", tone: "bad", group: "Needs you" },
   unpushed: { label: "unpushed", tone: "ok", group: "Ready to push" },
-  working: { label: "working", tone: "run", group: "Working" },
   idle: { label: "idle", tone: "idle", group: "Idle" },
+  working: { label: "working", tone: "run", group: "Working" },
   stopped: { label: "stopped", tone: "idle", group: "Stopped" },
 };
 const ORDER = Object.keys(STATES);
