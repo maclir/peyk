@@ -84,6 +84,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
 	mux.HandleFunc("POST "+SharePath, shareFallback)
+	mux.HandleFunc("GET /robots.txt", robots)
 	mux.HandleFunc("GET /{$}", a.home)
 	return securityHeaders(a.firebase, mux)
 }
@@ -97,6 +98,15 @@ func (a *App) home(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := a.page.Execute(w, cfg); err != nil {
 		http.Error(w, "could not render page", http.StatusInternalServerError)
+	}
+}
+
+// robots asks crawlers to stay out. It is advisory; the X-Robots-Tag header on
+// every response is what keeps a page that is crawled anyway out of an index.
+func robots(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if _, err := w.Write([]byte("User-agent: *\nDisallow: /\n")); err != nil {
+		log.Printf("write robots.txt: %v", err)
 	}
 }
 
@@ -204,6 +214,7 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", csp)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 		next.ServeHTTP(w, r)
 	})
 }

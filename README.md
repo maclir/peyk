@@ -22,9 +22,9 @@ To send tasks, replies, stops and pushes from the phone, pair its passkey once:
 
 `make help` lists every target. Set `GCLOUD_ACCOUNT` in `.env` first; cloud targets refuse to run without it. Steps no script can do:
 
-- Enable the Google sign-in provider in the Firebase console (Authentication → Sign-in method), and add the Cloud Run hostname under Authorized domains.
+- Enable the Google sign-in provider in the Firebase console (Authentication → Sign-in method).
 - Copy the web config from `firebase apps:create web` into `.env` as `FIREBASE_*`.
-- Rerun `make harden` after any new Cloud Run address or custom domain, or the browser key refuses it.
+- Rerun `make harden` after any new Cloud Run address or custom domain; it authorizes `PEYK_ORIGIN` for sign-in and the browser key.
 
 ## Develop
 

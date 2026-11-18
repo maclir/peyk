@@ -4,7 +4,8 @@
 # - Sign-up is disabled once the owner account exists, so a stranger's Google
 #   sign-in fails at Firebase instead of creating an account the rules then
 #   have to refuse. That needs Identity Platform, which this upgrades to.
-# - The Firebase browser key only works from the app's own addresses.
+# - Google sign-in and the Firebase browser key work only from the app's own
+#   addresses.
 # - A budget alerts at 50, 90 and 100 percent of BUDGET.
 set -euo pipefail
 
@@ -38,14 +39,25 @@ api -X PATCH "$idt/admin/v2/projects/$GOOGLE_CLOUD_PROJECT/config?updateMask=cli
   -d '{"client":{"permissions":{"disabledUserSignup":true}}}' >/dev/null
 echo "Sign-up disabled; $users existing account(s) still sign in."
 
+# Sign-in refuses a page whose host is not authorized, so a new PEYK_ORIGIN
+# must be added here before the phone can sign in on it.
+origin_host=${PEYK_ORIGIN#https://}
+domains=$(api "$idt/admin/v2/projects/$GOOGLE_CLOUD_PROJECT/config" |
+  python3 -c 'import json,sys; d=json.load(sys.stdin).get("authorizedDomains",[]); h=sys.argv[1]; print(json.dumps({"authorizedDomains": d if h in d else d+[h]}))' "$origin_host")
+api -X PATCH "$idt/admin/v2/projects/$GOOGLE_CLOUD_PROJECT/config?updateMask=authorizedDomains" -d "$domains" >/dev/null
+echo "Sign-in authorized on $origin_host."
+
 key=$(gcloud services api-keys list --project "$GOOGLE_CLOUD_PROJECT" \
   --filter='displayName:"Browser key (auto created by Firebase)"' --format='value(uid)')
 [[ -n "$key" ]] || { echo "Firebase browser key not found" >&2; exit 1; }
-service_host=$(gcloud run services describe "${SERVICE_NAME:-peyk}" --project "$GOOGLE_CLOUD_PROJECT" \
-  --region "${GOOGLE_CLOUD_REGION:-europe-west1}" --format='value(status.url)')
+# status.url names only one of the service's run.app addresses; an installed
+# app on the other would lose sign-in, so every address in the annotation stays.
+service_urls=$(gcloud run services describe "${SERVICE_NAME:-peyk}" --project "$GOOGLE_CLOUD_PROJECT" \
+  --region "${GOOGLE_CLOUD_REGION:-europe-west1}" --format=json |
+  python3 -c 'import json,sys; print(",".join(u+"/*" for u in json.loads(json.load(sys.stdin)["metadata"]["annotations"]["run.googleapis.com/urls"])))')
 gcloud services api-keys update "$key" --project "$GOOGLE_CLOUD_PROJECT" --quiet \
-  --allowed-referrers="$PEYK_ORIGIN/*,$service_host/*,https://$FIREBASE_AUTH_DOMAIN/*" >/dev/null 2>&1
-echo "Browser key limited to $PEYK_ORIGIN, $service_host and https://$FIREBASE_AUTH_DOMAIN."
+  --allowed-referrers="$PEYK_ORIGIN/*,$service_urls,https://$FIREBASE_AUTH_DOMAIN/*" >/dev/null 2>&1
+echo "Browser key limited to $PEYK_ORIGIN/*,$service_urls,https://$FIREBASE_AUTH_DOMAIN/*."
 
 name="$GOOGLE_CLOUD_PROJECT budget"
 if gcloud billing budgets list --billing-account="$BILLING_ACCOUNT" --format='value(displayName)' | grep -qxF "$name"; then

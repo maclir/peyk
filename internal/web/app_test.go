@@ -36,6 +36,22 @@ func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestCrawlersAreKeptOut(t *testing.T) {
+	h := newTestApp().Handler()
+	for _, path := range []string{"/", "/robots.txt", "/static/app.js", "/nope"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("X-Robots-Tag"); !strings.Contains(got, "noindex") {
+			t.Errorf("%s: X-Robots-Tag = %q, want noindex", path, got)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/robots.txt", nil))
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, "Disallow: /\n") {
+		t.Fatalf("robots.txt = %d %q", rec.Code, body)
+	}
+}
+
 func TestUnknownPathIsNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ideas", nil))
