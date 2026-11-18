@@ -13,11 +13,12 @@ let repo = env["PEYK_REPO"]
 let domain = "gui/\(getuid())"
 
 enum AgentState {
-    case running, starting, crashed, stopped
+    case running, unreachable, starting, crashed, stopped
 
     var word: String {
         switch self {
         case .running: "running"
+        case .unreachable: "offline on the phone"
         case .starting: "starting"
         case .crashed: "restarting after a crash"
         case .stopped: "stopped"
@@ -52,9 +53,10 @@ struct Health: Decodable {
     let startedAt: Date
     let refreshedAt: Date?
     let workers: Int
+    let unreachable: String?
 
     enum CodingKeys: String, CodingKey {
-        case pid, workers
+        case pid, workers, unreachable
         case startedAt = "started_at"
         case refreshedAt = "refreshed_at"
     }
@@ -148,10 +150,11 @@ final class Model: ObservableObject {
                 state = .stopped
                 detail = ["Starts again at login"]
             case (true, true, let h?):
-                state = .running
+                state = h.unreachable == nil ? .running : .unreachable
                 var line = "Up \(ago(now.timeIntervalSince(h.startedAt)))"
                 if let r = h.refreshedAt { line += " · refreshed \(ago(now.timeIntervalSince(r))) ago" }
                 detail = [line, "Watching \(h.workers) worker\(h.workers == 1 ? "" : "s")"]
+                if let e = h.unreachable { detail.insert("Can't reach Firestore: \(e.prefix(80))", at: 0) }
             case (true, true, nil):
                 state = .starting
                 detail = ["Connecting to Firestore…"]
@@ -254,7 +257,7 @@ func icon(_ state: AgentState) -> NSImage {
         switch state {
         case .running:
             dots.fill()
-        case .crashed:
+        case .crashed, .unreachable:
             NSBezierPath(rect: NSRect(x: 14.6, y: 7, width: 2.8, height: 8)).fill()
             NSBezierPath(rect: NSRect(x: 14.6, y: 17, width: 2.8, height: 3)).fill()
         case .starting, .stopped:

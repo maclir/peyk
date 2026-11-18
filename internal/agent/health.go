@@ -15,6 +15,10 @@ type Health struct {
 	StartedAt   time.Time `json:"started_at"`
 	RefreshedAt time.Time `json:"refreshed_at,omitzero"`
 	Workers     int       `json:"workers"`
+	// Unreachable is why the last write of the laptop's status failed. The
+	// phone reads that status, so while this is set the phone shows the
+	// laptop as offline even though the process is alive.
+	Unreachable string `json:"unreachable,omitempty"`
 }
 
 // WriteHealth replaces the file whole, so a reader never sees half of it.

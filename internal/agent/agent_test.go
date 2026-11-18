@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -241,6 +242,38 @@ func TestRunGoesOfflineForSleepAndStaysOfflineUntilAFullWake(t *testing.T) {
 
 	power <- PowerEvent{}
 	waitFor(t, func() bool { return mem.Laptop().Online })
+}
+
+type unreachableLaptop struct {
+	*store.Memory
+	err error
+}
+
+func (u *unreachableLaptop) SetLaptop(ctx context.Context, l store.Laptop) error {
+	if u.err != nil {
+		return u.err
+	}
+	return u.Memory.SetLaptop(ctx, l)
+}
+
+func TestEveryLaptopStatusWriteIsReportedWithItsError(t *testing.T) {
+	s := &unreachableLaptop{Memory: store.NewMemory(), err: errors.New("deadline exceeded")}
+	a := newAgent(&fakeCollector{}, s)
+	var got []string
+	a.LaptopWritten = func(l store.Laptop, err error) {
+		got = append(got, fmt.Sprintf("%v %v", l.Online, err))
+	}
+	if a.wake(context.Background()) {
+		t.Fatal("wake reported a failed write as written")
+	}
+	s.err = nil
+	if !a.wake(context.Background()) {
+		t.Fatal("wake failed")
+	}
+	a.sleep(context.Background())
+	if want := "true deadline exceeded,true <nil>,false <nil>"; strings.Join(got, ",") != want {
+		t.Fatalf("reported %q, want %q", strings.Join(got, ","), want)
+	}
 }
 
 type recordingWatcher struct{ dirs []string }

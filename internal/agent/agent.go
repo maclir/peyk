@@ -117,6 +117,11 @@ type Agent struct {
 	// Refreshed, when set, is told the sessions after every refresh that
 	// published them.
 	Refreshed func(at time.Time, snaps []session.Snapshot)
+	// LaptopWritten, when set, is told every write of the laptop's status
+	// and its error. The phone reads that status, so a failed write means
+	// the phone shows the laptop as it was before, even though this process
+	// is running.
+	LaptopWritten func(l store.Laptop, err error)
 	// CI, when set, follows the workflow runs of each session's pushed
 	// commit. GitHub cannot tell the laptop a run moved on, so the agent
 	// asks every CIPoll, and only while a run is unfinished or, for CIWait
@@ -677,12 +682,21 @@ func contentKey(v any) string {
 	return string(b)
 }
 
+func (a *Agent) setLaptop(ctx context.Context, online bool) error {
+	l := store.Laptop{Online: online, SeenAt: a.Now()}
+	err := a.Store.SetLaptop(ctx, l)
+	if a.LaptopWritten != nil {
+		a.LaptopWritten(l, err)
+	}
+	return err
+}
+
 // sleep marks the laptop offline. A failure only logs: the network may already
 // be going, and the stale seen_at then tells the phone instead.
 func (a *Agent) sleep(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: false, SeenAt: a.Now()}); err != nil {
+	if err := a.setLaptop(ctx, false); err != nil {
 		a.Log.Printf("mark offline for sleep: %v", err)
 	}
 }
@@ -691,7 +705,7 @@ func (a *Agent) sleep(ctx context.Context) {
 func (a *Agent) wake(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
+	if err := a.setLaptop(ctx, true); err != nil {
 		a.Log.Printf("mark online after wake: %v", err)
 		return false
 	}
@@ -705,14 +719,14 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		// ctx may be cancelled; the goodbye needs a context of its own.
 		bye, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if offErr := a.Store.SetLaptop(bye, store.Laptop{Online: false, SeenAt: a.Now()}); err == nil {
+		if offErr := a.setLaptop(bye, false); err == nil {
 			err = offErr
 		}
 	}()
 	if err := a.Refresh(ctx); err != nil {
 		return err
 	}
-	if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
+	if err := a.setLaptop(ctx, true); err != nil {
 		return err
 	}
 	if err := a.PublishUsage(ctx); err != nil {
@@ -801,7 +815,7 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			if asleep {
 				continue
 			}
-			if err := a.Store.SetLaptop(ctx, store.Laptop{Online: true, SeenAt: a.Now()}); err != nil {
+			if err := a.setLaptop(ctx, true); err != nil {
 				return err
 			}
 		}

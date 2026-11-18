@@ -14,6 +14,8 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/impersonate"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/maclir/peyk/internal/agent"
 	"github.com/maclir/peyk/internal/inbox"
@@ -42,20 +44,41 @@ func healthPath() string {
 	return filepath.Join(home, ".peyk", "agent.json")
 }
 
-// reportHealth tells the menu bar app how many sessions are live. Failing to
-// is logged, not fatal: the phone still gets everything.
-func reportHealth(path string, started time.Time, logger *log.Logger) func(time.Time, []session.Snapshot) {
-	return func(at time.Time, snaps []session.Snapshot) {
-		live := 0
-		for _, s := range snaps {
-			if s.State != session.Stopped {
-				live++
-			}
+// healthReport keeps what the menu bar app shows and rewrites the file on
+// every change. Failing to write it is logged, not fatal: the phone still
+// gets everything.
+type healthReport struct {
+	path   string
+	logger *log.Logger
+	h      agent.Health
+}
+
+func newHealthReport(path string, started time.Time, logger *log.Logger) *healthReport {
+	return &healthReport{path: path, logger: logger, h: agent.Health{PID: os.Getpid(), StartedAt: started}}
+}
+
+func (r *healthReport) refreshed(at time.Time, snaps []session.Snapshot) {
+	live := 0
+	for _, s := range snaps {
+		if s.State != session.Stopped {
+			live++
 		}
-		h := agent.Health{PID: os.Getpid(), StartedAt: started, RefreshedAt: at, Workers: live}
-		if err := agent.WriteHealth(path, h); err != nil {
-			logger.Printf("health: %v", err)
-		}
+	}
+	r.h.RefreshedAt, r.h.Workers = at, live
+	r.write()
+}
+
+func (r *healthReport) laptopWritten(_ store.Laptop, err error) {
+	r.h.Unreachable = ""
+	if err != nil {
+		r.h.Unreachable = err.Error()
+	}
+	r.write()
+}
+
+func (r *healthReport) write() {
+	if err := agent.WriteHealth(r.path, r.h); err != nil {
+		r.logger.Printf("health: %v", err)
 	}
 }
 
@@ -92,7 +115,12 @@ func openStore(ctx context.Context) (*store.Firestore, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("impersonate agent account: %w", err)
 	}
-	fs, err := store.NewFirestore(ctx, p, option.WithTokenSource(ts))
+	// A connection open across a sleep is dead after the wake, yet without
+	// keepalive pings gRPC keeps sending on it until TCP gives up, minutes
+	// later, and every write times out meanwhile. A server that finds the
+	// pings too frequent answers too_many_pings, and gRPC doubles the interval.
+	alive := grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true})
+	fs, err := store.NewFirestore(ctx, p, option.WithTokenSource(ts), option.WithGRPCDialOption(alive))
 	return fs, p, err
 }
 
@@ -171,12 +199,14 @@ func runAgent(ctx context.Context) error {
 		return err
 	}
 	c := collector()
+	health := newHealthReport(healthPath(), time.Now(), logger)
 	a := &agent.Agent{
-		Refreshed:   reportHealth(healthPath(), time.Now(), logger),
-		Checkout:    own,
-		Power:       power,
-		Edits:       edits,
-		Transcripts: transcripts, Replies: replies,
+		Refreshed:     health.refreshed,
+		LaptopWritten: health.laptopWritten,
+		Checkout:      own,
+		Power:         power,
+		Edits:         edits,
+		Transcripts:   transcripts, Replies: replies,
 		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
 		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
