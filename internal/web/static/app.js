@@ -1104,6 +1104,7 @@ async function start(cfg) {
     if (!d) done.set(key, (d = { tasks: [], cursor: null, more: true, loading: false, error: "" }));
     if (d.loading || !d.more) return;
     d.loading = true;
+    render();
     const q = fs.query(fs.collection(db, "tasks"), fs.where("status", "==", "done"),
       ...(key ? [fs.where("project", "==", key)] : []), fs.orderBy("done_at", "desc"),
       ...(d.cursor ? [fs.startAfter(d.cursor)] : []), fs.limit(DONE_PAGE));
@@ -1147,7 +1148,7 @@ async function start(cfg) {
       d.error ? h("p", { class: "empty" }, d.error) : null,
       d.error ? h("button", { type: "button", class: "link more", onclick: () => { done.delete(key); render(); } }, "Try again") : null,
       !d.tasks.length && !d.loading && !d.error ? h("p", { class: "empty" }, "Nothing done yet.") : null,
-      d.loading ? loading("Loading done tasks…")
+      d.loading ? (d.tasks.length ? h("p", { class: "more pending", role: "status", "aria-label": "Loading more done tasks" }, spinner()) : loading("Loading done tasks…"))
         : d.more ? h("button", { type: "button", class: "link more", onclick: () => loadDone(key) }, "Show more") : null,
     ].filter(Boolean);
   }

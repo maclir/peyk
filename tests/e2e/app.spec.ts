@@ -893,6 +893,30 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 
+  test('Show more turns into a spinner until the next page of done tasks arrives', async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `more${i}`);
+    for (const [i, id] of ids.entries()) {
+      await put(page, `tasks/${id}`, { project: 'knip', text: `Older task ${i}`, status: 'done', created_at: new Date(Date.now() - 3600_000), done_at: new Date(Date.now() - 60_000 * (i + 1)) });
+    }
+    await page.goto('/#inbox');
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(page.locator('.task.done')).toHaveCount(10);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.sawPending = false;
+      new MutationObserver(() => { w.sawPending ||= Boolean(document.querySelector('[aria-label="Loading more done tasks"] .spin')); })
+        .observe(document.body, { childList: true, subtree: true });
+    });
+    await page.getByRole('button', { name: 'Show more' }).click();
+    await expect(page.locator('.task.done')).toHaveCount(11);
+    expect(await page.evaluate(() => (window as any).sawPending)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'Loading more done tasks' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(page.locator('.task.done')).toHaveCount(0);
+    for (const id of ids) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
   test('a sheet goes away with a drag down its top or a tap on its bar, and stays for a short pull', async () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date() });
     const pull = async (from: Locator, to: number) => {

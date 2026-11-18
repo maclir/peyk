@@ -287,7 +287,9 @@ button.step { width: 40px; height: 40px; background: var(--paper); color: var(--
 .rmeta { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--muted); }
 .rmeta a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .task.row { transition: none; } }
-button.link.more { align-self: center; }
+/* The spinner takes the button's place at its height, so the list does not move. */
+button.link.more, .more.pending { align-self: center; height: 32px; box-sizing: border-box; }
+.more.pending { display: flex; align-items: center; margin: 0; padding: 0 4px; color: var(--accent); }
 
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
 .thumb { position: relative; display: inline-flex; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
