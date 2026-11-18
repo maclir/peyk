@@ -85,7 +85,6 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .tabs a[aria-current="page"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
 .tabs .n { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
 .tabs a[aria-current="page"] .n { color: var(--accent); }
-.status { margin: 6px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--muted); }
 .group { font: 600 0.7rem var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 14px 2px 2px; }
 .group .fold { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .group .fold .n { font-weight: 500; }
@@ -329,8 +328,21 @@ button.link.more { align-self: center; }
 button.busy { cursor: progress; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 button.busy:disabled { opacity: 0.75; }
 button.busy .ico { display: none; }
-.status .spin { margin-right: 6px; }
-.status .spin, .tfoot > .spin { color: var(--accent); }
+.outcome .spin, .tfoot > .spin { color: var(--accent); }
+
+/* A command's result sits beside the control that sent it. A failure is
+   tinted, since it stays until dismissed. */
+.outcome { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 4px 6px 10px; min-height: 36px; box-sizing: border-box; border-radius: 10px; font-size: 0.85rem; color: var(--muted); background: var(--paper); overflow-wrap: anywhere; }
+.outcome[data-tone="ok"] { background: var(--ok-soft); }
+.outcome[data-tone="warn"] { background: var(--warn-soft); }
+.outcome[data-tone="bad"] { background: var(--bad-soft); }
+.outcome .dismiss, .toast .dismiss { width: 28px; height: 28px; color: inherit; }
+.composer > .outcome { margin: 0 4px 2px -4px; }
+.pushrow > .outcome { flex-basis: 100%; }
+.hstat { position: relative; }
+.hpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 5; margin: 0; padding: 6px 12px; border-radius: 10px; white-space: nowrap; font-size: 0.82rem; background: var(--card); border: 1px solid var(--line-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+.toast { position: fixed; z-index: 20; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: min(38rem, calc(100% - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))); box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 14px; border-radius: 12px; font-size: 0.88rem; background: var(--card); color: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); }
+.toast[data-tone="bad"] { background: var(--bad-soft); border-color: var(--bad); }
 .when.saving { display: inline-flex; align-items: center; gap: 4px; }
 .notice.loading { display: flex; align-items: center; gap: 8px; }
 #notice::before { content: ""; display: inline-block; width: 0.9em; height: 0.9em; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -0.12em; }

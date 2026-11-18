@@ -204,13 +204,27 @@ test.describe('signed in', () => {
     await expect(page.locator('.facts')).toContainText('main → origin/main');
     await expect(page.locator('.dhead .tag.branch')).toHaveCount(0);
     await page.getByRole('button', { name: 'Push 2' }).click();
-    await expect(page.getByText('Push knip: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.pushcard .outcome')).toHaveText('Waiting for the laptop…');
     const [cmd] = await list(page, 'commands');
     expect(cmd.fields.type.stringValue).toBe('push');
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'push', session: 'k' });
     expect(cmd.fields.assertion).toBeUndefined();
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
-    await expect(page.getByText('Push knip: done.')).toBeVisible();
+    await expect(page.locator('.pushcard .outcome')).toHaveText('Pushed');
+
+    // A failure stays beside the button until it is dismissed.
+    await page.getByRole('button', { name: 'Push 2' }).click();
+    await expect(page.locator('.pushcard .outcome')).toHaveText('Waiting for the laptop…');
+    const again = (await list(page, 'commands')).find((c) => c.fields.status.stringValue === 'pending')!;
+    await put(page, `commands/${again.name.split('/').pop()}`, { ...plain(again.fields), status: 'failed', error: 'rejected (fetch first)' });
+    const failure = page.locator('.pushcard .outcome');
+    await expect(failure).toHaveText('Push failed: rejected (fetch first)');
+    await expect(failure).toHaveAttribute('data-tone', 'bad');
+    await page.waitForTimeout(3500);
+    await expect(failure).toBeVisible();
+    await failure.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(failure).toHaveCount(0);
+    for (const c of await list(page, 'commands')) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
   });
 
   // Headless Chromium refuses notification permission, so the registration's
@@ -349,12 +363,12 @@ test.describe('signed in', () => {
     await expect(page.getByRole('menuitem', { name: 'Stop worker' })).toHaveCount(0);
     await page.getByRole('menuitem', { name: 'Start worker', exact: true }).click();
     await expect(page.getByRole('menu')).toHaveCount(0);
-    await expect(page.getByText('Start zzz: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
     const start = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'start')!;
     expect(JSON.parse(start.fields.payload.stringValue)).toMatchObject({ type: 'start', session: 'z' });
     expect(start.fields.grant).toBeDefined();
     await put(page, `commands/${start.name.split('/').pop()}`, { ...plain(start.fields), status: 'done' });
-    await expect(page.getByText('Start zzz: done.')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Started');
     await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'idle', state: 'idle', updated_at: new Date() });
     await actions.click();
     await expect(page.getByRole('menuitem', { name: 'Stop worker' })).toBeVisible();
@@ -363,11 +377,11 @@ test.describe('signed in', () => {
     await expect(page.getByRole('menu')).toHaveCount(0);
     await actions.click();
     await page.getByRole('menuitem', { name: 'Restart worker' }).click();
-    await expect(page.getByText('Restart zzz: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
     const restart = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'restart')!;
     expect(JSON.parse(restart.fields.payload.stringValue)).toMatchObject({ type: 'restart', session: 'z' });
     await put(page, `commands/${restart.name.split('/').pop()}`, { ...plain(restart.fields), status: 'done' });
-    await expect(page.getByText('Restart zzz: done.')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Restarted');
     await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
   });
 
@@ -375,23 +389,23 @@ test.describe('signed in', () => {
     await page.goto('/');
     await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();
     await page.getByRole('button', { name: 'Laptop online. Check for updates' }).click();
-    await expect(page.getByText('Check for updates: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.hpop')).toHaveText('Waiting for the laptop…');
     const check = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'check')!;
     expect(check.fields.assertion).toBeUndefined();
     expect(check.fields.grant).toBeUndefined();
     await put(page, 'laptop/version', { commit: 'abc1234', behind: 2 });
     await put(page, `commands/${check.name.split('/').pop()}`, { ...plain(check.fields), status: 'done' });
-    await expect(page.getByText('The laptop has 2 new commits to update to.')).toBeVisible();
+    await expect(page.locator('.hpop')).toHaveText('2 new commits to update to');
     await expect(page.getByRole('button', { name: 'Laptop online at abc1234. Check for updates' })).toBeVisible();
 
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Update the laptop: 2 new commits' }).click();
-    await expect(page.getByText('Update the laptop: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.hpop')).toHaveText('Waiting for the laptop…');
     const upd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'update')!;
     expect(upd.fields.grant).toBeDefined();
     await put(page, 'laptop/version', { commit: 'def5678', behind: 0 });
     await put(page, `commands/${upd.name.split('/').pop()}`, { ...plain(upd.fields), status: 'done' });
-    await expect(page.getByText('Update the laptop: done.')).toBeVisible();
+    await expect(page.locator('.hpop')).toHaveText('Updated');
     await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();
   });
 
@@ -403,7 +417,7 @@ test.describe('signed in', () => {
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
     await task.getByRole('button', { name: /More actions/ }).click();
     await task.getByRole('menuitem', { name: 'Send without clearing' }).click();
-    await expect(task.getByRole('status')).toHaveText('Send to knip: the laptop is offline, so nothing was sent.');
+    await expect(task.getByRole('status')).toHaveText('Not sent: the laptop is offline.');
     await page.request.delete(`${FIRESTORE}/tasks/proto`, { headers: admin });
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
   });
@@ -416,7 +430,7 @@ test.describe('signed in', () => {
     await expect(task).toContainText('Free · clears the conversation first');
     await expect(task.locator('button.send .ico.broom')).toHaveCount(1);
     await task.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
+    await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     await expect(task.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-busy', 'true');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'ctx', clear: true });
@@ -424,7 +438,7 @@ test.describe('signed in', () => {
     expect(Object.keys(cmd.fields.grant.mapValue.fields).sort()).toEqual(['assertion', 'signature', 'statement']);
     expect(JSON.parse(cmd.fields.grant.mapValue.fields.statement.stringValue)).toMatchObject({ kind: 'peyk-session' });
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
-    await expect(task.getByRole('status')).toHaveText('Clear knip and send: done.');
+    await expect(task.getByRole('status')).toHaveText('Sent');
     await expect(task.getByRole('button', { name: 'Send', exact: true })).not.toHaveAttribute('aria-busy', 'true');
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
 
@@ -432,7 +446,7 @@ test.describe('signed in', () => {
     await page.reload();
     await passkeyOn(page);
     await task.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(task.getByRole('status')).toHaveText('Clear knip and send: waiting for the laptop…');
+    await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     expect(await prompts(page)).toBe(0);
     const again = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(again.fields.grant.mapValue.fields.statement.stringValue).toBe(cmd.fields.grant.mapValue.fields.statement.stringValue);
@@ -574,7 +588,7 @@ test.describe('signed in', () => {
     await press(true);
     await expect(page.getByLabel('New task')).toHaveValue('');
     const task = page.locator('.task', { hasText: 'Ship it now' });
-    await expect(task.getByRole('status')).toHaveText('Send to knip: waiting for the laptop…');
+    await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     const payload = JSON.parse(cmd.fields.payload.stringValue);
     expect(payload).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Ship it now', clear: false });
@@ -633,7 +647,7 @@ test.describe('signed in', () => {
     await expect(task.locator('.thumb img')).toHaveCount(1);
 
     await task.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(task.getByRole('status')).toContainText('waiting for the laptop…');
+    await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => JSON.parse(c.fields.payload.stringValue).text === 'Match this layout')!;
     expect(JSON.parse(cmd.fields.payload.stringValue).images).toEqual([id]);
 
@@ -678,7 +692,7 @@ test.describe('signed in', () => {
     await reply.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
     await expect(reply.locator('.thumb img')).toHaveCount(1);
     await reply.getByRole('button', { name: 'Send reply' }).click();
-    await expect(page.getByText('Reply to knip: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.waitrow')).toContainText('Sending…');
     await expect(reply.locator('.thumb')).toHaveCount(0);
     const id = createHash('sha256').update(PNG).digest('hex');
     expect((await get(page, `attachments/${id}`)).type.stringValue).toBe('image/png');
@@ -687,7 +701,8 @@ test.describe('signed in', () => {
 
     // The laptop has saved the image once it answers, so it is not kept.
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
-    await expect(page.getByText('Reply to knip: done.')).toBeVisible();
+    await expect(page.locator('.waitrow')).toHaveCount(0);
+    await expect(page.locator('form.composer.respond .outcome')).toHaveCount(0);
     await expect.poll(async () => (await page.request.get(`${FIRESTORE}/attachments/${id}`, { headers: admin })).status()).toBe(404);
 
     // The delivered reply is the prompt until the laptop publishes its own.
@@ -717,7 +732,6 @@ test.describe('signed in', () => {
     await reply.getByLabel('Reply', { exact: true }).fill('Also add --csv');
     await page.evaluate(() => window.scrollTo(0, 0));
     await reply.getByRole('button', { name: 'Send reply' }).click();
-    await expect(page.getByText('Reply to knip: queued. It goes out when the laptop is back online.')).toBeVisible();
     await expect(page.getByText('Queued until the laptop is back online')).toBeVisible();
     await expect(page.locator('.reply.queued')).toBeInViewport();
     await page.setViewportSize(viewport);
@@ -830,7 +844,7 @@ test.describe('signed in', () => {
     expect((await stored())!.fields.project.stringValue).toBe('knip');
 
     await sheet.locator('.task', { hasText: 'First thing' }).getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(sheet.locator('.task', { hasText: 'First thing' }).getByRole('status')).toHaveText(/knip.*: waiting for the laptop…/);
+    await expect(sheet.locator('.task', { hasText: 'First thing' }).getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch' && JSON.parse(c.fields.payload.stringValue).task === 'one')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'one' });
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'dispatched', session_id: 'k', created_at: new Date(Date.now() - 3000), dispatched_at: new Date() });
@@ -857,14 +871,13 @@ test.describe('signed in', () => {
     await expect(old).toContainText('3f2a1c4');
 
     await old.getByRole('button', { name: 'Clear and resume: Detect unused exports' }).click();
-    await expect(sheet.getByRole('status')).toHaveText('Resume knip: waiting for the laptop…');
+    await expect(sheet.getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'resume')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'resume', session: 'k', conversation: 'c-old' });
     expect(cmd.fields.grant).toBeDefined();
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
     await expect(sheet).toBeHidden();
-    await expect(page.locator('#status')).toHaveText('Resume knip: done.');
-    await expect(page.locator('#status')).toHaveAttribute('data-tone', 'ok');
+    await expect(page.locator('.toast')).toBeHidden();
 
     await conversation('c-old');
     await page.getByRole('button', { name: /^Inbox/ }).click();
@@ -981,7 +994,7 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply.sent.none')).toHaveText('Nothing sent yet.');
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear conversation' }).click();
-    await expect(page.getByText('Clear knip: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'clear')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'clear', session: 'k' });
 
@@ -1004,7 +1017,7 @@ test.describe('signed in', () => {
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear and stop' }).click();
     await expect(page.getByRole('menu')).toHaveCount(0);
-    await expect(page.getByText('Clear and stop cleo: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
     const sent = (await list(page, 'commands')).filter((c) => JSON.parse(c.fields.payload.stringValue).session === 'c');
     expect(sent).toHaveLength(1);
     expect(JSON.parse(sent[0].fields.payload.stringValue)).toMatchObject({ type: 'stop', session: 'c', clear: true });
@@ -1022,7 +1035,7 @@ test.describe('signed in', () => {
     await page.goto('/#s-f');
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Clear and stop' }).click();
-    await expect(page.getByText('Clear and stop fini: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
     const sent = (await list(page, 'commands')).filter((c) => JSON.parse(c.fields.payload.stringValue).session === 'f');
     expect(sent).toHaveLength(1);
     expect(JSON.parse(sent[0].fields.payload.stringValue)).toMatchObject({ type: 'stop', session: 'f', clear: true });
@@ -1058,14 +1071,14 @@ test.describe('signed in', () => {
     await put(page, 'sessions/q', { ...asking, updated_at: new Date() });
     await expect(page.getByLabel('Blue')).toBeChecked();
     await send.click();
-    await expect(page.getByText('Answer quiz: waiting for the laptop…')).toBeVisible();
+    await expect(page.locator('.qcard .outcome')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'answer')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({
       type: 'answer', session: 'q', question: 'toolu_1',
       text: 'My answers to your questions:\n- Which colour? Blue\n- Which pets? Cat; a fish',
     });
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
-    await expect(page.getByText('Answer quiz: done.')).toBeVisible();
+    await expect(page.locator('.qcard .outcome')).toHaveText('Sent');
 
     const { question, ...answered } = asking;
     await put(page, 'sessions/q', { ...answered, aoe_status: 'running', state: 'working' });
