@@ -637,7 +637,7 @@ async function start(cfg) {
       }
     });
     return h("article", { class: "detail" },
-      h("a", { class: "back", href: "#" }, "← Workers"),
+      h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
       h("h2", {}, "Pair this device"),
       h("p", {}, "Commands to the laptop are signed with a passkey on this device. Create one, then confirm its fingerprint on the laptop."),
       button, out);
