@@ -273,6 +273,30 @@ test.describe('signed in', () => {
     });
   });
 
+  test("on Android a push for the worker on screen shows nothing", async () => {
+    await page.goto('/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await page.evaluate(() => { location.hash = '#s-k'; });
+    await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
+    const [worker] = page.context().serviceWorkers();
+    const shown = await worker.evaluate(async () => {
+      const reg = (self as any).registration;
+      const out: string[] = [];
+      reg.showNotification = async (_: string, o: any) => { out.push(o.tag); };
+      reg.getNotifications = async () => [];
+      // @ts-ignore the worker's top-level binding
+      closeLeavesNote = true;
+      try {
+        for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/#s-${session}`, session });
+      } finally {
+        // @ts-ignore
+        closeLeavesNote = false;
+      }
+      return out;
+    });
+    expect(shown).toEqual(['h']);
+  });
+
   test("a notification click shows its worker in the open window and is logged", async () => {
     await page.goto('/');
     await page.waitForFunction(() => navigator.serviceWorker.controller);

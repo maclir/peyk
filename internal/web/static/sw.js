@@ -114,12 +114,18 @@ self.addEventListener("push", (event) => {
 
 // Browsers require every push to show a notification: Safari revokes the
 // subscription otherwise, and Chrome shows a generic one in its place. A note
-// for the worker already on screen is shown silently and closed at once.
+// for the worker already on screen is shown silently and closed at once,
+// except on Android: there a note closed as soon as it is shown stays in the
+// tray, while Chrome forgets it, so nothing can close it later. Chrome on
+// Android asks for no notification while the app is on screen.
+let closeLeavesNote = /Android/.test(self.navigator.userAgent);
+
 async function notify(note) {
   if (note.dismiss) return dismiss(note.session);
   const visible = await visibleWindows();
   const watched = Boolean(note.session) && (await watching(visible, note.session));
   await log("push", { session: note.session, watched, windows: describe(visible) });
+  if (watched && closeLeavesNote) return;
   try {
     await self.registration.showNotification(note.title, {
       body: note.body,
