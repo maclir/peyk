@@ -219,7 +219,7 @@ func TestServiceWorkerCacheIsNamedAfterTheAssetsItHolds(t *testing.T) {
 	}
 }
 
-// The page shows the revision its cached code came from and offers a reload
+// The page shows the revision its cached code came from and, on a tap, offers a reload
 // when the deployed one differs, so a deploy must reach installed apps even
 // when no asset changed.
 func TestEachDeployIsANewWorker(t *testing.T) {

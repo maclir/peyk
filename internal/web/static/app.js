@@ -27,25 +27,39 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
 });
 
 // The footer names the revision this page's code came from, which the worker
-// may have served from its cache. It turns yellow when another revision is
-// deployed, and tapping it then drops the cached shell before reloading, since
-// a plain reload would be answered from that same cache.
+// may have served from its cache. Tapping it asks the server which revision is
+// deployed; when another one is, it turns yellow, and tapping it then drops
+// the cached shell before reloading, since a plain reload would be answered
+// from that same cache.
 const revEl = document.getElementById("rev");
+const revStatusEl = document.getElementById("revstatus");
 revEl.textContent = revision;
 async function checkRevision() {
+  revEl.disabled = true;
+  revStatusEl.dataset.tone = "";
+  revStatusEl.replaceChildren(Object.assign(document.createElement("span"), { className: "spin" }), " Checking");
+  let text = "Up to date", tone = "ok";
   try {
     const res = await fetch("/version", { cache: "no-store" });
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { revision: deployed } = await res.json();
-    const stale = deployed !== revision;
-    revEl.classList.toggle("stale", stale);
-    revEl.disabled = !stale;
-    revEl.title = stale ? `${deployed} is deployed; tap to load it` : "Latest deployed revision";
+    if (deployed !== revision) {
+      revEl.classList.add("stale");
+      revEl.title = `${deployed} is deployed; tap to load it`;
+      text = `${deployed} is deployed`;
+      tone = "warn";
+    }
   } catch {
-    // Offline: the deployed revision is unknown, so the footer claims nothing.
+    text = "Could not reach the server";
+    tone = "bad";
   }
+  revEl.disabled = false;
+  revStatusEl.textContent = text;
+  revStatusEl.dataset.tone = tone;
+  clearTimeout(revStatusEl.timer);
+  if (tone === "ok") revStatusEl.timer = setTimeout(() => { revStatusEl.textContent = ""; }, 3000);
 }
-revEl.addEventListener("click", async () => {
+async function loadDeployed() {
   revEl.disabled = true;
   try {
     await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
@@ -54,11 +68,8 @@ revEl.addEventListener("click", async () => {
     // The reload still fetches whatever the deleted caches no longer hold.
   }
   location.reload();
-});
-checkRevision();
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) checkRevision();
-});
+}
+revEl.addEventListener("click", () => (revEl.classList.contains("stale") ? loadDeployed() : checkRevision()));
 
 const app = document.getElementById("app");
 const hstatEl = document.getElementById("hstat");
