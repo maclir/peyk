@@ -353,3 +353,8 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 [data-tone="ok"] { color: var(--ok); }
 [data-tone="warn"] { color: var(--warn); }
 [data-tone="bad"] { color: var(--bad); }
+
+.foot { display: flex; justify-content: center; margin-top: 2rem; }
+.rev { font: 12px var(--mono); color: var(--none); background: none; border: 0; padding: .25rem .5rem; border-radius: 6px; }
+.rev:disabled { cursor: default; opacity: 1; }
+.rev.stale { color: var(--warn); background: var(--warn-soft); cursor: pointer; }

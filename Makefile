@@ -23,6 +23,11 @@ DNS_CONSOLE_URL ?=
 GOOGLE_CLOUD_REGION ?= europe-west1
 FIRESTORE_LOCATION ?= eur3
 SERVICE_NAME ?= $(APP_NAME)
+# The commit `make deploy` uploads, which the page shows in its footer. A deploy
+# from a modified tree uploads those modifications, so it says so.
+ifeq ($(origin REVISION),undefined)
+REVISION := $(shell git rev-parse --short HEAD 2>/dev/null)$(shell git status --porcelain --untracked-files=no 2>/dev/null | grep -q . && echo -dirty)
+endif
 
 # Pin gcloud to this project and account for the life of a make invocation,
 # instead of relying on — or mutating — the globally active configuration. One
@@ -205,7 +210,7 @@ deploy: gcp-guard ## Deploy the current source to a scale-to-zero Cloud Run serv
 		--build-service-account $(BUILD_SERVICE_ACCOUNT) \
 		--allow-unauthenticated --min-instances 0 --max-instances 3 \
 		--memory 256Mi --cpu 1 --concurrency 80 --timeout 60 \
-		--set-env-vars GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT),FIREBASE_API_KEY=$(FIREBASE_API_KEY),FIREBASE_AUTH_DOMAIN=$(FIREBASE_AUTH_DOMAIN),FIREBASE_APP_ID=$(FIREBASE_APP_ID)
+		--set-env-vars GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT),FIREBASE_API_KEY=$(FIREBASE_API_KEY),FIREBASE_AUTH_DOMAIN=$(FIREBASE_AUTH_DOMAIN),FIREBASE_APP_ID=$(FIREBASE_APP_ID),REVISION=$(REVISION)
 
 deploy-rules: gcp-guard node_modules ## Deploy deny-by-default Firestore rules and indexes.
 	npx firebase deploy --only firestore:rules,firestore:indexes --project $(GOOGLE_CLOUD_PROJECT) --force

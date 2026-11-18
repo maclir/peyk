@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
-	srv := httptest.NewServer(New(Firebase{APIKey: "k", AuthDomain: "p.firebaseapp.com", ProjectID: "p", AppID: "a"}).Handler())
+	srv := httptest.NewServer(New(Firebase{APIKey: "k", AuthDomain: "p.firebaseapp.com", ProjectID: "p", AppID: "a"}, "abc1234").Handler())
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
@@ -55,7 +56,7 @@ func TestVendoredFirebaseLoadsNothingFromGoogleCDN(t *testing.T) {
 	}
 }
 
-func newTestApp() *App { return New(Firebase{}) }
+func newTestApp() *App { return New(Firebase{}, "abc1234") }
 
 // Google's frontend reserves /healthz on *.run.app and answers it itself, so a
 // health check there reports a perfectly healthy service as broken. The path
@@ -188,8 +189,8 @@ func TestServiceWorkerCacheIsNamedAfterTheAssetsItHolds(t *testing.T) {
 	if strings.Contains(string(body), "__VERSION__") {
 		t.Error("the worker went out with its placeholder still in it")
 	}
-	if !strings.Contains(string(body), staticVersion) {
-		t.Errorf("worker does not name this build's cache (%s)", staticVersion)
+	if !strings.Contains(string(body), newTestApp().release) {
+		t.Errorf("worker does not name this build's cache (%s)", newTestApp().release)
 	}
 	// A worker's scope cannot rise above its own path, so it is served from the
 	// root; and being the carrier of every other update, it is never answered
@@ -199,6 +200,41 @@ func TestServiceWorkerCacheIsNamedAfterTheAssetsItHolds(t *testing.T) {
 	}
 	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
 		t.Errorf("Cache-Control = %q, want no-cache", got)
+	}
+}
+
+// The page shows the revision its cached code came from and offers a reload
+// when the deployed one differs, so a deploy must reach installed apps even
+// when no asset changed.
+func TestEachDeployIsANewWorker(t *testing.T) {
+	a, b := New(Firebase{}, "aaa1111"), New(Firebase{}, "bbb2222")
+	if a.release == b.release || bytes.Equal(a.worker, b.worker) {
+		t.Error("two revisions with the same assets share a worker, so the second never reaches an installed app")
+	}
+}
+
+func TestReleaseAndVersionNameTheRevision(t *testing.T) {
+	srv := httptest.NewServer(newTestApp().Handler())
+	defer srv.Close()
+
+	if body := get(t, srv.URL+ReleasePath); body != "export const revision = \"abc1234\";\n" {
+		t.Errorf("release module = %q", body)
+	}
+	if worker := get(t, srv.URL+"/sw.js"); !strings.Contains(worker, ReleasePath) {
+		t.Error("the worker does not cache the release module, so the page cannot tell which revision it runs")
+	}
+
+	resp, err := http.Get(srv.URL + VersionPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", VersionPath, err)
+	}
+	defer resp.Body.Close()
+	var v struct{ Revision string }
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || v.Revision != "abc1234" {
+		t.Errorf("version = %+v, %v; want abc1234", v, err)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
 	}
 }
 

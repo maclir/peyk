@@ -2,7 +2,10 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"mime"
@@ -45,19 +48,39 @@ type Emulators struct {
 type App struct {
 	firebase Firebase
 	page     *template.Template
+	revision string
+	// release names the shell the worker caches. It covers the revision as
+	// well as the assets, so every deploy installs a new worker and refills
+	// its cache with this deploy's release.js; otherwise a deploy that changed
+	// only Go code would leave every installed app reporting an old revision.
+	release string
+	worker  []byte
+	module  []byte
 }
 
-// New serves the phone app. An empty Firebase config serves the shell with a
-// notice instead of a sign-in button, which is what local runs and tests get.
-func New(fb Firebase) *App {
-	return &App{firebase: fb, page: template.Must(template.New("page").Parse(pageHTML))}
+// New serves the phone app built from revision. An empty Firebase config
+// serves the shell with a notice instead of a sign-in button, which is what
+// local runs and tests get.
+func New(fb Firebase, revision string) *App {
+	sum := sha256.Sum256([]byte(staticVersion + "\n" + revision))
+	release := hex.EncodeToString(sum[:8])
+	return &App{
+		firebase: fb,
+		page:     template.Must(template.New("page").Parse(pageHTML)),
+		revision: revision,
+		release:  release,
+		worker:   bytes.ReplaceAll(serviceWorkerSource, []byte("__VERSION__"), []byte(release)),
+		module:   []byte(fmt.Sprintf("export const revision = %q;\n", revision)),
+	}
 }
 
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.Handle("GET /static/", revalidated(http.FileServer(http.FS(staticFS))))
-	mux.HandleFunc("GET /sw.js", serviceWorker)
+	mux.HandleFunc("GET /sw.js", a.serviceWorker)
+	mux.HandleFunc("GET "+ReleasePath, a.releaseModule)
+	mux.HandleFunc("GET "+VersionPath, a.version)
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
 	mux.HandleFunc("POST "+SharePath, shareFallback)
@@ -115,28 +138,49 @@ func revalidated(next http.Handler) http.Handler {
 	})
 }
 
-// serviceWorkerBody is the worker with this build's version compiled into it.
-// The substitution happens once, because the answer cannot change while the
-// process is running.
-var serviceWorkerBody = func() []byte {
+var serviceWorkerSource = func() []byte {
 	body, err := staticFS.ReadFile("static/sw.js")
 	if err != nil {
 		panic("read embedded service worker: " + err.Error())
 	}
-	return bytes.ReplaceAll(body, []byte("__VERSION__"), []byte(staticVersion))
+	return body
 }()
+
+// ReleasePath is the module that tells the running page which revision its
+// cached code came from. It is cached with the shell, so it ages with the code
+// it describes.
+const ReleasePath = "/static/release.js"
+
+func (a *App) releaseModule(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("ETag", `"`+a.release+`"`)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, "release.js", time.Time{}, bytes.NewReader(a.module))
+}
+
+// VersionPath reports the revision deployed now, which the page compares with
+// its own. Nothing may store it, or the comparison would be stale itself.
+const VersionPath = "/version"
+
+func (a *App) version(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(map[string]string{"revision": a.revision}); err != nil {
+		log.Printf("write version: %v", err)
+	}
+}
 
 // serviceWorker is served from the root because a worker's scope cannot rise
 // above its own path, and this one has to control the whole app.
 //
 // It is the update mechanism for everything else, so it is the one file that
 // must never be answered from a cache without asking.
-func serviceWorker(w http.ResponseWriter, r *http.Request) {
+func (a *App) serviceWorker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Service-Worker-Allowed", "/")
-	w.Header().Set("ETag", `"`+staticVersion+`"`)
+	w.Header().Set("ETag", `"`+a.release+`"`)
 	w.Header().Set("Cache-Control", "no-cache")
-	http.ServeContent(w, r, "sw.js", time.Time{}, bytes.NewReader(serviceWorkerBody))
+	http.ServeContent(w, r, "sw.js", time.Time{}, bytes.NewReader(a.worker))
 }
 
 // securityHeaders allows exactly what Firebase sign-in and Firestore need:
@@ -205,6 +249,7 @@ const pageHTML = `<!doctype html>
 <body data-firebase="{{.}}">
 <header class="bar"><h1><a href="/#"><img src="/static/icon.svg" alt="" width="24" height="24">peyk</a></h1><div id="hstat" class="hstat"><div class="wmenu"><button id="usage" class="usage" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meter"><i></i></span><span class="meter"><i></i></span><span class="meter gh"><i></i></span></button><div id="usagepop" class="pop upop" role="dialog" aria-label="Usage" hidden></div></div><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></header>
 <main id="app"><p class="notice" id="notice">Loading…</p></main>
+<footer class="foot"><button id="rev" class="rev" type="button" disabled></button></footer>
 <script type="module" src="/static/app.js"></script></body></html>`
 
 // color-scheme is what tells the browser to draw the surfaces this stylesheet

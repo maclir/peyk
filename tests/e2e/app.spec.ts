@@ -1141,3 +1141,25 @@ test('opens with no signal and says so', async ({ browser }) => {
 
   await context.close();
 });
+
+test('the footer names the running revision and reloads when another is deployed', async ({ page }) => {
+  const deployed = (await (await page.request.get('/version')).json()).revision;
+  await page.goto('/');
+  const rev = page.locator('#rev');
+  await expect(rev).toHaveText(deployed);
+  await expect(rev).toBeDisabled();
+  await expect(rev).not.toHaveClass(/stale/);
+
+  // context.route also sees the request when the service worker makes it.
+  await page.context().route('**/version', (route) => route.fulfill({ json: { revision: 'f00dfee' } }));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(rev).toHaveClass(/stale/);
+  await expect(rev).toBeEnabled();
+  await page.evaluate(() => caches.open('peyk-old').then((c) => c.put('/x', new Response('x'))));
+
+  await page.context().unroute('**/version');
+  await Promise.all([page.waitForEvent('load'), rev.click()]);
+  await expect(rev).toBeDisabled();
+  await expect(rev).not.toHaveClass(/stale/);
+  expect(await page.evaluate(() => caches.has('peyk-old'))).toBe(false);
+});

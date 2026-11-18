@@ -6,9 +6,9 @@
 // data and a stale answer presented as a current one is worse than no answer.
 // Serve data from the network, and fall back to something honest.
 //
-// The service names this cache after a digest of every asset it serves, so a
-// changed file is a changed worker, and a changed worker is a rebuilt cache.
-// There is no number here to remember to raise.
+// The service names this cache after a digest of every asset it serves and the
+// revision, so a changed file or deploy is a changed worker, and a changed
+// worker is a rebuilt cache. There is no number here to remember to raise.
 
 const SHELL = "peyk-__VERSION__";
 const OFFLINE = "/offline";
@@ -19,6 +19,7 @@ const ASSETS = [
   "/static/icon.svg",
   "/static/app.css",
   "/static/app.js",
+  "/static/release.js",
   "/static/board.js",
   "/static/markdown.js",
   "/static/images.js",

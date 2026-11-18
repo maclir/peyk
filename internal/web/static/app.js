@@ -3,6 +3,7 @@ import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingRepl
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
+import { revision } from "./release.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
 // with no signal at all.
@@ -23,6 +24,40 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
   if (url.pathname !== location.pathname) location.assign(url.href);
   else if (url.hash !== location.hash) location.hash = url.hash;
   else window.dispatchEvent(new HashChangeEvent("hashchange"));
+});
+
+// The footer names the revision this page's code came from, which the worker
+// may have served from its cache. It turns yellow when another revision is
+// deployed, and tapping it then drops the cached shell before reloading, since
+// a plain reload would be answered from that same cache.
+const revEl = document.getElementById("rev");
+revEl.textContent = revision;
+async function checkRevision() {
+  try {
+    const res = await fetch("/version", { cache: "no-store" });
+    if (!res.ok) return;
+    const { revision: deployed } = await res.json();
+    const stale = deployed !== revision;
+    revEl.classList.toggle("stale", stale);
+    revEl.disabled = !stale;
+    revEl.title = stale ? `${deployed} is deployed; tap to load it` : "Latest deployed revision";
+  } catch {
+    // Offline: the deployed revision is unknown, so the footer claims nothing.
+  }
+}
+revEl.addEventListener("click", async () => {
+  revEl.disabled = true;
+  try {
+    await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+    await (await navigator.serviceWorker?.getRegistration())?.update();
+  } catch {
+    // The reload still fetches whatever the deleted caches no longer hold.
+  }
+  location.reload();
+});
+checkRevision();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkRevision();
 });
 
 const app = document.getElementById("app");
