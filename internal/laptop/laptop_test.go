@@ -258,6 +258,19 @@ func TestLastExchangeUsesTheSessionsOwnTranscript(t *testing.T) {
 	}
 }
 
+func TestLastExchangeFindsAPromptSentWhileWorking(t *testing.T) {
+	claude := t.TempDir()
+	writeTranscript(t, claude, "/w", "s", time.Now(),
+		human("2026-11-14T09:00:00Z", `"Fix the bug"`),
+		queued("2026-11-14T09:00:30Z", "Also add a test"),
+		assistant("2026-11-14T09:01:00Z", "Done."),
+	)
+	_, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
+	if p == nil || p.Text != "Also add a test" {
+		t.Fatalf("prompt = %+v", p)
+	}
+}
+
 func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
 	claude := t.TempDir()
 	work := "/w"

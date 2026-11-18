@@ -141,6 +141,30 @@ type entry struct {
 		// A string for a typed prompt, a list of parts otherwise.
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
+	// Attachment holds a prompt sent while the agent was working, which
+	// Claude Code records as a queued command instead of a user entry.
+	Attachment struct {
+		Type   string          `json:"type"`
+		Prompt json.RawMessage `json:"prompt"`
+		Origin struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+	} `json:"attachment"`
+}
+
+// humanPrompt returns the text of a prompt a person sent, or "" when the
+// entry is not one.
+func (e entry) humanPrompt() string {
+	if e.IsSidechain {
+		return ""
+	}
+	switch {
+	case e.Type == "user" && e.Origin.Kind == "human":
+		return e.text()
+	case e.Type == "attachment" && e.Attachment.Type == "queued_command" && e.Attachment.Origin.Kind == "human":
+		return contentText(e.Attachment.Prompt)
+	}
+	return ""
 }
 
 type part struct {
@@ -149,13 +173,17 @@ type part struct {
 }
 
 // text joins the entry's non-empty text, or returns "" when it has none.
-func (e entry) text() string {
+func (e entry) text() string { return contentText(e.Message.Content) }
+
+// contentText joins a message content's non-empty text: a plain string or a
+// list of parts.
+func contentText(content json.RawMessage) string {
 	var s string
-	if json.Unmarshal(e.Message.Content, &s) == nil {
+	if json.Unmarshal(content, &s) == nil {
 		return strings.TrimSpace(s)
 	}
 	var parts []part
-	if json.Unmarshal(e.Message.Content, &parts) != nil {
+	if json.Unmarshal(content, &parts) != nil {
 		return ""
 	}
 	var texts []string
@@ -235,13 +263,13 @@ func openingClear(path string) (time.Time, bool) {
 	}
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		var e entry
-		if json.Unmarshal(line, &e) != nil || e.Type != "user" || e.IsSidechain {
+		if json.Unmarshal(line, &e) != nil || e.IsSidechain {
 			continue
 		}
-		if bytes.Contains(line, clearMarker) {
+		if e.Type == "user" && bytes.Contains(line, clearMarker) {
 			return e.Timestamp, true
 		}
-		if e.Origin.Kind == "human" {
+		if e.humanPrompt() != "" {
 			return time.Time{}, false
 		}
 	}
@@ -270,15 +298,14 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
 			continue
 		}
-		text := e.text()
-		if text == "" {
-			continue
-		}
-		switch {
-		case isReply && e.Type == "assistant":
-			reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
-		case isPrompt && e.Type == "user" && e.Origin.Kind == "human":
-			prompt = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
+		if isReply && e.Type == "assistant" {
+			if text := e.text(); text != "" {
+				reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
+			}
+		} else if isPrompt {
+			if text := e.humanPrompt(); text != "" {
+				prompt = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
+			}
 		}
 	}
 	if prompt == nil {

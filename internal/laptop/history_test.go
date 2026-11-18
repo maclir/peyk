@@ -42,6 +42,30 @@ func TestHistoryReadsTheWholeConversation(t *testing.T) {
 	}
 }
 
+func TestHistoryIncludesAPromptSentWhileWorking(t *testing.T) {
+	claude := t.TempDir()
+	writeTranscript(t, claude, "/w", "s", time.Now(),
+		human("2026-11-14T09:00:00Z", `"Fix the bug"`),
+		queued("2026-11-14T09:00:30Z", "Also add a test"),
+		`{"type":"attachment","timestamp":"2026-11-14T09:00:31Z","attachment":{"type":"queued_command","prompt":"from a hook","origin":{"kind":"hook"}}}`,
+		assistant("2026-11-14T09:01:00Z", "Done."),
+	)
+	got, _ := History(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
+	var prompts []string
+	for _, e := range got {
+		if e.Kind == session.EntryPrompt {
+			prompts = append(prompts, e.Text)
+		}
+	}
+	if strings.Join(prompts, "|") != "Fix the bug|Also add a test" {
+		t.Fatalf("prompts = %q", prompts)
+	}
+}
+
+func queued(ts, text string) string {
+	return `{"type":"attachment","isSidechain":false,"timestamp":"` + ts + `","attachment":{"type":"queued_command","prompt":` + quote(text) + `,"origin":{"kind":"human"}}}`
+}
+
 func TestHistoryShortensAToolLine(t *testing.T) {
 	claude := t.TempDir()
 	writeTranscript(t, claude, "/w", "s", time.Now(),

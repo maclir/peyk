@@ -75,10 +75,8 @@ func historyEntries(line []byte) []session.Entry {
 		return nil
 	}
 	switch {
-	case e.Type == "user" && e.Origin.Kind == "human":
-		if text := e.text(); text != "" {
-			return []session.Entry{{Kind: session.EntryPrompt, Text: text, At: e.Timestamp}}
-		}
+	case e.humanPrompt() != "":
+		return []session.Entry{{Kind: session.EntryPrompt, Text: e.humanPrompt(), At: e.Timestamp}}
 	case e.Type == "assistant":
 		var parts []contentPart
 		if json.Unmarshal(e.Message.Content, &parts) != nil {
