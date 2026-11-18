@@ -41,6 +41,23 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('a | b\nc | d')).toBe('<p>a | b c | d</p>');
   });
 
+  it('nests indented lists and keeps numbering across them', () => {
+    const html = renderMarkdown(
+      '1. **Push** `main`.\n2. Switch:\n  - Open the app\n  - Delete\n    the old one\n3. Pair:\n   - `make pair`\n\nDo step 3 last.',
+    );
+    expect(html).toBe(
+      '<ol><li><strong>Push</strong> <code>main</code>.</li>' +
+        '<li>Switch:<ul><li>Open the app</li><li>Delete the old one</li></ul></li>' +
+        '<li>Pair:<ul><li><code>make pair</code></li></ul></li></ol>\n<p>Do step 3 last.</p>',
+    );
+  });
+
+  it('continues a list across blank lines and keeps its start number', () => {
+    expect(renderMarkdown('4. four\n\n5. five\n\n- a\n\n  more')).toBe(
+      '<ol start="4"><li>four</li><li>five</li></ol>\n<ul><li>a more</li></ul>',
+    );
+  });
+
   it('keeps code spans literal', () => {
     expect(renderMarkdown('`**not bold**`')).toContain('<code>**not bold**</code>');
   });

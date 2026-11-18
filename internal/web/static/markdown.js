@@ -46,19 +46,52 @@ function renderTable(header, aligns, rows) {
   return `<div class="table"><table><thead>${row("th", header)}</thead>${body}</table></div>`;
 }
 
+const indentOf = (line) => line.match(/^[ \t]*/)[0].replace(/\t/g, "    ").length;
+
+function renderList(list) {
+  const start = list.tag === "ol" && list.start !== 1 ? ` start="${list.start}"` : "";
+  const items = list.items.map((item) => `<li>${inline(item.text)}${item.lists.map(renderList).join("")}</li>`);
+  return `<${list.tag}${start}>${items.join("")}</${list.tag}>`;
+}
+
 export function renderMarkdown(src) {
   const lines = String(src ?? "").replace(/\r\n?/g, "\n").split("\n");
   const out = [];
   let para = [];
-  let list = null;
+  // Open lists from outermost to innermost; each holds the indent of its
+  // markers so a deeper marker nests and a shallower one closes lists.
+  let lists = [];
+  let blank = false;
 
   const flushPara = () => {
     if (para.length) out.push(`<p>${inline(para.join(" "))}</p>`);
     para = [];
   };
   const flushList = () => {
-    if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.tag}>`);
-    list = null;
+    if (lists.length) out.push(renderList(lists[0]));
+    lists = [];
+  };
+  const lastItem = () => {
+    const items = lists[lists.length - 1].items;
+    return items[items.length - 1];
+  };
+  const addItem = (tag, indent, start, text) => {
+    // Agents nest with two spaces even under "1. ", so any deeper marker nests.
+    while (lists.length > 1 && lists[lists.length - 1].indent > indent) lists.pop();
+    const top = lists[lists.length - 1];
+    if (top && (top.indent > indent || (top.indent === indent && top.tag !== tag))) {
+      if (lists.length === 1) flushList();
+      else lists.pop();
+    }
+    let list = lists[lists.length - 1];
+    if (!list || list.indent < indent) {
+      const parent = list && lastItem();
+      if (!parent) flushList();
+      list = { tag, indent, start, items: [] };
+      if (parent) parent.lists.push(list);
+      lists.push(list);
+    }
+    list.items.push({ text, lists: [] });
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -86,26 +119,28 @@ export function renderMarkdown(src) {
       }
     }
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+    const numbered = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    const wasBlank = blank;
+    blank = false;
     if (heading) {
       flushPara();
       flushList();
       const level = Math.min(heading[1].length + 2, 6);
       out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-    } else if (bullet || numbered) {
+    } else if (bullet) {
       flushPara();
-      const tag = bullet ? "ul" : "ol";
-      if (!list || list.tag !== tag) {
-        flushList();
-        list = { tag, items: [] };
-      }
-      list.items.push((bullet || numbered)[1]);
+      addItem("ul", indentOf(line), 1, bullet[1]);
+    } else if (numbered) {
+      flushPara();
+      addItem("ol", indentOf(line), Number(numbered[1]), numbered[2]);
     } else if (line.trim() === "") {
       flushPara();
-      flushList();
-    } else if (list && /^\s{2,}\S/.test(line)) {
-      list.items[list.items.length - 1] += " " + line.trim();
+      blank = true;
+    } else if (lists.length && /^\s{2,}\S/.test(line)) {
+      lastItem().text += " " + line.trim();
+    } else if (lists.length && !wasBlank) {
+      lastItem().text += " " + line.trim();
     } else {
       flushList();
       para.push(line.trim());
