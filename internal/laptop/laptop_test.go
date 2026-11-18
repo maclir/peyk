@@ -467,7 +467,7 @@ func TestClearWaitsForTheNewConversationInTheTranscripts(t *testing.T) {
 	if r := <-done; r.err != nil || r.id != "new" {
 		t.Fatalf("id = %q, err = %v", r.id, r.err)
 	}
-	if got := strings.Join(calls, "|"); got != "send k /clear" {
+	if got := strings.Join(calls, "|"); got != "send -- k /clear" {
 		t.Fatalf("calls = %s", got)
 	}
 }
@@ -658,5 +658,19 @@ func TestResumeRefusesAConversationFromAnotherProject(t *testing.T) {
 	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", TranscriptDir(claude, "/w"), "other", false)
 	if err == nil || !strings.Contains(err.Error(), "no conversation other") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSendPassesAMessageStartingWithADashAsTheMessage(t *testing.T) {
+	var args []string
+	run := func(_ context.Context, _ string, _ string, a ...string) ([]byte, error) {
+		args = a
+		return nil, nil
+	}
+	if err := (Aoe{Profile: "p", Run: run}).Send(context.Background(), "k", "- fix it"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(args[2:], "|"); got != "send|--|k|- fix it" {
+		t.Fatalf("args = %s", got)
 	}
 }

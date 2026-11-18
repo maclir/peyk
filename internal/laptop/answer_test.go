@@ -69,7 +69,7 @@ func TestAnswerDismissesTheDialogThenSendsTheAnswer(t *testing.T) {
 		"tmux list-sessions -F #{session_name}",
 		"tmux capture-pane -p -t aoe_knip_7ab0c363",
 		"tmux send-keys -t aoe_knip_7ab0c363 Escape",
-		"aoe -p personal send 7ab0c36356b64513 Colour: Blue",
+		"aoe -p personal send -- 7ab0c36356b64513 Colour: Blue",
 	}
 	if strings.Join(d.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls:\n%s", strings.Join(d.calls, "\n"))

@@ -84,7 +84,7 @@ func (a Aoe) Show(ctx context.Context, id string) (AoeSession, error) {
 
 // Send delivers a prompt to a session, starting it if it is stopped.
 func (a Aoe) Send(ctx context.Context, id, text string) error {
-	_, err := a.cmd(ctx, "send", id, text)
+	_, err := a.cmd(ctx, "send", "--", id, text)
 	return err
 }
 
