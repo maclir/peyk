@@ -1112,6 +1112,30 @@ test.describe('signed in', () => {
     await expect(page.locator('.qcard')).toHaveCount(0);
   });
 
+  test('opening the whole conversation keeps the latest messages in view', async () => {
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: viewport.width, height: 400 });
+    await put(page, 'sessions/w', { id: 'w', title: 'wide', path: '/c/wide', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      prompt: { text: 'Last ask', at: new Date() }, message: { text: 'Last answer', at: new Date() }, latest: 'r1' });
+    await page.goto('/#s-w');
+    const fromBottom = () => page.evaluate(() => document.documentElement.scrollHeight - window.scrollY);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const before = await fromBottom();
+    // A dispatched click, unlike a pointer click, does not scroll the button into view first.
+    await page.getByRole('button', { name: 'Whole conversation' }).dispatchEvent('click');
+    await expect.poll(async () => (await list(page, 'history')).length).toBe(1);
+    const asked = (await get(page, 'history/w')).requested_at.timestampValue;
+    const at = new Date();
+    const entries = Array.from({ length: 30 }, (_, i) => ({ kind: i % 2 ? 'reply' : 'prompt', text: `Message ${i}`, at }));
+    await put(page, 'history/w', { requested_at: new Date(asked), served_at: new Date(asked), truncated: false,
+      entries: [...entries, { kind: 'prompt', text: 'Last ask', at }, { kind: 'reply', text: 'Last answer', at }] });
+    await expect(page.getByText('Message 0', { exact: true })).toBeAttached();
+    expect(await fromBottom()).toBe(before);
+    await page.getByRole('button', { name: 'Latest only' }).click();
+    await expect.poll(async () => (await list(page, 'history')).length).toBe(0);
+    await page.setViewportSize(viewport);
+  });
+
   test("a worker's whole conversation is read from the laptop only while it is open", async () => {
     const worker = { id: 'w', title: 'wide', path: '/c/wide', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       prompt: { text: 'Second ask', at: new Date() }, message: { text: 'Second answer', at: new Date() }, latest: 'r2' };

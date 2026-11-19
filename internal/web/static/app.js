@@ -419,6 +419,7 @@ async function start(cfg) {
     for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
     document.documentElement.classList.toggle("locked", (view === "inbox" && state.picking) || Boolean(sheet?.open));
     if (focused) document.getElementById(focused)?.focus();
+    keepHistoryAnchor();
     if (s && !document.hidden) dismissNotes(s.id);
   }
 
@@ -1529,7 +1530,8 @@ async function start(cfg) {
   // asks again, and leaving the worker or the app deletes it.
   function openHistory(s) {
     closeHistory();
-    const whole = { id: s.id, latest: s.latest, data: null, nodes: null, unsub: null };
+    const root = document.documentElement;
+    const whole = { id: s.id, latest: s.latest, data: null, nodes: null, unsub: null, fromBottom: root.scrollHeight - window.scrollY };
     state.history = whole;
     whole.unsub = fs.onSnapshot(fs.doc(db, "history", s.id), (snap) => {
       if (state.history !== whole) return;
@@ -1539,6 +1541,16 @@ async function start(cfg) {
     }, (err) => toast(`Cannot read the conversation: ${err.message}`, "bad"));
     requestHistory(whole);
     render();
+  }
+
+  // The earlier messages open above the latest ones, so until the laptop's
+  // first copy is drawn the page keeps its distance from the bottom instead
+  // of its distance from the top.
+  function keepHistoryAnchor() {
+    const whole = state.history;
+    if (whole?.fromBottom == null) return;
+    window.scrollTo({ top: document.documentElement.scrollHeight - whole.fromBottom, behavior: "instant" });
+    if (whole.data?.served_at) whole.fromBottom = null;
   }
 
   function requestHistory(whole) {
