@@ -1131,8 +1131,14 @@ test.describe('signed in', () => {
       entries: [...entries, { kind: 'prompt', text: 'Last ask', at }, { kind: 'reply', text: 'Last answer', at }] });
     await expect(page.getByText('Message 0', { exact: true })).toBeAttached();
     expect(await fromBottom()).toBe(before);
-    await page.getByRole('button', { name: 'Latest only' }).click();
+    await page.getByText('Message 15', { exact: true }).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    const less = page.getByRole('button', { name: 'Latest only' });
+    await expect(less).toBeInViewport();
+    // A dispatched click keeps the scroll position the user closed it from.
+    await less.dispatchEvent('click');
     await expect.poll(async () => (await list(page, 'history')).length).toBe(0);
+    await expect(page.getByRole('button', { name: 'Whole conversation' })).toBeInViewport();
+    await expect(page.getByText('Last ask', { exact: true })).toBeInViewport();
     await page.setViewportSize(viewport);
   });
 

@@ -1566,6 +1566,17 @@ async function start(cfg) {
     fs.deleteDoc(fs.doc(db, "history", whole.id)).catch(() => {});
   }
 
+  // The bar stays pinned while the earlier messages scroll under it, so the
+  // button that reopens them takes the bar's place on screen with the latest
+  // messages below it, wherever in the conversation it was closed.
+  function collapseHistory(bar) {
+    const top = bar.getBoundingClientRect().top;
+    closeHistory();
+    render();
+    const again = document.querySelector(".detail .convo .earlier");
+    if (again) window.scrollBy({ top: again.getBoundingClientRect().top - top, behavior: "instant" });
+  }
+
   function followHistory(s) {
     const whole = state.history;
     if (!whole) return;
@@ -1577,15 +1588,17 @@ async function start(cfg) {
   }
 
   function historyView(s, whole, now) {
-    const less = h("button", { type: "button", class: "link earlier", onclick: () => { closeHistory(); render(); } }, icon("down"), "Latest only");
+    const bar = h("div", { class: "convobar" },
+      h("span", {}, "Whole conversation"),
+      h("button", { type: "button", class: "link", onclick: () => collapseHistory(bar) }, icon("down"), "Latest only"));
     const data = whole.data;
     if (!data?.served_at) {
-      return [less, laptopOnline(state.laptop, now)
+      return [bar, laptopOnline(state.laptop, now)
         ? loading("Reading the conversation on the laptop…")
         : h("p", { class: "hint" }, "The laptop is offline. The conversation loads once it is back.")];
     }
     whole.nodes ??= historyEntries(s, data.entries || [], now);
-    return [less,
+    return [bar,
       data.truncated ? h("p", { class: "hint" }, "The oldest messages are left out: the whole conversation is too long to show.") : null,
       ...(whole.nodes.length ? whole.nodes : [h("p", { class: "hint" }, "Nothing in this conversation yet.")])];
   }
