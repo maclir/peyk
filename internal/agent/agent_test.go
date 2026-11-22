@@ -821,3 +821,46 @@ func TestHistoryRequestIsPendingUntilServed(t *testing.T) {
 		}
 	}
 }
+
+type unreachablePut struct{ *store.Memory }
+
+func (unreachablePut) Put(context.Context, string, string, any) error {
+	return errors.New("deadline exceeded")
+}
+
+func TestQuotasReachTheMenuBarOncePerChange(t *testing.T) {
+	a := newAgent(&fakeCollector{}, store.NewMemory())
+	used := 10.0
+	a.Usage = func() (*session.Usage, error) { return &session.Usage{FiveHour: &session.Window{Used: used}}, nil }
+	a.Actions = func(context.Context) (*session.Actions, error) { return &session.Actions{Used: int(used)}, nil }
+	var got []string
+	a.UsageRead = func(u *session.Usage) { got = append(got, fmt.Sprintf("claude %v", u.FiveHour.Used)) }
+	a.ActionsRead = func(u *session.Actions) { got = append(got, fmt.Sprintf("actions %v", u.Used)) }
+	ctx := context.Background()
+	for _, u := range []float64{10, 10, 12} {
+		used = u
+		if err := a.PublishUsage(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.PublishActions(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "claude 10,actions 10,claude 12,actions 12"; strings.Join(got, ",") != want {
+		t.Fatalf("told %q, want %q", strings.Join(got, ","), want)
+	}
+}
+
+func TestQuotasReachTheMenuBarWhenFirestoreFails(t *testing.T) {
+	a := newAgent(&fakeCollector{}, unreachablePut{store.NewMemory()})
+	a.Usage = func() (*session.Usage, error) { return &session.Usage{}, nil }
+	a.Actions = func(context.Context) (*session.Actions, error) { return &session.Actions{}, nil }
+	told := 0
+	a.UsageRead = func(*session.Usage) { told++ }
+	a.ActionsRead = func(*session.Actions) { told++ }
+	a.PublishUsage(context.Background())
+	a.PublishActions(context.Background())
+	if told != 2 {
+		t.Fatalf("told the menu bar %d quotas, want 2", told)
+	}
+}

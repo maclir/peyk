@@ -144,6 +144,9 @@ type Agent struct {
 	Usage        func() (*session.Usage, error)
 	UsageChanged <-chan struct{}
 	usageKey     string
+	// UsageRead, when set, is told each changed usage, whether or not
+	// publishing it succeeds, since the menu bar shows it without Firestore.
+	UsageRead func(*session.Usage)
 
 	// Actions, when set, reads the month's GitHub Actions usage. Billing has
 	// no event, so the agent asks at start and after a followed run
@@ -151,6 +154,9 @@ type Agent struct {
 	Actions    func(context.Context) (*session.Actions, error)
 	actionsDue bool
 	actionsKey string
+	// ActionsRead, when set, is told each changed Actions usage, whether or
+	// not publishing it succeeds.
+	ActionsRead func(*session.Actions)
 
 	// clears follows sessions cleared from the phone until aoe reports
 	// their new conversation, keyed by session id.
@@ -538,6 +544,9 @@ func (a *Agent) PublishUsage(ctx context.Context) error {
 	if key == a.usageKey {
 		return nil
 	}
+	if a.UsageRead != nil {
+		a.UsageRead(u)
+	}
 	if err := a.Store.Put(ctx, "laptop", "usage", u); err != nil {
 		return err
 	}
@@ -561,6 +570,9 @@ func (a *Agent) PublishActions(ctx context.Context) error {
 	key := contentKey(u)
 	if key == a.actionsKey {
 		return nil
+	}
+	if a.ActionsRead != nil {
+		a.ActionsRead(u)
 	}
 	if err := a.Store.Put(ctx, "laptop", "actions", u); err != nil {
 		return err

@@ -76,6 +76,16 @@ func (r *healthReport) laptopWritten(_ store.Laptop, err error) {
 	r.write()
 }
 
+func (r *healthReport) usage(u *session.Usage) {
+	r.h.Usage = u
+	r.write()
+}
+
+func (r *healthReport) actions(a *session.Actions) {
+	r.h.Actions = a
+	r.write()
+}
+
 func (r *healthReport) write() {
 	if err := agent.WriteHealth(r.path, r.h); err != nil {
 		r.logger.Printf("health: %v", err)
@@ -212,6 +222,8 @@ func runAgent(ctx context.Context) error {
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 		Usage:        func() (*session.Usage, error) { return laptop.LoadUsage(usagePath()) },
 		UsageChanged: usage,
+		UsageRead:    health.usage,
+		ActionsRead:  health.actions,
 		Hidden:       laptop.HiddenFile{Path: hiddenPath()},
 		History:      laptop.History, HistoryRequests: history,
 		Seen: seen,

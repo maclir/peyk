@@ -54,12 +54,73 @@ struct Health: Decodable {
     let refreshedAt: Date?
     let workers: Int
     let unreachable: String?
+    let usage: Usage?
+    let actions: Actions?
 
     enum CodingKeys: String, CodingKey {
-        case pid, workers, unreachable
+        case pid, workers, unreachable, usage, actions
         case startedAt = "started_at"
         case refreshedAt = "refreshed_at"
     }
+}
+
+struct Window: Decodable {
+    let used: Double
+    let resetsAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case used
+        case resetsAt = "resets_at"
+    }
+}
+
+struct Usage: Decodable {
+    let fiveHour: Window?
+    let sevenDay: Window?
+
+    enum CodingKeys: String, CodingKey {
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+    }
+}
+
+struct Actions: Decodable {
+    let included: Int
+    let used: Int
+    let resetsAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case included, used
+        case resetsAt = "resets_at"
+    }
+}
+
+/// One quota as the phone's header bars show it: the percentage left, and
+/// the words its menu line says.
+struct Meter: Hashable {
+    let left: Int
+    let line: String
+}
+
+/// Claude's 5-hour and 7-day windows, as board.js usageLeft reads them: a
+/// window past its reset, or one Claude Code no longer reports, is whole.
+func claudeMeters(_ u: Usage?, now: Date) -> [Meter] {
+    guard let u else { return [] }
+    return [("5h", u.fiveHour), ("7d", u.sevenDay)].map { label, w in
+        guard let w, w.resetsAt > now else { return Meter(left: 100, line: "Claude \(label): 100% left") }
+        let left = max(0, min(100, Int((100 - w.used).rounded())))
+        return Meter(left: left, line: "Claude \(label): \(left)% left · resets in \(ago(w.resetsAt.timeIntervalSince(now)))")
+    }
+}
+
+/// The month's included Actions minutes left, as board.js actionsLeft reads
+/// them: a month past its reset is whole again.
+func actionsMeter(_ a: Actions?, now: Date) -> Meter? {
+    guard let a, a.included > 0 else { return nil }
+    let used = a.resetsAt > now ? max(0, min(a.included, a.used)) : 0
+    let left = a.included - used
+    return Meter(left: Int((100 * Double(left) / Double(a.included)).rounded()),
+                 line: "GitHub Actions: \(left.formatted()) of \(a.included.formatted()) minutes left")
 }
 
 /// What launchd reports about the agent's job.
@@ -125,6 +186,8 @@ func ago(_ seconds: TimeInterval) -> String {
 final class Model: ObservableObject {
     @Published var state = AgentState.starting
     @Published var detail: [String] = []
+    @Published var claude: [Meter] = []
+    @Published var actions: Meter?
     /// The last check's answer: nil until checked, then the version or why
     /// the check failed.
     @Published var version: Version?
@@ -162,9 +225,13 @@ final class Model: ObservableObject {
                 state = (job.lastExit ?? 0) != 0 ? .crashed : .starting
                 if let line = lastLogLine() { detail = [String(line.prefix(80))] }
             }
+            let claude = claudeMeters(health?.usage, now: now)
+            let actions = actionsMeter(health?.actions, now: now)
             DispatchQueue.main.async {
                 self.state = state
                 self.detail = detail
+                self.claude = claude
+                self.actions = actions
             }
         }
     }
@@ -227,11 +294,31 @@ func launchctl(_ args: [String]) -> (status: Int32, output: String) {
     return (p.terminationStatus, String(decoding: data, as: UTF8.self))
 }
 
-/// The Peyk mark as a template image, drawn in the icon's 32-unit grid so it
-/// matches the app icon and macOS tints it for the menu bar.
-func icon(_ state: AgentState) -> NSImage {
-    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+/// The Peyk mark, then the phone header's quota bars: Claude's two windows
+/// and, set apart below, the month's Actions minutes. Each bar fills with
+/// what is used. It is a template image so macOS tints it for the menu bar,
+/// which leaves a bar's length, not the phone's amber and red, to show a
+/// quota running out.
+func icon(_ state: AgentState, claude: [Meter], actions: Meter?) -> NSImage {
+    let bars: [(y: CGFloat, left: Int)] = claude.enumerated().map { (CGFloat(3 + 4 * $0.offset), $0.element.left) }
+        + (actions.map { [(12, $0.left)] } ?? [])
+    let barX: CGFloat = 21, barWidth: CGFloat = 16
+    let width: CGFloat = bars.isEmpty ? 18 : barX + barWidth
+    let image = NSImage(size: NSSize(width: width, height: 18), flipped: true) { _ in
         guard let ctx = NSGraphicsContext.current else { return false }
+        ctx.saveGraphicsState()
+        defer {
+            ctx.restoreGraphicsState()
+            for bar in bars {
+                NSColor.black.withAlphaComponent(0.35).setFill()
+                NSBezierPath(roundedRect: NSRect(x: barX, y: bar.y, width: barWidth, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+                NSColor.black.setFill()
+                let used = barWidth * CGFloat(100 - bar.left) / 100
+                if used > 0 {
+                    NSBezierPath(roundedRect: NSRect(x: barX, y: bar.y, width: used, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+                }
+            }
+        }
         let t = NSAffineTransform()
         t.scale(by: 18.0 / 32.0)
         t.concat()
@@ -278,7 +365,8 @@ func icon(_ state: AgentState) -> NSImage {
         return true
     }
     image.isTemplate = true
-    image.accessibilityDescription = "Peyk agent \(state.word)"
+    image.accessibilityDescription = (["Peyk agent \(state.word)"] + claude.map(\.line) + (actions.map { [$0.line] } ?? []))
+        .joined(separator: "; ")
     return image
 }
 
@@ -297,6 +385,15 @@ struct PeykMenu: App {
         MenuBarExtra {
             Text("Peyk agent — \(model.state.word)")
             ForEach(model.detail, id: \.self) { Text($0) }
+            if !model.claude.isEmpty || model.actions != nil {
+                Divider()
+                ForEach(model.claude, id: \.self) { m in
+                    Button(m.line) { NSWorkspace.shared.open(URL(string: "https://claude.ai/settings/usage")!) }
+                }
+                if let m = model.actions {
+                    Button(m.line) { NSWorkspace.shared.open(URL(string: "https://github.com/settings/billing")!) }
+                }
+            }
             Divider()
             if model.state == .stopped {
                 Button("Start") { model.start() }
@@ -322,7 +419,7 @@ struct PeykMenu: App {
             Divider()
             Button("Quit menu bar app") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
-            Image(nsImage: icon(model.state))
+            Image(nsImage: icon(model.state, claude: model.claude, actions: model.actions))
         }
         .menuBarExtraStyle(.menu)
     }

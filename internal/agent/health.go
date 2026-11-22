@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/maclir/peyk/internal/session"
 )
 
 // Health is what the menu bar app shows about the running agent. launchd
@@ -19,6 +21,9 @@ type Health struct {
 	// phone reads that status, so while this is set the phone shows the
 	// laptop as offline even though the process is alive.
 	Unreachable string `json:"unreachable,omitempty"`
+	// Usage and Actions are the quotas the phone's header shows as bars.
+	Usage   *session.Usage   `json:"usage,omitempty"`
+	Actions *session.Actions `json:"actions,omitempty"`
 }
 
 // WriteHealth replaces the file whole, so a reader never sees half of it.
