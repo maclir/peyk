@@ -1077,7 +1077,7 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/sessions/f`, { headers: admin });
   });
 
-  test('a finished worker shows its next ready task above the current one, with a clear-and-send button', async () => {
+  test('a free worker shows its next ready task above the current one, with a send button that clears only a conversation', async () => {
     await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
     await put(page, 'projects/nesto', { name: 'nesto', path: '/c/nesto', session_id: 'n', free: true, busy: '' });
     await put(page, 'tasks/next', { project: 'nesto', text: 'Flag unused types', status: 'queued', created_at: new Date() });
@@ -1092,9 +1092,24 @@ test.describe('signed in', () => {
     const [cmd] = await dispatches();
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'nesto', task: 'next', text: 'Flag unused types', clear: true });
     expect(cmd.fields.grant).toBeDefined();
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(pair.getByRole('status')).toHaveText('Sent');
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+
+    // A cleared or stopped worker shows its next task too, sent without a clear.
+    await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: true });
+    await expect(pair.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+    await expect(pair.locator('button.send .ico.broom')).toHaveCount(0);
+    await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'stopped', state: 'idle', updated_at: new Date(), cleared: true });
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    await pair.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(async () => (await dispatches()).length).toBe(1);
+    const [plainSend] = await dispatches();
+    expect(JSON.parse(plainSend.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', task: 'next', clear: false });
+    await page.request.delete(`${FIRESTORE}/${plainSend.name.split('/documents/')[1]}`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/tasks/next`, { headers: admin });
     await expect(page.locator('.nownext')).toHaveCount(0);
+    await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
     await expect(page.getByRole('button', { name: 'Clear and stop' })).toBeVisible();
     await page.request.delete(`${FIRESTORE}/projects/nesto`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/sessions/n`, { headers: admin });

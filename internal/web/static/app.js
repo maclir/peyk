@@ -1521,7 +1521,7 @@ async function start(cfg) {
           workerMenu(s, busy)),
         outcomeLine(`worker:${s.id}`),
       ),
-      action === "clearnext" ? nowAndNext(task, next, now)
+      next ? nowAndNext(task, next, now)
         : task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
@@ -1679,15 +1679,17 @@ async function start(cfg) {
   }
 
   // Sending the next task is what ends the current one, so the next task sits
-  // above it with the inbox's send button, and its text opens the inbox.
+  // above it with the inbox's send button, and its text opens the inbox. A
+  // stopped worker is started by the send.
   function nowAndNext(task, next, now) {
     const sent = state.sends.get(next.id);
+    const clears = hasConversation(next);
     return h("div", { class: "nownext" },
       h("div", { class: "nnrow" },
         h("button", { type: "button", class: "nntext", "aria-label": `Next task, open the inbox: ${next.text}`, onclick: () => openSheet(next.project) },
           sent ? h("span", { class: "nnlabel", role: "status", "data-tone": sent.tone || null }, sent.text) : h("span", { class: "nnlabel" }, "Next"),
           h("span", { class: "nnone" }, oneLine(next.text))),
-        sendButton(next, true, () => send(next, true))),
+        sendButton(next, clears, () => send(next, clears))),
       task ? h("div", { class: "nnrow" },
         h("div", { class: "nntext" }, h("span", { class: "nnlabel" }, `Task · sent ${ago(task.dispatched_at, now)} ago`), h("span", {}, task.text))) : null);
   }
