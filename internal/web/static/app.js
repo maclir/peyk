@@ -355,6 +355,7 @@ async function start(cfg) {
       const left = i < 2 ? claude?.[i].left : gh?.pct;
       m.hidden = left == null;
       m.classList.toggle("low", left < 10);
+      m.classList.toggle("out", left <= 0);
       m.firstElementChild.style.width = `${100 - (left ?? 100)}%`;
     });
     const minutes = (n) => n.toLocaleString("en-US");
@@ -369,7 +370,7 @@ async function start(cfg) {
       return;
     }
     const row = (label, left, text) => h("span", { class: "uwin" }, h("span", {}, label),
-      h("span", { class: `meter${left < 10 ? " low" : ""}` }, h("i", { style: `width: ${100 - left}%` })), h("span", {}, text));
+      h("span", { class: `meter${left <= 0 ? " low out" : left < 10 ? " low" : ""}` }, h("i", { style: `width: ${100 - left}%` })), h("span", {}, text));
     const link = (href, ...children) => h("a", { href, target: "_blank", rel: "noopener", onclick: () => { state.menu = null; render(); } }, ...children);
     const day = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const parts = [];

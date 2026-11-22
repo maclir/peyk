@@ -46,7 +46,9 @@ html.locked { overflow: hidden; }
 .upop .hint { font-size: 0.75rem; }
 .meter { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--muted); }
-.meter.low i { background: var(--bad); }
+/* Amber while some quota remains, red once none does. */
+.meter.low i { background: var(--warn); }
+.meter.out i { background: var(--bad); }
 .notice { color: var(--muted); margin-top: 2rem; }
 .hint { color: var(--muted); }
 .loglink { font-size: 0.8rem; text-align: center; }

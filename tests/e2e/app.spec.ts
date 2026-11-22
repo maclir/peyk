@@ -145,6 +145,7 @@ test.describe('signed in', () => {
     await expect(page.getByRole('button', { name: 'Laptop online. Check for updates' })).toBeVisible();
     const usage = page.getByRole('button', { name: 'Usage: Claude 5h 77% left, 7d 5% left; Actions 1,240 of 2,000 minutes left' });
     await expect(usage.locator('.meter.low')).toHaveCount(1);
+    await expect(usage.locator('.meter.out')).toHaveCount(0);
     await expect(usage.locator('.meter i').first()).toHaveAttribute('style', 'width: 23%;');
     await expect(usage.locator('.meter.gh i')).toHaveAttribute('style', 'width: 38%;');
 
