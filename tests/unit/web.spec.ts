@@ -66,14 +66,14 @@ describe('renderMarkdown', () => {
 describe('board', () => {
   it('offers one quick action by worker state and inbox', () => {
     const w = (aoe_status: string, state: string, cleared = false) => ({ aoe_status, state, cleared });
-    expect(quickAction(w('stopped', 'stopped'), 0)).toBe('start');
-    expect(quickAction(w('stopped', 'unpushed'), 2)).toBe('start');
-    expect(quickAction(w('idle', 'unpushed'), 0)).toBe('clearstop');
-    expect(quickAction(w('idle', 'idle'), 0)).toBe('clearstop');
-    expect(quickAction(w('idle', 'idle', true), 0)).toBe('stop');
-    expect(quickAction(w('idle', 'unpushed'), 1)).toBe('clear');
-    expect(quickAction(w('idle', 'idle', true), 1)).toBeNull();
-    for (const state of ['working', 'needs_input', 'error', 'dirty']) expect(quickAction(w('idle', state), 0)).toBeNull();
+    expect(quickAction(w('stopped', 'stopped'), false)).toBe('start');
+    expect(quickAction(w('stopped', 'unpushed'), true)).toBe('start');
+    expect(quickAction(w('idle', 'unpushed'), false)).toBe('clearstop');
+    expect(quickAction(w('idle', 'idle'), false)).toBe('clearstop');
+    expect(quickAction(w('idle', 'idle', true), false)).toBe('stop');
+    expect(quickAction(w('idle', 'unpushed'), true)).toBe('clearnext');
+    expect(quickAction(w('idle', 'idle', true), true)).toBeNull();
+    for (const state of ['working', 'needs_input', 'error', 'dirty']) expect(quickAction(w('idle', state), false)).toBeNull();
   });
 
   it('sorts by what needs attention, then by title when nothing has happened', () => {

@@ -1672,16 +1672,20 @@ async function start(cfg) {
   // command as pending.
   function quickButton(s) {
     const p = projectOf(s);
-    const action = quickAction(s, p ? queuedFor(p.name).length : 0);
+    const next = p ? queuedFor(p.name).find((t) => t.ready) : null;
+    const action = quickAction(s, Boolean(next));
     if (!action) return null;
+    if (action === "clearnext") {
+      return busyButton(`send:${next.id}`, { type: "button", class: "icon tool", title: `Clear and send next: ${next.text}`, "aria-label": "Clear and send next",
+        onclick: () => send(next, true) },
+      icon("clearnext"));
+    }
     const [cmd, ico, label, fields] = {
       start: ["start", "play", "Start", {}],
       stop: ["stop", "stop", "Stop", {}],
-      clear: ["clear", "broom", "Clear", {}],
       clearstop: ["stop", "clearstop", "Clear and stop", { clear: true }],
     }[action];
-    const title = action === "clear" ? "Clear conversation" : label;
-    return busyButton(`${cmd}:${s.id}`, { type: "button", class: "icon tool", title, "aria-label": title,
+    return busyButton(`${cmd}:${s.id}`, { type: "button", class: "icon tool", title: label, "aria-label": label,
       onclick: () => workerCommand(s, cmd, label, fields) },
     icon(ico));
   }
@@ -2043,6 +2047,7 @@ const ICONS = {
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
   restart: '<path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
   resume: '<path d="M3.5 6v12l8-6z"/><path d="M15.5 6v12M20 6v12"/>',
+  clearnext: '<g transform="translate(-0.9 -0.8) scale(.82) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><path d="M15.2 14.2l3.3 3.3-3.3 3.3"/><path d="M20 21.5H23.3"/>',
   clearresume: '<g transform="scale(.7) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><path d="M13.5 14.5v7l4-3.5z"/><path d="M19.5 14.5v7M22.5 14.5v7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   push: '<path d="M12 20V8"/><path d="M6.5 13.5 12 8l5.5 5.5"/><path d="M5 4h14"/>',

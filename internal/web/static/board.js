@@ -138,14 +138,16 @@ function count(n, noun) {
 }
 
 // quickAction is the one worker command offered beside the inbox: a stopped
-// worker can only start; a finished one is shut down when nothing waits for
-// it, or cleared for the next task when something does. A busy or dirty
+// worker can only start; a finished one is shut down when no task is ready
+// for it, or cleared and given the next one when a task is. Tapping it is how
+// you say the current task is done, since a worker's reply cannot tell a
+// finished task from one that needs more back-and-forth. A busy or dirty
 // worker gets none, so a tap cannot interrupt work or drop the context of
 // uncommitted changes.
-export function quickAction(s, queued) {
+export function quickAction(s, ready) {
   if (s.aoe_status === "stopped") return "start";
   if (s.state !== "idle" && s.state !== "unpushed") return null;
-  if (queued) return s.cleared ? null : "clear";
+  if (ready) return s.cleared ? null : "clearnext";
   return s.cleared ? "stop" : "clearstop";
 }
 
