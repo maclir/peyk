@@ -430,9 +430,9 @@ test.describe('signed in', () => {
     const task = page.locator('.task', { hasText: 'Start fresh' });
     await expect(task.locator('.tstatus')).toHaveText('Free');
     await expect(task.locator('button.send .ico.broom')).toHaveCount(1);
-    await task.getByRole('button', { name: 'Send', exact: true }).click();
+    await task.getByRole('button', { name: 'Clear and send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
-    await expect(task.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-busy', 'true');
+    await expect(task.getByRole('button', { name: 'Clear and send', exact: true })).toHaveAttribute('aria-busy', 'true');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', task: 'ctx', clear: true });
     expect(cmd.fields.assertion).toBeUndefined();
@@ -440,13 +440,13 @@ test.describe('signed in', () => {
     expect(JSON.parse(cmd.fields.grant.mapValue.fields.statement.stringValue)).toMatchObject({ kind: 'peyk-session' });
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
     await expect(task.getByRole('status')).toHaveText('Sent');
-    await expect(task.getByRole('button', { name: 'Send', exact: true })).not.toHaveAttribute('aria-busy', 'true');
+    await expect(task.getByRole('button', { name: 'Clear and send', exact: true })).not.toHaveAttribute('aria-busy', 'true');
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
 
     // The approval outlives a reload, so the next send asks for no passkey.
     await page.reload();
     await passkeyOn(page);
-    await task.getByRole('button', { name: 'Send', exact: true }).click();
+    await task.getByRole('button', { name: 'Clear and send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     expect(await prompts(page)).toBe(0);
     const again = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
@@ -461,6 +461,7 @@ test.describe('signed in', () => {
     await task.locator('.ttext').click();
     await expect(task.getByRole('menu')).toHaveCount(0);
     await expect(task.locator('button.send .ico.broom')).toHaveCount(0);
+    await expect(task.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
     await page.request.delete(`${FIRESTORE}/tasks/ctx`, { headers: admin });
   });
 
@@ -1076,13 +1077,16 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/sessions/f`, { headers: admin });
   });
 
-  test('the quick action beside the inbox clears a finished worker and sends its next ready task', async () => {
+  test('a finished worker shows its next ready task above the current one, with a clear-and-send button', async () => {
     await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
     await put(page, 'projects/nesto', { name: 'nesto', path: '/c/nesto', session_id: 'n', free: true, busy: '' });
     await put(page, 'tasks/next', { project: 'nesto', text: 'Flag unused types', status: 'queued', created_at: new Date() });
     await page.goto('/#s-n');
     await passkeyOn(page);
-    await page.getByRole('button', { name: 'Clear and send next' }).click();
+    const pair = page.locator('.nownext');
+    await expect(pair.locator('.nnrow').first()).toContainText('Flag unused types');
+    await expect(page.locator('.dhead').getByRole('button', { name: /Clear and send/ })).toHaveCount(0);
+    await pair.getByRole('button', { name: 'Clear and send', exact: true }).click();
     const dispatches = async () => (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'dispatch' && JSON.parse(c.fields.payload.stringValue).task === 'next');
     await expect.poll(async () => (await dispatches()).length).toBe(1);
     const [cmd] = await dispatches();
@@ -1090,7 +1094,7 @@ test.describe('signed in', () => {
     expect(cmd.fields.grant).toBeDefined();
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/tasks/next`, { headers: admin });
-    await expect(page.getByRole('button', { name: 'Clear and send next' })).toHaveCount(0);
+    await expect(page.locator('.nownext')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Clear and stop' })).toBeVisible();
     await page.request.delete(`${FIRESTORE}/projects/nesto`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/sessions/n`, { headers: admin });

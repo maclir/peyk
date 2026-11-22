@@ -156,6 +156,14 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .back .ico svg { width: 22px; height: 22px; }
 button.tool { width: 40px; height: 40px; color: var(--muted); }
 .detail > .curtask { white-space: normal; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.nownext { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.nnrow { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 12px; }
+.nnrow + .nnrow { border-top: 1px solid var(--line); }
+.nntext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+button.nntext { border: 0; background: none; padding: 0; border-radius: 0; font-weight: 500; }
+.nnlabel { font: 600 0.66rem var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.nnlabel[data-tone="bad"] { color: var(--bad); }
+.nnone { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pushcard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 .phead { display: flex; align-items: center; gap: 8px; }
 .phead h3 { margin: 0; font-size: 0.9rem; }
@@ -269,7 +277,7 @@ button.go.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); 
 .tfoot { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .tstatus { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--muted); }
 .task.waiting .tstatus:not([data-tone]) { color: var(--warn); }
-button.send { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: 999px; font-size: 0.85rem; }
+button.send { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 999px; font-size: 0.85rem; }
 button.send .ico svg { width: 14px; height: 14px; }
 .task.arrange { flex-direction: row; align-items: center; gap: 10px; padding: 6px 6px 6px 10px; }
 .task.arrange > .ico { color: var(--none); }

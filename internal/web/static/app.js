@@ -805,9 +805,15 @@ async function start(cfg) {
       h("div", { class: "tfoot" },
         sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
-        t.ready ? busyButton(`send:${t.id}`, { type: "button", class: "primary send", onclick: () => sendWith(t, clears) }, clears ? icon("broom") : null, "Send", icon("prompt")) : null,
+        t.ready ? sendButton(t, clears, () => sendWith(t, clears)) : null,
       ),
     );
+  }
+
+  function sendButton(t, clears, onclick) {
+    const label = clears ? "Clear and send" : "Send";
+    return busyButton(`send:${t.id}`, { type: "button", class: "primary send", title: label, "aria-label": label, onclick },
+      clears ? icon("broom") : null, icon("prompt"));
   }
 
   function taskMenu(t, clears, sendWith) {
@@ -1471,6 +1477,9 @@ async function start(cfg) {
     const g = s.git;
     const busy = s.state === "working" || s.state === "needs_input";
     const task = currentTask(state.tasks, s.id);
+    const p = projectOf(s);
+    const next = p ? queuedFor(p.name).find((t) => t.ready) : null;
+    const action = quickAction(s, Boolean(next));
     const rows = [["aoe", s.aoe_status], ["path", s.path]];
     if (!g) rows.push(["repository", "none"]);
     if (g) {
@@ -1507,12 +1516,13 @@ async function start(cfg) {
           h("div", { class: "dtitle" },
             h("h2", {}, s.title, chip(st)),
             h("div", { class: "tags" }, tagList(s, true))),
-          quickButton(s),
+          quickButton(s, action),
           inboxButton(s),
           workerMenu(s, busy)),
         outcomeLine(`worker:${s.id}`),
       ),
-      task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
+      action === "clearnext" ? nowAndNext(task, next, now)
+        : task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
       g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       convo,
@@ -1668,18 +1678,24 @@ async function start(cfg) {
     return queue(state.tasks, state.projects).filter((t) => t.project === project);
   }
 
+  // Sending the next task is what ends the current one, so the next task sits
+  // above it with the inbox's send button, and its text opens the inbox.
+  function nowAndNext(task, next, now) {
+    const sent = state.sends.get(next.id);
+    return h("div", { class: "nownext" },
+      h("div", { class: "nnrow" },
+        h("button", { type: "button", class: "nntext", "aria-label": `Next task, open the inbox: ${next.text}`, onclick: () => openSheet(next.project) },
+          sent ? h("span", { class: "nnlabel", role: "status", "data-tone": sent.tone || null }, sent.text) : h("span", { class: "nnlabel" }, "Next"),
+          h("span", { class: "nnone" }, oneLine(next.text))),
+        sendButton(next, true, () => send(next, true))),
+      task ? h("div", { class: "nnrow" },
+        h("div", { class: "nntext" }, h("span", { class: "nnlabel" }, `Task · sent ${ago(task.dispatched_at, now)} ago`), h("span", {}, task.text))) : null);
+  }
+
   // The quick action shares the menu's busy keys, so either shows the other's
-  // command as pending.
-  function quickButton(s) {
-    const p = projectOf(s);
-    const next = p ? queuedFor(p.name).find((t) => t.ready) : null;
-    const action = quickAction(s, Boolean(next));
-    if (!action) return null;
-    if (action === "clearnext") {
-      return busyButton(`send:${next.id}`, { type: "button", class: "icon tool", title: `Clear and send next: ${next.text}`, "aria-label": "Clear and send next",
-        onclick: () => send(next, true) },
-      icon("clearnext"));
-    }
+  // command as pending. Clearing for the next task is offered beside that task.
+  function quickButton(s, action) {
+    if (!action || action === "clearnext") return null;
     const [cmd, ico, label, fields] = {
       start: ["start", "play", "Start", {}],
       stop: ["stop", "stop", "Stop", {}],
@@ -2047,7 +2063,6 @@ const ICONS = {
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
   restart: '<path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
   resume: '<path d="M3.5 6v12l8-6z"/><path d="M15.5 6v12M20 6v12"/>',
-  clearnext: '<g transform="translate(-0.9 -0.8) scale(.82) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><path d="M15.2 14.2l3.3 3.3-3.3 3.3"/><path d="M20 21.5H23.3"/>',
   clearresume: '<g transform="scale(.7) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><path d="M13.5 14.5v7l4-3.5z"/><path d="M19.5 14.5v7M22.5 14.5v7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   push: '<path d="M12 20V8"/><path d="M6.5 13.5 12 8l5.5 5.5"/><path d="M5 4h14"/>',

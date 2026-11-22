@@ -137,7 +137,7 @@ function count(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-// quickAction is the one worker command offered beside the inbox: a stopped
+// quickAction is the one worker command offered on its page: a stopped
 // worker can only start; a finished one is shut down when no task is ready
 // for it, or cleared and given the next one when a task is. Tapping it is how
 // you say the current task is done, since a worker's reply cannot tell a
