@@ -840,7 +840,7 @@ test.describe('signed in', () => {
 
     await sheet.getByRole('button', { name: 'Add task' }).click();
     await expect(box).toHaveValue('');
-    await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing', 'Third thing']);
+    await expect(sheet.locator('.ttext')).toHaveText(['Third thing', 'First thing', 'Second thing']);
     await expect(page.getByRole('button', { name: 'Inbox, 3 queued' })).toBeVisible();
     const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Third thing');
     await expect.poll(stored).toBeTruthy();

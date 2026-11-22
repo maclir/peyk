@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -1180,9 +1180,7 @@ async function start(cfg) {
     reveal(project);
     const batch = fs.writeBatch(db);
     const ids = await storeImages(batch, images);
-    // The rank is set here because created_at reads as null until the server
-    // has confirmed it, which would sort the new task to the top meanwhile.
-    const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: Date.now() };
+    const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: topRank(state.tasks, Date.now()) };
     if (ids.length) task.images = ids;
     const ref = fs.doc(fs.collection(db, "tasks"));
     batch.set(ref, task);

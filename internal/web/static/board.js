@@ -189,6 +189,12 @@ export function filterQueue(list, status, project) {
     (!project || t.project === project) && (status === "ready" ? t.ready : status === "waiting" ? !t.ready : true));
 }
 
+// The rank that puts a new task above every queued one.
+export function topRank(tasks, now) {
+  const ranks = tasks.filter((t) => t.status === "queued").map(taskRank);
+  return ranks.length ? Math.min(...ranks) - 1000 : now;
+}
+
 // The rank that puts list[i] at position to, between the tasks that would
 // then be its neighbours, so a move writes one task.
 export function rankAt(list, i, to) {

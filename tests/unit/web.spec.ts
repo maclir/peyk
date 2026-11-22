@@ -205,6 +205,13 @@ describe('inbox', () => {
     expect(rankAt([{ rank: 5 }], 0, 0)).toBe(5);
   });
 
+  it('ranks a new task above every queued one', async () => {
+    const { topRank } = await load();
+    const tasks = [{ status: 'queued', rank: 10 }, { status: 'queued', created_at: new Date(5) }, { status: 'dispatched', rank: -5000 }];
+    expect(topRank(tasks, 99)).toBe(-995);
+    expect(topRank([], 99)).toBe(99);
+  });
+
   it('draws a project without a logo as its initial on a stable tint', async () => {
     const { monogram } = await load();
     expect(monogram('sakku')).toEqual(monogram('sakku'));
