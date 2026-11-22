@@ -788,7 +788,7 @@ async function start(cfg) {
     const status = sent
       ? h("span", { class: "tstatus", role: "status", "data-tone": sent.tone || null }, sent.text)
       : h("span", { class: "tstatus" }, t.ready
-        ? (projectNamed(t.project)?.session_id ? (clears ? "Free · clears the conversation first" : "Free") : "Starts a new worker")
+        ? (projectNamed(t.project)?.session_id ? "Free" : "Starts a new worker")
         : `Waiting · ${t.why}`);
     return h("article", { class: `task${t.ready ? "" : " waiting"}` },
       h("div", { class: "thead" },

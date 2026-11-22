@@ -427,7 +427,7 @@ test.describe('signed in', () => {
     await page.goto('/#inbox');
     await passkeyOn(page);
     const task = page.locator('.task', { hasText: 'Start fresh' });
-    await expect(task).toContainText('Free · clears the conversation first');
+    await expect(task.locator('.tstatus')).toHaveText('Free');
     await expect(task.locator('button.send .ico.broom')).toHaveCount(1);
     await task.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
