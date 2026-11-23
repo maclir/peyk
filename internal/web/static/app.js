@@ -75,6 +75,9 @@ const seenEl = document.getElementById("seen");
 const updateEl = document.getElementById("update");
 const usageEl = document.getElementById("usage");
 const usagePopEl = document.getElementById("usagepop");
+const barEl = document.querySelector("header.bar");
+const homeEl = document.getElementById("home");
+const hpageEl = document.getElementById("hpage");
 const config = document.body.dataset.firebase;
 // Checking for updates and updating start from the header, so their result
 // shows under it; the toast carries results whose control is gone.
@@ -134,6 +137,7 @@ function sheetTop(head, close) {
 const spinner = () => h("span", { class: "spin", "aria-hidden": "true" });
 
 function notice(text, ...extra) {
+  hpageEl.replaceChildren();
   app.replaceChildren(h("p", { class: "notice" }, text), ...extra);
 }
 
@@ -162,10 +166,10 @@ async function start(cfg) {
   const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
-    filter: "ready", only: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
+    filter: "ready", only: null, lastPicked: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
-    // The task sent from the inbox sheet; the sheet closes once it leaves the queue.
+    // The task sent from a worker's inbox; the inbox closes once it leaves the queue.
     sheetSent: null,
     // Sent and done rows the viewer has opened, by task id.
     openRows: new Set(),
@@ -288,7 +292,8 @@ async function start(cfg) {
   });
   usageEl.addEventListener("click", () => { state.menu = state.menu === "usage" ? null : "usage"; render(); });
   usageEl.parentElement.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.menu === "usage") { state.menu = null; render(); usageEl.focus(); } });
-  window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); render(); });
+  window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); syncLayers(); render(); });
+  window.addEventListener("popstate", syncLayers);
   tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
 
@@ -386,42 +391,59 @@ async function start(cfg) {
         most ? h("span", { class: "hint" }, `Most used: ${most}`) : null));
     }
     usagePopEl.replaceChildren(...parts);
-    // The bars sit mid-header, so a popover hung from them can pass the
-    // screen's left edge; shift it right to the page gutter instead.
-    usagePopEl.style.right = "";
-    const past = usagePopEl.getBoundingClientRect().left - 16;
-    if (past < 0) usagePopEl.style.right = `${past}px`;
+    // The bars sit beside the logo, so a popover hung from them can pass the
+    // screen's right edge; shift it left to the page gutter instead.
+    usagePopEl.style.left = "";
+    const past = usagePopEl.getBoundingClientRect().right - (document.documentElement.clientWidth - 16);
+    if (past > 0) usagePopEl.style.left = `${usagePopEl.offsetLeft - past}px`;
   }
+
+  // #inbox and #new open a sheet over the workers. The sheet then holds the
+  // history entry, so a later render does not open it again.
+  const ROUTES = ["#inbox", "#new"];
 
   function render() {
     if (!state.user) return;
+    if (ROUTES.includes(location.hash)) return location.hash === "#inbox" ? openInbox(null) : openCompose(null, null);
+    ensureSheets();
     renderLaptop();
-    // Snapshots re-render the whole view; keep what is being typed.
+    // Snapshots re-render the whole view; keep what is being typed. The New
+    // task sheet is never redrawn, so it needs no keeping.
     const typed = 'textarea, input[type="search"]';
-    const fields = () => [...app.querySelectorAll(typed), ...(sheet ? sheet.list.querySelectorAll(typed) : [])];
+    const fields = () => [app, inboxSheet.body, pickerHost].flatMap((el) => [...el.querySelectorAll(typed)]);
     const drafts = new Map(fields().map((t) => [t.id, t.value]));
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
     const id = shownSession();
     const s = id && shownWorker(id);
     followHistory(s);
-    const view = s ? "board" : location.hash === "#inbox" ? "inbox" : "board";
-    const tabs = h("nav", { class: "tabs" },
-      h("a", { href: "#", "aria-current": view === "board" ? "page" : null }, "Workers", h("span", { class: "n" }, String(activeCount()))),
-      h("a", { href: "#inbox", "aria-current": view === "inbox" ? "page" : null }, "Inbox", readyCount() ? h("span", { class: "n" }, String(readyCount())) : null),
-    );
+    renderHeader(s);
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
     else if (location.hash === "#log") app.replaceChildren(logView());
     else if (s) app.replaceChildren(detail(s));
-    else if (view === "inbox") app.replaceChildren(tabs, inbox());
-    else app.replaceChildren(tabs, board());
+    else app.replaceChildren(board());
 
-    renderSheet(s);
+    renderInbox();
+    renderCompose();
+    pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : []));
     for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
-    document.documentElement.classList.toggle("locked", (view === "inbox" && state.picking) || Boolean(sheet?.open));
+    document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking);
     if (focused) document.getElementById(focused)?.focus();
     keepHistoryAnchor();
     if (s && !document.hidden) dismissNotes(s.id);
+  }
+
+  // The header's left side is the same on every page; its right side holds
+  // what the page offers. Off the workers list the logo leads back to it.
+  function renderHeader(s) {
+    const onBoard = !s && !location.hash.startsWith("#pair-") && location.hash !== "#log";
+    barEl.classList.toggle("sub", !onBoard);
+    homeEl.setAttribute("aria-label", onBoard ? "peyk" : "Back to workers");
+    const p = s && projectOf(s);
+    const tools = onBoard ? [addButton(null, null), inboxButton(null)]
+      : s ? [addButton(p?.name ?? null, p?.name ?? null), p ? inboxButton(p) : null]
+        : [];
+    hpageEl.replaceChildren(...tools.filter(Boolean));
   }
 
   // Notifications are tagged with their worker's id; seeing the worker
@@ -647,14 +669,9 @@ async function start(cfg) {
       }
     });
     return h("article", { class: "detail" },
-      h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
       h("h2", {}, "Pair this device"),
       h("p", {}, "Commands to the laptop are signed with a passkey on this device. Create one, then confirm its fingerprint on the laptop."),
       button, out);
-  }
-
-  function activeCount() {
-    return [...state.sessions.values()].filter((s) => s.aoe_status !== "stopped").length;
   }
 
   function readyCount() {
@@ -679,51 +696,6 @@ async function start(cfg) {
   function projectStatus(p) {
     if (!p.session_id) return { text: "no worker · a task starts one", tone: "none" };
     return p.free ? { text: "free", tone: "ok" } : { text: p.busy, tone: "busy" };
-  }
-
-  function inbox() {
-    const projects = sortProjects(state.projects.filter((p) => !p.hidden));
-    if (!state.picked || !projects.some((p) => p.name === state.picked)) state.picked = projects[0]?.name ?? null;
-    const all = queue(state.tasks, state.projects);
-    if (state.only && !all.some((t) => t.project === state.only)) state.only = null;
-    const counts = queueCounts(state.only ? all.filter((t) => t.project === state.only) : all);
-    const list = filterQueue(all, state.filter, state.only);
-    const now = Date.now();
-
-    const chips = [["all", "All"], ["ready", "Ready"], ["waiting", "Waiting"]].map(([key, label]) =>
-      h("button", { type: "button", class: "fchip", "aria-pressed": String(state.filter === key), onclick: () => { state.filter = key; render(); } },
-        label, h("span", { class: "n" }, String(counts[key]))));
-    const filters = h("div", { class: "filters" }, chips, h("span", { class: "grow" }),
-      list.length > 1 || state.arranging
-        ? h("button", { type: "button", class: "link", onclick: () => { state.arranging = !state.arranging; state.menu = null; render(); } },
-          icon("sort"), state.arranging ? "Done" : "Reorder")
-        : null);
-    const names = [...new Set(all.map((t) => t.project))];
-    const strip = names.length > 1 || state.only
-      ? h("div", { class: "strip", role: "group", "aria-label": "Filter by project" }, names.map((n) =>
-        h("button", { type: "button", class: "sface", title: n, "aria-label": n, "aria-pressed": String(state.only === n),
-          onclick: () => { state.only = state.only === n ? null : n; render(); } }, face(projectNamed(n), n, "md"))))
-      : null;
-
-    const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
-      ? list.map((t, i) => (state.editing === t.id ? editor(t) : state.arranging ? arrangeRow(list, t, i) : taskCard(t, now)))
-      : h("p", { class: "empty" }, all.length ? "Nothing here for this filter." : "No tasks queued.");
-    const sent = sentTasks(state.tasks).filter((t) => !state.only || t.project === state.only);
-    return h("div", { class: "inbox" },
-      filters, strip,
-      h("p", { class: "alert", id: "alert", role: "status" }),
-      h("div", { class: "tasks" }, items),
-      sent.length && state.filter !== "waiting" && !state.arranging ? [
-        h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
-        h("div", { class: "rows" }, sent.map((t) => sentRow(t, now))),
-      ] : null,
-      state.filter !== "waiting" && !state.arranging ? [
-        doneFold(state.showDone, () => { state.showDone = !state.showDone; render(); }, state.only ?? ""),
-        ...(state.showDone ? doneList(state.only ?? "", now) : []),
-      ] : null,
-      composer(),
-      state.picking ? picker(projects) : null,
-    );
   }
 
   // A sent or done task has had its turn, so it is one faded line that opens
@@ -761,9 +733,10 @@ async function start(cfg) {
 
   // A send's outcome stays on its task, which may have moved since, rather
   // than in a status line scrolled out of view.
-  function send(t, clear) {
+  function send(t, clear, { announce = false } = {}) {
     const report = (text, busy = false, tone = "") => {
       state.sends.set(t.id, { text, busy, tone });
+      if (announce && text && !busy) toast(`${t.project}: ${text}`, tone);
       render();
     };
     state.menu = null;
@@ -925,36 +898,99 @@ async function start(cfg) {
       name ? face(projectNamed(name), name, "xs") : null, h("span", {}, name ?? "No project"), icon("chevron"));
   }
 
-  function composer() {
-    // The draft is cleared as soon as the task is accepted: a local write
-    // re-renders the inbox before the server confirms it, and the re-render
-    // would otherwise restore the text it found in the box.
-    const add = async (text, andSend = false) => {
+  function visibleProjects() {
+    return sortProjects(state.projects.filter((p) => !p.hidden));
+  }
+
+  // The New task sheet takes the project it is opened with, or the one the
+  // last task went to. It closes as the task is accepted; a failed add opens
+  // it again with the text and images restored.
+  function buildCompose() {
+    const key = "add";
+    const close = () => closeLayer("compose");
+    const add = (text, andSend = false) => {
       const value = text.value.trim();
-      if (!value || !state.picked) return;
-      const attaching = draft("add");
+      const project = state.picked;
+      if (!value || !project) return;
+      const attaching = draft(key);
+      const from = compose.from;
       text.value = "";
-      state.drafts.delete("add");
-      try {
-        const t = await track("add", () => addTask(state.picked, value, attaching));
+      state.drafts.delete(key);
+      state.lastPicked = project;
+      const shown = inboxSheet.open;
+      if (shown && state.only && state.only !== project) state.only = project;
+      close();
+      addTask(project, value, attaching).then((t) => {
         forgetImages(attaching);
-        if (andSend) send(t, hasConversation(t));
-      } catch (err) {
-        const box = document.getElementById("task-text");
-        if (box && !box.value) box.value = value;
-        if (!draft("add").length) state.drafts.set("add", attaching);
-        render();
+        if (andSend) send(t, hasConversation(t), { announce: !inboxSheet.open });
+      }, (err) => {
+        if (!compose.text.value) compose.text.value = value;
+        if (!draft(key).length) state.drafts.set(key, attaching);
+        openCompose(project, from);
         alertLine(`Could not add the task: ${err.message}`);
-      }
+      });
+      if (!shown) toast(`Added to ${project}`, "ok");
     };
     // A long press sends the task straight away, as its Send button would,
     // when the project's worker is free to take it.
     const hold = {
-      armed: (text) => Boolean(text.value.trim() && projectNamed(state.picked)?.free && !state.busy.has("add")),
+      armed: (text) => Boolean(text.value.trim() && projectNamed(state.picked)?.free),
       fire: (text) => add(text, true),
     };
-    return composerForm({ key: "add", id: "task-text", label: "New task", placeholder: state.picked ? "Describe a task…" : "No projects published yet",
-      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead: projectPill(state.picked) });
+    const lead = h("span", { class: "pillslot" });
+    const form = composerForm({ key, id: "task-text", label: "Task description", placeholder: "Describe a task…",
+      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead });
+    const note = h("p", { class: "cnote", role: "status", hidden: "" });
+    const alert = h("p", { class: "alert", role: "status" });
+    const head = h("div", { class: "sheethead" }, h("h2", {}, "New task"),
+      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: close }, icon("x")));
+    const panel = h("section", { class: "sheet compose", role: "dialog", "aria-modal": "true", "aria-label": "New task", onkeydown: (e) => e.key === "Escape" && close() },
+      sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, note));
+    const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
+    document.body.append(scrim);
+    return { scrim, form, lead, note, alert, text: form.querySelector("textarea"), open: false, from: null };
+  }
+
+  // from names the worker's project when the sheet opens on a worker's page,
+  // so picking another project says where the task goes instead.
+  function openCompose(project, from) {
+    ensureSheets();
+    state.picked = project ?? state.lastPicked ?? state.picked;
+    compose.from = from;
+    compose.alert.textContent = "";
+    compose.open = true;
+    compose.scrim.hidden = false;
+    openLayer("compose");
+    render();
+    compose.text.focus();
+  }
+
+  function hideCompose() {
+    compose.open = false;
+    compose.scrim.hidden = true;
+    compose.alert.textContent = "";
+    if (!state.pickFor) state.picking = false;
+    render();
+  }
+
+  // Only the project pill, the note and the thumbnails are redrawn; the
+  // textarea stays where it is.
+  function renderCompose() {
+    syncThumbs(compose.form, "add");
+    if (!compose.open) return;
+    if (state.loaded.has("projects") && !state.projects.some((p) => p.name === state.picked)) state.picked = visibleProjects()[0]?.name ?? null;
+    compose.lead.replaceChildren(projectPill(state.picked));
+    compose.text.placeholder = state.picked ? "Describe a task…" : "No projects published yet";
+    const elsewhere = Boolean(compose.from && state.picked && state.picked !== compose.from);
+    compose.note.hidden = !elsewhere;
+    compose.note.textContent = elsewhere ? `Goes to ${state.picked}, not ${compose.from}.` : "";
+  }
+
+  function syncThumbs(form, key) {
+    const imgs = draft(key);
+    form.querySelector(":scope > .thumbs")?.remove();
+    if (imgs.length) form.prepend(h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))));
+    form.querySelector('[aria-label="Attach image"]').disabled = imgs.length >= MAX_IMAGES;
   }
 
   // The picker lists the projects that are not hidden. Its edit mode hides
@@ -1256,11 +1292,10 @@ async function start(cfg) {
   async function receiveShare() {
     const shared = await takeShare();
     if (!shared) return;
-    if (location.hash !== "#inbox") history.replaceState(null, "", "#inbox");
-    render();
-    const box = document.getElementById("task-text");
+    openCompose(null, null);
+    const box = compose.text;
     const text = sharedText(shared);
-    if (box && text) box.value = box.value ? `${box.value}\n${text}` : text;
+    if (text) box.value = box.value ? `${box.value}\n${text}` : text;
     const all = shared.files || [];
     const files = all.filter((f) => f.type.startsWith("image/"));
     if (files.length) await attachImages("add", files);
@@ -1354,9 +1389,9 @@ async function start(cfg) {
     return form;
   }
 
-  // The closed sheet stays in the page, hidden, with its own alert line.
+  // Each sheet has its own alert line; with neither open, a toast says it.
   function alertLine(text, tone = "bad") {
-    const el = (sheet?.open ? sheet.scrim : app).querySelector(".alert");
+    const el = compose?.open ? compose.alert : inboxSheet?.open ? inboxSheet.alert : null;
     if (!el) return text && toast(text, tone);
     el.textContent = text;
     toneOf(el, tone);
@@ -1365,7 +1400,7 @@ async function start(cfg) {
   // A resume that went through closes the inbox sheet, as a sent task does;
   // the worker's new conversation is the result.
   function resumed(text, busy, tone) {
-    if (!busy && !text && sheet?.open) return closeSheet();
+    if (!busy && !text && inboxSheet?.open) return closeLayer("inbox");
     alertLine(busy && !text ? "" : text, tone);
   }
 
@@ -1425,7 +1460,7 @@ async function start(cfg) {
       port1.onmessage = (e) => list.replaceChildren(...(e.data.length ? e.data.reverse().map((x) => h("li", {}, JSON.stringify(x))) : [h("li", { class: "hint" }, "Nothing logged yet.")]));
       ctl.postMessage({ type: "read log" }, [port2]);
     }
-    return h("div", {}, h("p", {}, h("a", { href: "#" }, "Back")), h("h2", { class: "group" }, "Notification log"),
+    return h("div", {}, h("h2", { class: "group" }, "Notification log"),
       h("p", { class: "hint" }, `Permission: ${"Notification" in window ? Notification.permission : "unsupported"} · subscribed here: ${state.push}`), list);
   }
 
@@ -1511,13 +1546,11 @@ async function start(cfg) {
     return h("article", { class: "detail" },
       h("div", { class: "dhead" },
         h("div", { class: "drow" },
-          h("a", { class: "back", href: "#", "aria-label": "Back to workers" }, icon("back")),
           h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
           h("div", { class: "dtitle" },
             h("h2", {}, s.title, chip(st)),
             h("div", { class: "tags" }, tagList(s, true))),
           quickButton(s, action),
-          inboxButton(s),
           workerMenu(s, busy)),
         outcomeLine(`worker:${s.id}`),
       ),
@@ -1686,7 +1719,7 @@ async function start(cfg) {
     const clears = hasConversation(next);
     return h("div", { class: "nownext" },
       h("div", { class: "nnrow" },
-        h("button", { type: "button", class: "nntext", "aria-label": `Next task, open the inbox: ${next.text}`, onclick: () => openSheet(next.project) },
+        h("button", { type: "button", class: "nntext", "aria-label": `Next task, open the inbox: ${next.text}`, onclick: () => openInbox(next.project) },
           sent ? h("span", { class: "nnlabel", role: "status", "data-tone": sent.tone || null }, sent.text) : h("span", { class: "nnlabel" }, "Next"),
           h("span", { class: "nnone" }, oneLine(next.text))),
         sendButton(next, clears, () => send(next, clears))),
@@ -1708,84 +1741,101 @@ async function start(cfg) {
     icon(ico));
   }
 
-  function inboxButton(s) {
-    const p = projectOf(s);
-    if (!p) return null;
-    const n = queuedFor(p.name).length;
-    return h("button", { type: "button", class: "icon tool inboxbtn", title: "Inbox", "aria-label": n ? `Inbox, ${n} queued` : "Inbox", "aria-haspopup": "dialog",
-      onclick: () => openSheet(p.name) },
-      icon("tray"), n ? h("span", { class: "count" }, String(n)) : null);
+  function addButton(project, from) {
+    return h("button", { type: "button", class: "icon tool", title: "New task", "aria-label": "New task", "aria-haspopup": "dialog",
+      onclick: () => openCompose(project, from) }, icon("plus"));
   }
 
-  // The project's inbox as a sheet over its worker. It lives outside #app and
-  // its composer is built once per project, never redrawn: a snapshot while
-  // typing would otherwise replace the textarea under the caret, dropping
-  // keystrokes and the phone keyboard's composition.
-  let sheet = null;
+  // The workers' tray counts the tasks ready to send; a worker's counts its
+  // project's queue.
+  function inboxButton(p) {
+    const n = p ? queuedFor(p.name).length : readyCount();
+    const label = !n ? "Inbox" : p ? `Inbox, ${n} queued` : `Inbox, ${n} ready`;
+    return h("button", { type: "button", class: "icon tool inboxbtn", title: "Inbox", "aria-label": label, "aria-haspopup": "dialog",
+      onclick: () => openInbox(p?.name ?? null) },
+    icon("tray"), n ? h("span", { class: "count" }, String(n)) : null);
+  }
 
-  function openSheet(project) {
-    if (sheet?.project !== project) buildSheet(project);
-    sheet.open = true;
-    sheet.arranging = false;
-    sheet.scrim.hidden = false;
+  // The sheets live outside #app, stacked in the order they are made.
+  let inboxSheet = null;
+  let compose = null;
+  let pickerHost = null;
+
+  function ensureSheets() {
+    if (inboxSheet) return;
+    inboxSheet = buildInbox();
+    compose = buildCompose();
+    pickerHost = document.body.appendChild(h("div"));
+  }
+
+  // Each open sheet has a history entry of its own, so the phone's back
+  // gesture closes the sheet rather than leaving the page.
+  const layers = [];
+
+  function openLayer(name) {
+    if (ROUTES.includes(location.hash)) history.replaceState(history.state, "", location.pathname + location.search);
+    if (layers.includes(name)) return;
+    layers.push(name);
+    history.pushState({ layers: layers.length }, "");
+  }
+
+  function closeLayer(name) {
+    const i = layers.indexOf(name);
+    if (i === -1) return;
+    if (i === layers.length - 1 && history.state?.layers === layers.length) return history.back();
+    layers.splice(i, 1);
+    hideLayer(name);
+  }
+
+  // Going back, or following a link out of a sheet, leaves the sheets above
+  // the entry the page is now on.
+  // A route can open a sheet while one closes, so the depth is read again
+  // after each.
+  function syncLayers() {
+    while (layers.length > (history.state?.layers ?? 0)) hideLayer(layers.pop());
+  }
+
+  function hideLayer(name) {
+    if (name === "inbox") hideInbox();
+    else hideCompose();
+  }
+
+  function buildInbox() {
+    const close = () => closeLayer("inbox");
+    const head = h("div", { class: "sheethead" });
+    const alert = h("p", { class: "alert", role: "status" });
+    const body = h("div", { class: "sheetbody inboxbody" });
+    const panel = h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Inbox", onkeydown: (e) => e.key === "Escape" && close() },
+      sheetTop(head, close), alert, body);
+    const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
+    document.body.append(scrim);
+    return { scrim, panel, head, alert, body, open: false, from: null };
+  }
+
+  // The workers' tray opens every project's tasks, a worker's its own
+  // project's. A task sent from a worker's own inbox closes it, since the
+  // worker's page shows the task from then on.
+  function openInbox(project) {
+    ensureSheets();
+    Object.assign(state, { only: project, filter: project ? "all" : "ready", arranging: false, menu: null, sheetSent: null });
+    inboxSheet.from = project && shownSession() ? project : null;
+    inboxSheet.alert.textContent = "";
+    inboxSheet.open = true;
+    inboxSheet.scrim.hidden = false;
+    openLayer("inbox");
     render();
-    if (!queuedFor(project).length) sheet.text.focus();
   }
 
-  function closeSheet() {
-    if (!sheet?.open) return;
-    sheet.open = false;
-    sheet.scrim.hidden = true;
-    sheet.scrim.querySelector(".alert").textContent = "";
-    state.menu = null;
-    state.sheetSent = null;
-    if (state.editing && sheet.list.contains(document.getElementById(`edit-${state.editing}`))) {
+  function hideInbox() {
+    inboxSheet.open = false;
+    inboxSheet.scrim.hidden = true;
+    inboxSheet.alert.textContent = "";
+    Object.assign(state, { menu: null, sheetSent: null, arranging: false });
+    if (state.editing && inboxSheet.body.contains(document.getElementById(`edit-${state.editing}`))) {
       dropDraft(`edit:${state.editing}`);
       state.editing = null;
     }
     render();
-  }
-
-  function buildSheet(project) {
-    if (sheet) {
-      dropDraft(sheet.key);
-      sheet.scrim.remove();
-    }
-    const key = `sheet:${project}`;
-    // The draft is cleared as soon as the task is accepted, as in the inbox.
-    // A held add sends only if the worker is still free once the task is saved.
-    const add = async (text, andSend = false) => {
-      const value = text.value.trim();
-      if (!value) return;
-      const attaching = draft(key);
-      text.value = "";
-      state.drafts.delete(key);
-      try {
-        const t = await track(`add:${key}`, () => addTask(project, value, attaching));
-        forgetImages(attaching);
-        if (andSend && projectNamed(project)?.free) sheetSend(t, hasConversation(t));
-      } catch (err) {
-        if (!text.value) text.value = value;
-        if (!draft(key).length) state.drafts.set(key, attaching);
-        render();
-        alertLine(`Could not add the task: ${err.message}`);
-      }
-    };
-    const hold = {
-      armed: (text) => Boolean(text.value.trim() && projectNamed(project)?.free),
-      fire: (text) => add(text, true),
-    };
-    const form = composerForm({ key, id: "sheet-text", label: `New task for ${project}`, placeholder: "Add a task", cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold });
-    const head = h("div", { class: "sheethead" });
-    const list = h("div", { class: "sheetbody tlist tasks" });
-    const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && closeSheet() },
-      h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": `${project} inbox`, onkeydown: (e) => e.key === "Escape" && closeSheet() },
-        sheetTop(head, closeSheet),
-        h("p", { class: "alert", id: "alert", role: "status" }),
-        list,
-        h("div", { class: "sheetfoot" }, form)));
-    document.body.append(scrim);
-    sheet = { project, key, scrim, head, list, form, text: form.querySelector("textarea"), open: false, arranging: false };
   }
 
   function sheetSend(t, clear) {
@@ -1793,43 +1843,61 @@ async function start(cfg) {
     send(t, clear);
   }
 
-  function renderSheet(s) {
-    if (!sheet?.open) return;
-    if (!s || projectOf(s)?.name !== sheet.project) return closeSheet();
-    const tasks = queuedFor(sheet.project);
-    // A sent task closes the sheet, unless something is being written for the next one.
-    if (state.sheetSent && !tasks.some((t) => t.id === state.sheetSent)) {
+  function renderInbox() {
+    const sh = inboxSheet;
+    if (!sh.open) return;
+    const all = queue(state.tasks, state.projects);
+    if (state.sheetSent && !all.some((t) => t.id === state.sheetSent)) {
       state.sheetSent = null;
-      if (!sheet.text.value.trim() && !draft(sheet.key).length) return closeSheet();
+      return closeLayer("inbox");
     }
-    const p = projectNamed(sheet.project);
+    const only = state.only;
+    const inProject = Boolean(only);
+    const counts = queueCounts(only ? all.filter((t) => t.project === only) : all);
+    const list = filterQueue(all, state.filter, only);
+    const sendWith = sh.from && sh.from === only ? sheetSend : send;
     const now = Date.now();
-    sheet.head.replaceChildren(
-      face(p, sheet.project, "sm"),
-      h("h2", { class: "grow" }, "Inbox", h("span", { class: `dot ${p?.free ? "free" : "busy"}`, title: p?.free ? "Free" : p?.busy || "Busy" })),
-      ...(tasks.length > 1 || sheet.arranging
-        ? [h("button", { type: "button", class: "link", onclick: () => { sheet.arranging = !sheet.arranging; state.menu = null; render(); } },
-          icon("sort"), sheet.arranging ? "Done" : "Reorder")]
-        : []),
-      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: closeSheet }, icon("x")));
-    sheet.list.replaceChildren(...(tasks.length
-      ? tasks.map((t, i) => (state.editing === t.id ? editor(t, false)
-        : sheet.arranging ? arrangeRow(tasks, t, i, { inProject: true })
-          : taskCard(t, now, { inProject: true, sendWith: sheetSend })))
-      : [h("p", { class: "empty" }, "Nothing queued.")]),
-    ...(sheet.arranging ? [] : [
-      doneFold(sheet.showDone, () => { sheet.showDone = !sheet.showDone; render(); }, sheet.project),
-      ...(sheet.showDone ? doneList(sheet.project, now, true) : []),
-    ]));
-    syncThumbs(sheet.form, sheet.key);
-  }
 
-  // Only the thumbnails are redrawn; the textarea stays where it is.
-  function syncThumbs(form, key) {
-    const imgs = draft(key);
-    form.querySelector(":scope > .thumbs")?.remove();
-    if (imgs.length) form.prepend(h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))));
-    form.querySelector('[aria-label="Attach image"]').disabled = imgs.length >= MAX_IMAGES;
+    sh.panel.setAttribute("aria-label", only ? `${only} inbox` : "Inbox");
+    sh.head.replaceChildren(...[
+      h("h2", { class: "grow" }, "Inbox"),
+      list.length > 1 || state.arranging
+        ? h("button", { type: "button", class: "link", onclick: () => { state.arranging = !state.arranging; state.menu = null; render(); } },
+          icon("sort"), state.arranging ? "Done" : "Reorder")
+        : null,
+      addButton(only, sh.from),
+      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: () => closeLayer("inbox") }, icon("x")),
+    ].filter(Boolean));
+
+    const chips = [["all", "All"], ["ready", "Ready"], ["waiting", "Waiting"]].map(([key, label]) =>
+      h("button", { type: "button", class: "fchip", "aria-pressed": String(state.filter === key), onclick: () => { state.filter = key; render(); } },
+        label, h("span", { class: "n" }, String(counts[key]))));
+    const names = [...new Set([...all.map((t) => t.project), ...(only ? [only] : [])])];
+    const strip = names.length > 1 || only
+      ? h("div", { class: "strip", role: "group", "aria-label": "Filter by project" }, names.map((n) =>
+        h("button", { type: "button", class: "sface", title: n, "aria-label": n, "aria-pressed": String(only === n),
+          onclick: () => { state.only = only === n ? null : n; render(); } }, face(projectNamed(n), n, "md"))))
+      : null;
+    const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
+      ? list.map((t, i) => (state.editing === t.id ? editor(t)
+        : state.arranging ? arrangeRow(list, t, i, { inProject })
+          : taskCard(t, now, { inProject, sendWith })))
+      : h("p", { class: "empty" }, only && !counts.all ? "Nothing queued." : all.length ? "Nothing here for this filter." : "No tasks queued.");
+    const sent = sentTasks(state.tasks).filter((t) => !only || t.project === only);
+    const rest = state.filter !== "waiting" && !state.arranging;
+    sh.body.replaceChildren(...[
+      h("div", { class: "filters" }, chips),
+      strip,
+      h("div", { class: "tasks" }, items),
+      ...(sent.length && rest ? [
+        h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
+        h("div", { class: "rows" }, sent.map((t) => sentRow(t, now))),
+      ] : []),
+      ...(rest ? [
+        doneFold(state.showDone, () => { state.showDone = !state.showDone; render(); }, only ?? ""),
+        ...(state.showDone ? doneList(only ?? "", now, inProject) : []),
+      ] : []),
+    ].filter(Boolean));
   }
 
   function pushCard(s, now) {
@@ -2047,11 +2115,11 @@ function oneLine(text) {
 const ICONS = {
   more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
   prompt: '<path d="M5 7l5 5-5 5"/><path d="M12.5 17H19"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   addtask: '<path d="M4 6h11M4 12h11M4 18h7"/><path d="M18 14.5v7M14.5 18h7"/>',
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
-  back: '<path d="M15 18l-6-6 6-6"/>',
   clip: '<path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/>',
   tray: '<path d="M4 13l2.5-7h11L20 13v6H4z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',
   sort: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',

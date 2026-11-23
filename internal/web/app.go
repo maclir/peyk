@@ -115,7 +115,7 @@ func robots(w http.ResponseWriter, _ *http.Request) {
 // storing them needs a signed-in browser, and this request carries no
 // identity.
 func shareFallback(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/#inbox", http.StatusSeeOther)
+	http.Redirect(w, r, "/#new", http.StatusSeeOther)
 }
 
 // OfflinePath is what the worker shows when a launch cannot reach the service.
@@ -258,7 +258,7 @@ const pageHTML = `<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
 <body data-firebase="{{.}}">
-<header class="bar"><h1><a href="/#"><img src="/static/icon.svg" alt="" width="24" height="24">peyk</a></h1><div id="hstat" class="hstat"><div class="wmenu"><button id="usage" class="usage" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meter"><i></i></span><span class="meter"><i></i></span><span class="meter gh"><i></i></span></button><div id="usagepop" class="pop upop" role="dialog" aria-label="Usage" hidden></div></div><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></header>
+<header class="bar"><div class="hglobal"><h1><a id="home" href="/#" aria-label="peyk"><svg class="homeback" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><img src="/static/icon.svg" alt="" width="24" height="24"></a></h1><div id="hstat" class="hstat"><div class="wmenu"><button id="usage" class="usage" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meter"><i></i></span><span class="meter"><i></i></span><span class="meter gh"><i></i></span></button><div id="usagepop" class="pop upop" role="dialog" aria-label="Usage" hidden></div></div><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></div><div id="hpage" class="hpage"></div></header>
 <main id="app"><p class="notice" id="notice">Loading…</p></main>
 <footer class="foot"><button id="rev" class="rev" type="button" title="Check for a newer revision"></button></footer>
 <script type="module" src="/static/app.js"></script></body></html>`

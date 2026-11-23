@@ -98,7 +98,7 @@ async function keepShare(request) {
   } catch (err) {
     await log("share failed", { error: String(err) });
   }
-  return Response.redirect("/#inbox", 303);
+  return Response.redirect("/#new", 303);
 }
 
 // Notifications from the laptop. The payload is encrypted to this browser's

@@ -174,12 +174,8 @@ test.describe('signed in', () => {
   test('the board groups sessions and shows what each is doing', async () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
-    const workersTab = page.getByRole('link', { name: /^Workers/ });
-    await expect(workersTab).toHaveText('Workers2');
-    await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'stopped', state: 'idle', updated_at: new Date() });
-    await expect(page.locator('.card', { hasText: 'zzz' })).toBeVisible();
-    await expect(workersTab).toHaveText('Workers2');
-    await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
+    await expect(page.locator('nav.tabs')).toHaveCount(0);
+    await expect(page.locator('.hpage').getByRole('button', { name: 'New task' })).toBeVisible();
     const hamta = page.locator('.card', { hasText: 'hamta' });
     await expect(hamta.getByText('needs input')).toBeVisible();
     await expect(hamta.getByText('Task: Add CSV export')).toBeVisible();
@@ -195,8 +191,9 @@ test.describe('signed in', () => {
     await expect(page.locator('.reply strong')).toHaveText('3f2a1c4');
     await expect(page.locator('.reply code')).toHaveText('make test');
 
-    await page.getByRole('link', { name: 'peyk' }).click();
+    await page.getByRole('link', { name: 'Back to workers' }).click();
     await expect(page).toHaveURL(/\/#$/);
+    await expect(page.getByRole('link', { name: 'peyk' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
   });
 
@@ -445,6 +442,7 @@ test.describe('signed in', () => {
 
     // The approval outlives a reload, so the next send asks for no passkey.
     await page.reload();
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
     await passkeyOn(page);
     await task.getByRole('button', { name: 'Clear and send', exact: true }).click();
     await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
@@ -468,7 +466,9 @@ test.describe('signed in', () => {
   test('the inbox adds, edits and deletes tasks', async () => {
     await page.goto('/#inbox');
     await expect(page.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('button', { name: 'Project: hamta' }).click();
+    await page.getByRole('dialog', { name: 'Inbox' }).getByRole('button', { name: 'New task' }).click();
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await compose.getByRole('button', { name: 'Project: hamta' }).click();
     const sheet = page.getByRole('dialog', { name: 'Choose a project' });
     await expect(sheet.getByRole('radio', { name: /hamta/ })).toHaveAttribute('aria-checked', 'true');
     // Keys typed one at a time land in the same input.
@@ -481,9 +481,10 @@ test.describe('signed in', () => {
     await expect(sheet.getByRole('radio')).toHaveCount(1);
     await sheet.getByRole('radio', { name: /knip/ }).click();
     await expect(sheet).toHaveCount(0);
-    await page.getByLabel('New task').fill('Add --json output');
-    await page.getByLabel('New task').press('Meta+Enter');
-    await expect(page.getByLabel('New task')).toHaveValue('');
+    await compose.getByLabel('Task description').fill('Add --json output');
+    await compose.getByLabel('Task description').press('Meta+Enter');
+    await expect(compose).toBeHidden();
+    await expect(page.locator('#task-text')).toHaveValue('');
 
     const task = page.locator('.task', { hasText: 'Add --json output' });
     await expect(task.locator('.proj')).toContainText('knip');
@@ -514,7 +515,7 @@ test.describe('signed in', () => {
   test('the picker hides projects, finds hidden ones, and undoes a hide', async () => {
     const areh = { name: 'areh', path: '/c/areh', session_id: '', free: true, busy: '' };
     await put(page, 'projects/areh', areh);
-    await page.goto('/#inbox');
+    await page.goto('/#new');
     await passkeyOn(page);
     await page.getByRole('button', { name: /^Project:/ }).click();
     const sheet = page.getByRole('dialog', { name: 'Choose a project' });
@@ -558,9 +559,12 @@ test.describe('signed in', () => {
   });
 
   test('a long press on Add task sends the task when its worker is free', async () => {
-    await page.goto('/#inbox');
+    await page.goto('/#new');
     await passkeyOn(page);
-    const button = page.getByRole('button', { name: 'Add task' });
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    // The sheet's box outlives the sheet, which leaves the accessibility tree when it closes.
+    const box = page.locator('#task-text');
+    const button = page.locator('form.add button[type="submit"]');
     // The button shows the send icon during a press only when the press will send.
     const press = async (sends: boolean) => {
       await button.hover();
@@ -572,10 +576,14 @@ test.describe('signed in', () => {
       await page.mouse.up();
     };
 
-    await page.getByRole('button', { name: /^Project:/ }).click();
-    await page.getByRole('dialog').getByRole('radio', { name: /hamta/ }).click();
-    await page.getByLabel('New task').fill('Wait for hamta');
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /hamta/ }).click();
+    await box.fill('Wait for hamta');
     await press(false);
+    await expect(compose).toBeHidden();
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const inbox = page.getByRole('dialog', { name: 'Inbox' });
+    await inbox.getByRole('button', { name: /^All/ }).click();
     const waiting = page.locator('.task', { hasText: 'Wait for hamta' });
     await expect(waiting).toContainText('Waiting · needs input');
     expect((await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'dispatch')).toHaveLength(0);
@@ -584,11 +592,13 @@ test.describe('signed in', () => {
     await expect.poll(stored).toBeTruthy();
     await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
 
-    await page.getByRole('button', { name: /^Project:/ }).click();
-    await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();
-    await page.getByLabel('New task').fill('Ship it now');
+    await inbox.getByRole('button', { name: 'New task' }).click();
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await box.fill('Ship it now');
     await press(true);
-    await expect(page.getByLabel('New task')).toHaveValue('');
+    await expect(compose).toBeHidden();
+    await expect(box).toHaveValue('');
     const task = page.locator('.task', { hasText: 'Ship it now' });
     await expect(task.getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
@@ -614,16 +624,20 @@ test.describe('signed in', () => {
   });
 
   test('a task carries a screenshot to its worker and drops it when deleted', async () => {
-    await page.goto('/#inbox');
+    await page.goto('/#new');
     await passkeyOn(page);
-    await page.getByRole('button', { name: /^Project:/ }).click();
-    await page.getByRole('dialog').getByRole('radio', { name: /knip/ }).click();
-    await page.getByLabel('New task').fill('Match this layout');
-    await page.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await compose.getByLabel('Task description').fill('Match this layout');
+    await compose.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
     await expect(page.locator('form.add .thumb img')).toHaveCount(1);
-    await page.getByRole('button', { name: 'Add task' }).click();
-    await expect(page.getByLabel('New task')).toHaveValue('');
+    await compose.getByRole('button', { name: 'Add task' }).click();
+    await expect(compose).toBeHidden();
+    await expect(page.locator('#task-text')).toHaveValue('');
     await expect(page.locator('form.add .thumb')).toHaveCount(0);
+    await expect(page.locator('.toast')).toContainText('Added to knip');
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
 
     const task = page.locator('.task', { hasText: 'Match this layout' });
     await expect(task.locator('.thumb img')).toHaveCount(1);
@@ -678,15 +692,18 @@ test.describe('signed in', () => {
       document.body.append(form);
       form.submit();
     }, PNG.toString('base64'));
-    await expect(page).toHaveURL(/\/#inbox$/);
-    await expect(page.locator('form.add .thumb img')).toHaveCount(1);
-    await expect(page.getByLabel('New task')).toHaveValue('Shared from Photos');
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await expect(compose).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
+    await expect(compose.getByLabel('Task description')).toHaveValue('Shared from Photos');
 
     // The share is used once; a reload starts empty.
     await page.reload();
-    await expect(page.getByLabel('New task')).toBeVisible();
-    await expect(page.locator('form.add .thumb')).toHaveCount(0);
-    await expect(page.getByLabel('New task')).toHaveValue('');
+    await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
+    await expect(compose).toBeVisible();
+    await expect(compose.locator('form.add .thumb')).toHaveCount(0);
+    await expect(page.locator('#task-text')).toHaveValue('');
   });
 
   test('a reply carries a screenshot to its worker', async () => {
@@ -775,7 +792,7 @@ test.describe('signed in', () => {
     const texts = page.locator('.tasks .ttext');
     await page.getByRole('button', { name: /^Ready/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing']);
-    await expect(page.locator('a[href="#inbox"] .n')).toHaveText('2');
+    await expect(page.locator('.hpage .inboxbtn .count')).toHaveText('2');
     await page.getByRole('button', { name: /^All/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing', 'Waits on hamta']);
 
@@ -828,7 +845,10 @@ test.describe('signed in', () => {
     await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
 
     // The worker turning busy mid-sentence leaves the same box, text and focus.
-    const box = sheet.getByLabel('New task for knip');
+    await sheet.getByRole('button', { name: 'New task' }).click();
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await expect(compose.getByRole('button', { name: 'Project: knip' })).toBeVisible();
+    const box = page.locator('#task-text');
     await box.evaluate((el) => { (el as HTMLTextAreaElement & { kept?: boolean }).kept = true; });
     await box.pressSequentially('Third');
     const knip = { name: 'knip', path: '/c/knip', session_id: 'k', active: new Date() };
@@ -840,7 +860,8 @@ test.describe('signed in', () => {
     expect(await box.evaluate((el) => (el as HTMLTextAreaElement & { kept?: boolean }).kept)).toBe(true);
     await put(page, 'projects/knip', { ...knip, free: true, busy: '' });
 
-    await sheet.getByRole('button', { name: 'Add task' }).click();
+    await compose.getByRole('button', { name: 'Add task' }).click();
+    await expect(compose).toBeHidden();
     await expect(box).toHaveValue('');
     await expect(sheet.locator('.ttext')).toHaveText(['Third thing', 'First thing', 'Second thing']);
     await expect(page.getByRole('button', { name: 'Inbox, 3 queued' })).toBeVisible();
@@ -930,7 +951,7 @@ test.describe('signed in', () => {
       await page.mouse.up();
     };
 
-    await page.goto('/#inbox');
+    await page.goto('/#new');
     const open = () => page.getByRole('button', { name: /^Project: / }).first().click();
     const picker = page.getByRole('dialog', { name: 'Choose a project' });
     await open();
@@ -953,16 +974,16 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/tasks/one`, { headers: admin });
   });
 
-  test('the composer tucks while scrolling down and returns at the end without changing the page length', async () => {
-    const ids = Array.from({ length: 30 }, (_, i) => `long${i}`);
-    for (const [i, id] of ids.entries()) {
-      await put(page, `tasks/${id}`, { project: 'knip', text: `Long list item ${i}`, status: 'queued', created_at: new Date(Date.now() - 60000 + i) });
-    }
-    await page.goto('/#inbox');
-    await expect(page.locator('.task', { hasText: 'Long list item 29' })).toBeVisible();
-    await page.locator('#task-text').blur();
+  test('the reply box tucks while scrolling down and returns at the end without changing the page length', async () => {
+    const before = await get(page, 'sessions/k');
+    const long = Array.from({ length: 60 }, (_, i) => `Paragraph ${i} of a long reply.`).join('\n\n');
+    const message = `${FIRESTORE}/sessions/k?updateMask.fieldPaths=message`;
+    expect((await page.request.patch(message, { headers: admin, data: { fields: { message: encode({ id: 'm-long', text: long, at: new Date() }) } } })).ok()).toBe(true);
+    await page.goto('/#s-k');
+    await expect(page.getByText('Paragraph 59 of a long reply.')).toBeAttached();
+    await page.locator('#reply-k').blur();
     const edges = await page.evaluate(() => {
-      const r = document.querySelector('form.composer:not(.edit)')!.getBoundingClientRect();
+      const r = document.querySelector('#app form.composer.respond')!.getBoundingClientRect();
       const y = r.top + r.height / 2;
       return [r.left + 1, r.right - 1].map((x) => !!document.elementFromPoint(x, y)?.closest('.composer'));
     });
@@ -975,7 +996,30 @@ test.describe('signed in', () => {
     await expect.poll(() => page.evaluate(() => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1)).toBe(true);
     await expect(page.locator('html')).not.toHaveClass(/tuck/);
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height);
-    for (const id of ids) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+    expect((await page.request.patch(message, { headers: admin, data: { fields: { message: before.message } } })).ok()).toBe(true);
+  });
+
+  test("a worker's New task starts on its project, says when another is picked, and back closes each sheet", async () => {
+    await page.goto('/#s-k');
+    await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await expect(compose.getByRole('button', { name: 'Project: knip' })).toBeVisible();
+    await expect(compose.locator('.cnote')).toBeHidden();
+    await compose.getByRole('button', { name: 'Project: knip' }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /hamta/ }).click();
+    await expect(compose.locator('.cnote')).toHaveText('Goes to hamta, not knip.');
+    await page.goBack();
+    await expect(compose).toBeHidden();
+    await expect(page).toHaveURL(/#s-k$/);
+    await expect(page.locator('.detail')).toBeVisible();
+
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const inbox = page.getByRole('dialog', { name: 'knip inbox' });
+    await expect(inbox).toBeVisible();
+    await page.goBack();
+    await expect(inbox).toBeHidden();
+    await expect(page).toHaveURL(/#s-k$/);
+    await expect(page.locator('.detail')).toBeVisible();
   });
 
   test('projects show their logo, or their initial when they have none', async () => {
@@ -984,7 +1028,7 @@ test.describe('signed in', () => {
     await page.goto('/');
     await expect(page.locator('.card', { hasText: 'knip' }).locator('img.face')).toHaveAttribute('src', logo);
     await expect(page.locator('.card', { hasText: 'hamta' }).locator('.face.mono')).toHaveText('H');
-    await page.goto('/#inbox');
+    await page.goto('/#new');
     await expect(page.getByRole('button', { name: /^Project:/ }).locator('.face')).toHaveCount(1);
   });
 

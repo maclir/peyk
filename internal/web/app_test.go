@@ -168,8 +168,8 @@ func TestAndroidShareSheetPostsImagesToTheWorker(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, SharePath, strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	newTestApp().Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/#inbox" {
-		t.Errorf("POST %s without the worker = %d to %q, want 303 to /#inbox", SharePath, rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/#new" {
+		t.Errorf("POST %s without the worker = %d to %q, want 303 to /#new", SharePath, rec.Code, rec.Header().Get("Location"))
 	}
 }
 

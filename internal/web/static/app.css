@@ -15,9 +15,16 @@ body { background: var(--bg); color: var(--ink); }
 html.locked { overflow: hidden; }
 .grow { flex: 1 1 auto; min-width: 0; }
 
-.bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 0 10px; }
-.bar h1 { margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; }
-.bar h1 a { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+/* The left side is the same on every page; the right holds the page's own tools. */
+.bar { display: flex; align-items: center; gap: 12px; padding: 14px 0 10px; }
+.hglobal { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.bar h1 { margin: 0; line-height: 0; }
+/* The padding is the tap target; the negative margin keeps it from growing the header. */
+.bar h1 a { display: flex; align-items: center; padding: 8px; margin: -8px; color: var(--ink); text-decoration: none; }
+.homeback { display: none; width: 22px; height: 22px; margin: 0 0 0 -6px; }
+.bar.sub .homeback { display: block; }
+.hpage { display: flex; align-items: center; gap: 2px; margin: -4px -8px -4px auto; }
+.hpage:empty { display: none; }
 [hidden] { display: none !important; }
 .hstat { display: flex; align-items: center; gap: 14px; }
 .seen { font: 0.75rem var(--mono); color: var(--bad); }
@@ -37,7 +44,7 @@ html.locked { overflow: hidden; }
 .usage[aria-expanded="true"] { background: var(--run-soft); }
 .meter.gh { margin-top: 2px; }
 .meter.gh i { background: var(--accent); }
-.upop { top: 34px; box-sizing: border-box; width: min(280px, calc(100vw - 32px)); padding: 4px; }
+.wmenu .upop { right: auto; left: -4px; top: 34px; box-sizing: border-box; width: min(280px, calc(100vw - 32px)); padding: 4px; }
 .upop a { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
 .upop a:hover, .upop a:focus-visible { background: var(--paper); outline: none; }
 .upop strong { font-weight: 600; }
@@ -82,11 +89,6 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
   .mono.t4 { background: #133432; color: #6fd6cb; } .mono.t5 { background: #3d1e1b; color: #ff8a7f; }
 }
 
-.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 2px 0 4px; background: var(--paper); border-radius: 12px; }
-.tabs a { display: flex; justify-content: center; align-items: center; gap: 6px; height: 36px; border-radius: 9px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
-.tabs a[aria-current="page"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
-.tabs .n { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
-.tabs a[aria-current="page"] .n { color: var(--accent); }
 .group { font: 600 0.7rem var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 14px 2px 2px; }
 .group .fold { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .group .fold .n { font-weight: 500; }
@@ -152,8 +154,6 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .wmenu .pop button .ico svg { width: 16px; height: 16px; }
 .wmenu .pop button.danger { color: var(--bad); }
 .wmenu .pop hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
-.back { width: 36px; height: 40px; margin-left: -10px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); }
-.back .ico svg { width: 22px; height: 22px; }
 button.tool { width: 40px; height: 40px; color: var(--muted); }
 .detail > .curtask { white-space: normal; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .nownext { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
@@ -254,7 +254,7 @@ button.go.holding:not(.busy) .ico.held { display: inline-flex; }
 button.go.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
 
 /* Inbox */
-.inbox { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 0; }
+.inboxbody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
 .filters { display: flex; align-items: center; gap: 6px; }
 .fchip { height: 32px; padding: 0 12px; border-radius: 999px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px; }
 .fchip .n { font-weight: 500; opacity: 0.75; }
@@ -339,12 +339,14 @@ button.link.more, .more.pending { align-self: center; height: 32px; box-sizing: 
 .pname { font-weight: 600; overflow-wrap: anywhere; }
 .pstat { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
 .pstat.ok { color: var(--ok); } .pstat.busy { color: var(--warn); }
-/* A worker's inbox: its project's queued tasks, with a composer that adds to it. */
 .sheethead h2 { display: flex; align-items: center; gap: 8px; }
 .sheet > .alert { padding: 4px 16px 10px; }
-.tlist { flex: 1 1 auto; min-height: 0; padding-top: 4px; padding-bottom: 12px; }
 .sheetfoot { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
 .sheetfoot .composer { position: static; margin: 0; box-shadow: none; background: var(--bg); }
+.compose .sheetfoot { border-top: 0; padding-top: 0; }
+.cnote { margin: 8px 6px 0; font-size: 0.8rem; color: var(--warn); }
+/* The pill is redrawn inside this slot, which must not become the box its width is measured against. */
+.pillslot { display: contents; }
 .badge { font-size: 0.72rem; font-weight: 600; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--paper); white-space: nowrap; }
 
 .fp { display: block; font: 700 1.4rem var(--mono); letter-spacing: 0.08em; margin-top: 8px; color: var(--ink); }
@@ -369,7 +371,7 @@ button.busy .ico { display: none; }
 .composer > .outcome { margin: 0 4px 2px -4px; }
 .pushrow > .outcome { flex-basis: 100%; }
 .hstat { position: relative; }
-.hpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 5; margin: 0; padding: 6px 12px; border-radius: 10px; white-space: nowrap; font-size: 0.82rem; background: var(--card); border: 1px solid var(--line-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+.hpop { position: absolute; left: 0; top: calc(100% + 8px); z-index: 5; margin: 0; padding: 6px 12px; border-radius: 10px; white-space: nowrap; font-size: 0.82rem; background: var(--card); border: 1px solid var(--line-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
 .toast { position: fixed; z-index: 20; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: min(38rem, calc(100% - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))); box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 14px; border-radius: 12px; font-size: 0.88rem; background: var(--card); color: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); }
 .toast[data-tone="bad"] { background: var(--bad-soft); border-color: var(--bad); }
 .when.saving { display: inline-flex; align-items: center; gap: 4px; }
