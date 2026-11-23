@@ -1502,7 +1502,6 @@ async function start(cfg) {
         ),
       );
     }
-    if (state.push === "on") out.push(h("p", { class: "hint loglink" }, h("a", { href: "#log" }, "Notification log")));
     return h("div", { class: "board" }, out);
   }
 
