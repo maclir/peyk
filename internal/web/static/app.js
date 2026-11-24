@@ -166,7 +166,7 @@ async function start(cfg) {
   const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
-    filter: "ready", only: null, lastPicked: null, arranging: false, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
+    filter: "ready", only: null, lastPicked: null, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
     // The task sent from a worker's inbox; the inbox closes once it leaves the queue.
@@ -755,7 +755,9 @@ async function start(cfg) {
 
   // In a project's own sheet the project goes without saying, and a send
   // goes through the sheet so that it can close once the task leaves.
-  function taskCard(t, now, { inProject = false, sendWith = send } = {}) {
+  // order is the shown list and the task's place in it; the arrows move the
+  // task among the tasks on screen, so a filter keeps them meaningful.
+  function taskCard(t, now, { inProject = false, sendWith = send, order = null } = {}) {
     const clears = t.ready && hasConversation(t);
     const open = state.menu === t.id;
     const sent = state.sends.get(t.id);
@@ -769,6 +771,7 @@ async function start(cfg) {
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         h("span", { class: "grow" }),
+        order && order.list.length > 1 ? stepButtons(t, order) : null,
         h("div", { class: "wmenu" },
           h("button", { type: "button", class: "icon", "aria-label": `More actions: ${t.text}`, "aria-haspopup": "menu", "aria-expanded": String(open),
             onclick: () => { state.menu = open ? null : t.id; render(); } }, icon("more")),
@@ -800,14 +803,11 @@ async function start(cfg) {
     );
   }
 
-  function arrangeRow(list, t, i, { inProject = false } = {}) {
-    return h("div", { class: "task arrange" },
-      icon("grip"),
-      inProject ? null : face(projectNamed(t.project), t.project, "sm"),
-      h("span", { class: "ttext one" }, t.text),
-      h("button", { type: "button", class: "icon step", "aria-label": `Move up: ${t.text}`, disabled: i === 0 ? "" : null, onclick: () => move(t, i - 1, list) }, icon("up")),
-      h("button", { type: "button", class: "icon step", "aria-label": `Move down: ${t.text}`, disabled: i === list.length - 1 ? "" : null, onclick: () => move(t, i + 1, list) }, icon("down")),
-    );
+  function stepButtons(t, { list, i }) {
+    return [
+      h("button", { type: "button", class: "icon step", title: "Move up", "aria-label": `Move up: ${t.text}`, disabled: i === 0 ? "" : null, onclick: () => move(t, i - 1, list) }, icon("chevup")),
+      h("button", { type: "button", class: "icon step", title: "Move down", "aria-label": `Move down: ${t.text}`, disabled: i === list.length - 1 ? "" : null, onclick: () => move(t, i + 1, list) }, icon("chevron")),
+    ];
   }
 
   function move(t, to, list) {
@@ -1816,7 +1816,7 @@ async function start(cfg) {
   // worker's page shows the task from then on.
   function openInbox(project) {
     ensureSheets();
-    Object.assign(state, { only: project, filter: project ? "all" : "ready", arranging: false, menu: null, sheetSent: null });
+    Object.assign(state, { only: project, filter: project ? "all" : "ready", menu: null, sheetSent: null });
     inboxSheet.from = project && shownSession() ? project : null;
     inboxSheet.alert.textContent = "";
     inboxSheet.open = true;
@@ -1829,7 +1829,7 @@ async function start(cfg) {
     inboxSheet.open = false;
     inboxSheet.scrim.hidden = true;
     inboxSheet.alert.textContent = "";
-    Object.assign(state, { menu: null, sheetSent: null, arranging: false });
+    Object.assign(state, { menu: null, sheetSent: null });
     if (state.editing && inboxSheet.body.contains(document.getElementById(`edit-${state.editing}`))) {
       dropDraft(`edit:${state.editing}`);
       state.editing = null;
@@ -1860,10 +1860,6 @@ async function start(cfg) {
     sh.panel.setAttribute("aria-label", only ? `${only} inbox` : "Inbox");
     sh.head.replaceChildren(...[
       h("h2", { class: "grow" }, "Inbox"),
-      list.length > 1 || state.arranging
-        ? h("button", { type: "button", class: "link", onclick: () => { state.arranging = !state.arranging; state.menu = null; render(); } },
-          icon("sort"), state.arranging ? "Done" : "Reorder")
-        : null,
       addButton(only, sh.from),
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: () => closeLayer("inbox") }, icon("x")),
     ].filter(Boolean));
@@ -1879,11 +1875,10 @@ async function start(cfg) {
       : null;
     const items = !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
       ? list.map((t, i) => (state.editing === t.id ? editor(t)
-        : state.arranging ? arrangeRow(list, t, i, { inProject })
-          : taskCard(t, now, { inProject, sendWith })))
+        : taskCard(t, now, { inProject, sendWith, order: { list, i } })))
       : h("p", { class: "empty" }, only && !counts.all ? "Nothing queued." : all.length ? "Nothing here for this filter." : "No tasks queued.");
     const sent = sentTasks(state.tasks).filter((t) => !only || t.project === only);
-    const rest = state.filter !== "waiting" && !state.arranging;
+    const rest = state.filter !== "waiting";
     sh.body.replaceChildren(...[
       h("div", { class: "filters" }, chips),
       strip,
@@ -2119,9 +2114,9 @@ const ICONS = {
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
+  chevup: '<path d="M6 15l6-6 6 6"/>',
   clip: '<path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/>',
   tray: '<path d="M4 13l2.5-7h11L20 13v6H4z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',
-  sort: '<path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -2143,7 +2138,6 @@ const ICONS = {
   "ci-failure": '<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
   "ci-cancelled": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>',
   frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
-  grip: '<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
 };
 
 function icon(name) {

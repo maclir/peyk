@@ -804,10 +804,8 @@ test.describe('signed in', () => {
     await expect(texts).toHaveText(['First thing', 'Second thing']);
     await page.getByRole('group', { name: 'Filter by project' }).getByRole('button', { name: 'knip' }).click();
 
-    await page.getByRole('button', { name: 'Reorder' }).click();
+    await expect(page.getByRole('button', { name: 'Move up: First thing' })).toBeDisabled();
     await page.getByRole('button', { name: 'Move up: Waits on hamta' }).click();
-    await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
-    await page.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
     expect((await get(page, 'tasks/wait')).rank).toBeDefined();
 
@@ -836,12 +834,10 @@ test.describe('signed in', () => {
     await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing']);
     await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
 
-    await sheet.getByRole('button', { name: 'Reorder' }).click();
     await sheet.getByRole('button', { name: 'Move down: First thing' }).click();
     await expect(sheet.locator('.ttext')).toHaveText(['Second thing', 'First thing']);
     await sheet.getByRole('button', { name: 'Move up: First thing' }).click();
     await expect(sheet.locator('.ttext')).toHaveText(['First thing', 'Second thing']);
-    await sheet.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(sheet.getByRole('button', { name: 'Send', exact: true })).toHaveCount(2);
 
     // The worker turning busy mid-sentence leaves the same box, text and focus.
