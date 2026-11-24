@@ -178,6 +178,9 @@ type Snapshot struct {
 	// Transcript is where the session's conversation is read from. It is
 	// the laptop's business and is not published.
 	Transcript Transcript `firestore:"-" json:"-"`
+	// AoeHooks is aoe's hook directory for the session, set only when its
+	// Claude Code profile does not run `peyk ping`. It is not published.
+	AoeHooks string `firestore:"-" json:"-"`
 }
 
 // Prototype is a page a session published with Claude Code's Artifact tool.

@@ -190,6 +190,8 @@ func runAgent(ctx context.Context) error {
 	replies := make(chan struct{}, 1)
 	transcripts := agent.NewEditWatcher(replies)
 	defer transcripts.Close()
+	statuses := agent.NewStatusWatcher(pings)
+	defer statuses.Close()
 	usage := make(chan struct{}, 1)
 	usageWatch := agent.NewEditWatcher(usage)
 	defer usageWatch.Close()
@@ -217,8 +219,9 @@ func runAgent(ctx context.Context) error {
 		Power:         power,
 		Edits:         edits,
 		Transcripts:   transcripts, Replies: replies,
-		Notify:  notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
-		Collect: c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
+		Statuses: statuses,
+		Notify:   notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
+		Collect:  c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
 		Usage:        func() (*session.Usage, error) { return laptop.LoadUsage(usagePath()) },
 		UsageChanged: usage,

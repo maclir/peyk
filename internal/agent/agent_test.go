@@ -924,3 +924,17 @@ func TestQuotasReachTheMenuBarWhenFirestoreFails(t *testing.T) {
 		t.Fatalf("told the menu bar %d quotas, want 2", told)
 	}
 }
+
+func TestRefreshFollowsAoeHooksOnlyForSessionsThatHaveThem(t *testing.T) {
+	c := &fakeCollector{}
+	c.set(session.Snapshot{ID: "a", Path: "/a"}, session.Snapshot{ID: "b", Path: "/b", AoeHooks: "/hooks/b"})
+	w := &recordingWatcher{}
+	a := newAgent(c, store.NewMemory())
+	a.Statuses = w
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(w.dirs, ",") != "/hooks/b" {
+		t.Fatalf("watched %v", w.dirs)
+	}
+}

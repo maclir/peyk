@@ -81,6 +81,11 @@ type Agent struct {
 	// when the question is answered at the terminal either.
 	Transcripts Watcher
 	Replies     <-chan struct{}
+	// Statuses, when set, is pointed at aoe's hook directories of sessions
+	// whose Claude Code profile does not run `peyk ping`, and pings a full
+	// refresh when aoe records a new status. A profile's own hook is faster
+	// and is preferred wherever it runs.
+	Statuses Watcher
 	// Debounce coalesces the burst of pings one agent turn produces.
 	Debounce time.Duration
 	// Presence only rewrites seen_at. A laptop that sleeps cannot say so, and
@@ -209,6 +214,17 @@ func (a *Agent) Refresh(ctx context.Context) error {
 			}
 		}
 		if err := a.Transcripts.Set(ctx, dirs); err != nil {
+			return err
+		}
+	}
+	if a.Statuses != nil {
+		var dirs []string
+		for _, s := range snaps {
+			if s.AoeHooks != "" {
+				dirs = append(dirs, s.AoeHooks)
+			}
+		}
+		if err := a.Statuses.Set(ctx, dirs); err != nil {
 			return err
 		}
 	}

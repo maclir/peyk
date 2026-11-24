@@ -20,6 +20,11 @@ type Collector struct {
 	// first. A project's environment can run Claude Code under another
 	// profile than the agent, which keeps that project's transcripts there.
 	ClaudeDirs []string
+	// AoeHooks is where aoe's own Claude Code hook writes each session's
+	// status, one directory per session id. aoe installs that hook in every
+	// profile it starts, so it is the event for a session whose profile does
+	// not run `peyk ping`.
+	AoeHooks string
 	// Root holds project repositories that can get a new session.
 	Root string
 	Now  func() time.Time
@@ -50,6 +55,9 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		Git:        git,
 		Transcript: t,
 		UpdatedAt:  c.Now(),
+	}
+	if c.AoeHooks != "" && t.Dir != "" && !PingsPeyk(profileOf(t.Dir)) {
+		snap.AoeHooks = filepath.Join(c.AoeHooks, s.ID)
 	}
 	c.Transcribe(&snap)
 	return snap
