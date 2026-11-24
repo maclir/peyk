@@ -92,6 +92,17 @@ describe('board', () => {
     expect(got).toEqual(['y', 'z', 'u', 'e', 'b', 'd', 'c', 'a', 'w']);
   });
 
+  it('sorts equal inboxes by the latest prompt, then by title', () => {
+    const got = sortSessions([
+      { title: 'a', state: 'idle' },
+      { title: 'b', state: 'idle', prompt: { at: '2026-11-24T10:00:00Z' } },
+      { title: 'c', state: 'idle', prompt: { at: new Date('2026-11-24T11:00:00Z') } },
+      { title: 'd', state: 'idle', notified: true },
+      { title: 'e', state: 'idle' },
+    ]).map((s: any) => s.title);
+    expect(got).toEqual(['d', 'c', 'b', 'a', 'e']);
+  });
+
   it('sorts by title without inbox counts', () => {
     const got = sortSessions([{ title: 'b', state: 'idle' }, { title: 'a', state: 'idle' }]).map((s: any) => s.title);
     expect(got).toEqual(['a', 'b']);

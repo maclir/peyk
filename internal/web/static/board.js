@@ -12,12 +12,14 @@ export const STATES = {
 const GROUPS = [...new Set(Object.values(STATES).map((st) => st.group))];
 
 // The board orders workers by group, then within a group puts a waiting
-// notification first, then the fullest inbox, then the title.
+// notification first, then the fullest inbox, then the one a person last
+// prompted, then the title.
 export function sortSessions(sessions, inboxCount = () => 0) {
   const counts = new Map(sessions.map((s) => [s, inboxCount(s)]));
   return [...sessions].sort(
     (a, b) => groupRank(a.state) - groupRank(b.state) || Number(Boolean(b.notified)) - Number(Boolean(a.notified))
-      || counts.get(b) - counts.get(a) || String(a.title).localeCompare(String(b.title)),
+      || counts.get(b) - counts.get(a) || time(b.prompt?.at) - time(a.prompt?.at)
+      || String(a.title).localeCompare(String(b.title)),
   );
 }
 
