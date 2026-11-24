@@ -103,8 +103,9 @@ type Agent struct {
 	// Seen sends the sessions a device showed. Each one notified since it was
 	// last seen gets a dismissal, so every device closes its notification,
 	// including devices that never showed the session.
-	Seen     <-chan string
-	notified map[string]bool
+	Seen           <-chan string
+	notified       map[string]bool
+	notifiedLoaded bool
 	// Checkout, when set, is the checkout the agent runs from: it publishes
 	// the checkout's version after every refresh and lets the phone fetch
 	// and update it.
@@ -213,10 +214,8 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	a.attachCI(ctx, snaps)
 	prev := a.sessions
-	sessions := map[string]any{}
 	a.sessions = map[string]session.Snapshot{}
 	for _, s := range snaps {
-		sessions[s.ID] = s
 		a.sessions[s.ID] = s
 	}
 	a.projects = map[string]session.Project{}
@@ -227,7 +226,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		}
 		a.projects[p.Name] = p
 	}
-	if err := a.sync(ctx, store.Sessions, sessions); err != nil {
+	if err := a.publishSessions(ctx); err != nil {
 		return err
 	}
 	if err := a.publishProjects(ctx); err != nil {
@@ -250,7 +249,10 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	if prev == nil {
 		return nil
 	}
-	return a.notify(ctx, notify.Changes(prev, a.sessions))
+	if err := a.notify(ctx, notify.Changes(prev, a.sessions)); err != nil {
+		return err
+	}
+	return a.publishSessions(ctx)
 }
 
 func (a *Agent) notify(ctx context.Context, notes []notify.Note) error {
@@ -269,16 +271,59 @@ func (a *Agent) notify(ctx context.Context, notes []notify.Note) error {
 	return nil
 }
 
-// seen dismisses a session's notifications everywhere. A failure only logs:
-// a notification left open is no reason to stop the agent.
+// seen dismisses a session's notifications everywhere and clears its badge.
+// A failure only logs: a notification left open is no reason to stop the
+// agent.
 func (a *Agent) seen(ctx context.Context, id string) {
 	if !a.notified[id] {
 		return
 	}
 	delete(a.notified, id)
-	if err := a.Notify.Notify(ctx, []notify.Note{notify.Dismissal(id)}); err != nil {
-		a.Log.Printf("dismiss %s: %v", id, err)
+	if a.Notify != nil {
+		if err := a.Notify.Notify(ctx, []notify.Note{notify.Dismissal(id)}); err != nil {
+			a.Log.Printf("dismiss %s: %v", id, err)
+		}
 	}
+	if err := a.publishSessions(ctx); err != nil {
+		a.Log.Printf("clear notified %s: %v", id, err)
+	}
+}
+
+// publishSessions writes the sessions that changed, each marked with whether
+// a notification about it is waiting to be seen.
+func (a *Agent) publishSessions(ctx context.Context) error {
+	if err := a.loadNotified(ctx); err != nil {
+		return err
+	}
+	docs := make(map[string]any, len(a.sessions))
+	for id, s := range a.sessions {
+		s.Notified = a.notified[id]
+		docs[id] = s
+	}
+	return a.sync(ctx, store.Sessions, docs)
+}
+
+// loadNotified recovers, once, the sessions an earlier run notified about,
+// whose notifications may still be open on a device. Without it a restart
+// would drop their badges and never dismiss their notifications.
+func (a *Agent) loadNotified(ctx context.Context) error {
+	if a.notifiedLoaded {
+		return nil
+	}
+	if r, ok := a.Store.(store.NotifiedReader); ok {
+		ids, err := r.NotifiedSessions(ctx)
+		if err != nil {
+			return err
+		}
+		if a.notified == nil {
+			a.notified = map[string]bool{}
+		}
+		for _, id := range ids {
+			a.notified[id] = true
+		}
+	}
+	a.notifiedLoaded = true
+	return nil
 }
 
 // clearedTo is a cleared session's new conversation and the one aoe still
@@ -328,11 +373,7 @@ func (a *Agent) cleared(ctx context.Context, id, transcript string) error {
 	s.Transcript.ID = transcript
 	a.Collect.Transcribe(&s)
 	a.sessions[id] = s
-	docs := make(map[string]any, len(a.sessions))
-	for id, s := range a.sessions {
-		docs[id] = s
-	}
-	if err := a.sync(ctx, store.Sessions, docs); err != nil {
+	if err := a.publishSessions(ctx); err != nil {
 		return err
 	}
 	return a.dropHeld(ctx)
@@ -429,7 +470,6 @@ func (a *Agent) RefreshCI(ctx context.Context) error {
 	asked := map[string]bool{}
 	prev := a.sessions
 	next := make(map[string]session.Snapshot, len(prev))
-	docs := make(map[string]any, len(prev))
 	for id, s := range prev {
 		if key := ciKey(s.Git); key != "" {
 			if run := a.ciRuns[key]; run != nil {
@@ -444,13 +484,15 @@ func (a *Agent) RefreshCI(ctx context.Context) error {
 			}
 		}
 		next[id] = s
-		docs[id] = s
 	}
 	a.sessions = next
-	if err := a.sync(ctx, store.Sessions, docs); err != nil {
+	if err := a.publishSessions(ctx); err != nil {
 		return err
 	}
-	return a.notify(ctx, notify.Changes(prev, next))
+	if err := a.notify(ctx, notify.Changes(prev, next)); err != nil {
+		return err
+	}
+	return a.publishSessions(ctx)
 }
 
 // RefreshReplies rereads the transcripts of working sessions and publishes
@@ -466,15 +508,13 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 			return a.Refresh(ctx)
 		}
 	}
-	docs := make(map[string]any, len(a.sessions))
 	for id, s := range a.sessions {
 		if s.State == session.Working {
 			s.SetExchange(a.Collect.Exchange(s.Transcript))
 			a.sessions[id] = s
 		}
-		docs[id] = s
 	}
-	return a.sync(ctx, store.Sessions, docs)
+	return a.publishSessions(ctx)
 }
 
 // finishTasks marks dispatched tasks done once their session has finished

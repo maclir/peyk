@@ -169,7 +169,11 @@ type Snapshot struct {
 	Prototypes []Prototype `firestore:"prototypes" json:"prototypes,omitempty"`
 	// Question is what the agent is asking with its multiple-choice dialog,
 	// while that dialog is open.
-	Question  *Question `firestore:"question" json:"question,omitempty"`
+	Question *Question `firestore:"question" json:"question,omitempty"`
+	// Notified is true from a notification about the session until a device
+	// shows the session. Swiping the notification away leaves it set: only
+	// opening the worker means it was dealt with.
+	Notified  bool      `firestore:"notified" json:"notified,omitempty"`
 	UpdatedAt time.Time `firestore:"updated_at" json:"updated_at"`
 	// Transcript is where the session's conversation is read from. It is
 	// the laptop's business and is not published.

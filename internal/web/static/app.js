@@ -1482,8 +1482,12 @@ async function start(cfg) {
       }
       const task = currentTask(state.tasks, s.id);
       const at = activity(s);
+      const line = s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
+        : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
+        : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
+        : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null;
       out.push(
-        h("a", { class: "card", href: `#s-${encodeURIComponent(s.id)}` },
+        h("a", { class: s.notified ? "card notified" : "card", href: `#s-${encodeURIComponent(s.id)}` },
           h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "md"), h("span", { class: `sdot ${st.tone}` })),
           h("span", { class: "cbody" },
             // The group heading names the state; only Needs you holds more than one.
@@ -1494,10 +1498,10 @@ async function start(cfg) {
               st.group === "Needs you" ? chip(st) : null,
               at ? h("span", { class: "when" }, ago(at, now)) : null),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
-            s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
-              : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
-              : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
-              : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null,
+            s.notified
+              ? h("span", { class: "mline" }, line || h("span", { class: "msg" }),
+                h("span", { class: "nbell", role: "img", "aria-label": "Notified" }, icon("bell")))
+              : line,
           ),
         ),
       );
@@ -2120,6 +2124,7 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   broom: '<g transform="translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g>',
   clearstop: '<g transform="translate(-0.3 -0.4) scale(.85) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><rect x="15" y="15" width="6.5" height="6.5" rx="1.5"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',

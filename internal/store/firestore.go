@@ -177,6 +177,18 @@ func (s *Firestore) DispatchedTasks(ctx context.Context) (map[string]Task, error
 	return out, nil
 }
 
+func (s *Firestore) NotifiedSessions(ctx context.Context) ([]string, error) {
+	docs, err := s.client.Collection(Sessions).Where("notified", "==", true).Select().Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("list notified sessions: %w", err)
+	}
+	ids := make([]string, len(docs))
+	for i, d := range docs {
+		ids[i] = d.Ref.ID
+	}
+	return ids, nil
+}
+
 func (s *Firestore) HeldReplies(ctx context.Context) (map[string]command.Command, error) {
 	docs, err := s.client.Collection(Commands).Where("status", "==", command.Held).Documents(ctx).GetAll()
 	if err != nil {

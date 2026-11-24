@@ -408,6 +408,66 @@ func TestSeenDismissesANotifiedSessionEverywhereOnce(t *testing.T) {
 	}
 }
 
+func notified(t *testing.T, mem *store.Memory, id string) bool {
+	t.Helper()
+	v, ok := mem.Get(store.Sessions, id)
+	if !ok {
+		t.Fatalf("session %s not published", id)
+	}
+	return v.(session.Snapshot).Notified
+}
+
+func TestASessionIsPublishedNotifiedUntilADeviceShowsIt(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	a := newAgent(c, mem)
+	a.Notify = &recordingNotifier{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Working}, session.Snapshot{ID: "h", Title: "hamta", State: session.Idle})
+	_ = a.Refresh(ctx)
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle}, session.Snapshot{ID: "h", Title: "hamta", State: session.Idle})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !notified(t, mem, "k") || notified(t, mem, "h") {
+		t.Fatalf("notified: k=%v h=%v", notified(t, mem, "k"), notified(t, mem, "h"))
+	}
+	_ = a.Refresh(ctx)
+	if !notified(t, mem, "k") {
+		t.Fatal("a later refresh cleared the badge")
+	}
+	a.seen(ctx, "k")
+	if notified(t, mem, "k") {
+		t.Fatal("still notified after being seen")
+	}
+}
+
+func TestARestartKeepsBadgesAndStillDismisses(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	c := &fakeCollector{}
+	first := newAgent(c, mem)
+	first.Notify = &recordingNotifier{}
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Working})
+	_ = first.Refresh(ctx)
+	c.set(session.Snapshot{ID: "k", Title: "knip", State: session.Idle})
+	_ = first.Refresh(ctx)
+
+	n := &recordingNotifier{}
+	second := newAgent(c, mem)
+	second.Notify = n
+	if err := second.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !notified(t, mem, "k") {
+		t.Fatal("restart dropped the badge")
+	}
+	second.seen(ctx, "k")
+	if notified(t, mem, "k") || strings.Join(n.notes, "|") != "dismiss k" {
+		t.Fatalf("notified=%v notes=%v", notified(t, mem, "k"), n.notes)
+	}
+}
+
 func TestRefreshNotifiesOnTransitionsButNotAtStart(t *testing.T) {
 	ctx := context.Background()
 	c := &fakeCollector{}

@@ -1039,6 +1039,20 @@ test.describe('signed in', () => {
     await expect(link).toHaveAttribute('target', '_blank');
   });
 
+  test('a worker with a notification waiting to be seen is marked with a bell', async () => {
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      message: { text: 'Finished the table', at: new Date() }, notified: true });
+    await page.goto('/');
+    const knip = page.locator('.card', { hasText: 'knip' });
+    await expect(knip).toHaveClass(/notified/);
+    await expect(knip.getByRole('img', { name: 'Notified' })).toBeVisible();
+    await expect(page.locator('.card', { hasText: 'hamta' }).getByRole('img', { name: 'Notified' })).toHaveCount(0);
+    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      message: { text: 'Finished the table', at: new Date() } });
+    await expect(knip.getByRole('img', { name: 'Notified' })).toHaveCount(0);
+    await expect(knip).not.toHaveClass(/notified/);
+  });
+
   test("a worker shows its pushed commit's CI and links to the run", async () => {
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       git: { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0,

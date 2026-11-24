@@ -259,3 +259,28 @@ func TestFirestoreSeen(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFirestoreFindsNotifiedSessions(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("run with make test-integration")
+	}
+	ctx := context.Background()
+	s, err := NewFirestore(ctx, "peyk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, snap := range []session.Snapshot{{ID: "it-notified", Notified: true}, {ID: "it-quiet"}} {
+		if err := s.Put(ctx, Sessions, snap.ID, snap); err != nil {
+			t.Fatal(err)
+		}
+		defer s.Delete(ctx, Sessions, snap.ID)
+	}
+	ids, err := s.NotifiedSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(ids, "it-notified") || contains(ids, "it-quiet") {
+		t.Fatalf("NotifiedSessions = %v", ids)
+	}
+}

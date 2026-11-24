@@ -9,6 +9,7 @@ import (
 
 	"github.com/maclir/peyk/internal/command"
 	"github.com/maclir/peyk/internal/notify"
+	"github.com/maclir/peyk/internal/session"
 )
 
 // Memory is the store for tests and local runs.
@@ -176,6 +177,19 @@ func (m *Memory) Subscriptions(context.Context) ([]notify.Subscription, error) {
 }
 
 // HeldReplies applies Update's status to commands Send stored.
+func (m *Memory) NotifiedSessions(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for id, v := range m.docs[Sessions] {
+		if s, ok := v.(session.Snapshot); ok && s.Notified {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 func (m *Memory) HeldReplies(context.Context) (map[string]command.Command, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

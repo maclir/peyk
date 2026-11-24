@@ -137,6 +137,11 @@ type Listener interface {
 	Seen(ctx context.Context, out chan<- string) error
 }
 
+// NotifiedReader finds the sessions published as notified.
+type NotifiedReader interface {
+	NotifiedSessions(ctx context.Context) ([]string, error)
+}
+
 // HeldReader finds the replies held for the phone to send again or cancel.
 type HeldReader interface {
 	HeldReplies(ctx context.Context) (map[string]command.Command, error)
