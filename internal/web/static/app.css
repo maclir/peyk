@@ -15,6 +15,8 @@
 }
 body { background: var(--bg); color: var(--ink); }
 html.locked { overflow: hidden; }
+a, button { }
+.reply a { -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
 .grow { flex: 1 1 auto; min-width: 0; }
 
 /* The left side is the same on every page; the right holds the page's own tools. */
@@ -264,7 +266,7 @@ button.pill { display: inline-flex; align-items: center; gap: 6px; height: 34px;
 button.pill > span:not(.ico):not(.face) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.pill .ico svg { width: 14px; height: 14px; color: var(--muted); }
 button.round { width: 36px; height: 36px; padding: 0; border-radius: 999px; border: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-button.go { background: var(--ink); color: var(--bg); -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+button.go { background: var(--ink); color: var(--bg); }
 button.go .ico.held, button.go.holding:not(.busy) .ico:not(.held) { display: none; }
 button.go.holding:not(.busy) .ico.held { display: inline-flex; }
 button.go.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
@@ -363,7 +365,7 @@ button.link.more, .more.pending { align-self: center; height: 32px; box-sizing: 
 .cnote { margin: 8px 6px 0; font-size: 0.8rem; color: var(--warn); }
 .pnote { margin: 8px 6px 0; font-size: 0.8rem; color: var(--muted); }
 /* Off, the prototype toggle is a bare icon like the clip beside it; each kind fills it with that kind's tint and names it. */
-button.proto { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 0.8rem; white-space: nowrap; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+button.proto { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 button.proto .ico svg { width: 18px; height: 18px; }
 button.proto[data-kind="html"] { background: var(--accent-soft); color: var(--accent); }
 button.proto[data-kind="design"] { background: var(--design-soft); color: var(--design); }

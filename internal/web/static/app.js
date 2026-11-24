@@ -287,6 +287,12 @@ async function start(cfg) {
     e.preventDefault();
     if (!submit.disabled) form.requestSubmit(submit);
   });
+  // A long press on a control opens the browser's link or text menu, which
+  // covers the board; a link inside a reply keeps it so it can be copied.
+  document.addEventListener("contextmenu", (e) => {
+    const control = e.target.closest?.("a, button, [role=button]");
+    if (control && !control.closest(".reply")) e.preventDefault();
+  });
   document.addEventListener("click", (e) => {
     if (state.menu && !e.target.closest(".wmenu")) { state.menu = null; render(); }
   });

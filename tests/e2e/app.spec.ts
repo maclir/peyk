@@ -189,8 +189,18 @@ test.describe('signed in', () => {
     const knip = page.locator('.card', { hasText: 'knip' });
     await expect(knip.getByLabel('2 unpushed commits')).toHaveText('2');
     await expect(knip.locator('.chip')).toHaveCount(0);
+    const menuBlocked = (el: Element) => !el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(await knip.evaluate(menuBlocked)).toBe(true);
+    expect(await page.locator('.hpage').getByRole('button', { name: 'New task' }).evaluate(menuBlocked)).toBe(true);
 
     await knip.click();
+    // A link in a reply keeps the browser's menu so it can be copied.
+    expect(await page.locator('.reply').first().evaluate((reply) => {
+      const link = reply.appendChild(Object.assign(document.createElement('a'), { href: '/x', textContent: 'x' }));
+      const blocked = !link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      link.remove();
+      return blocked;
+    })).toBe(false);
     await expect(page.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
     await expect(page.locator('.pending li')).toHaveText([/3f2a1c4 Report unused exports/, /9b0e7d2 Scan barrel files/]);
     await expect(page.getByRole('heading', { name: 'Done' })).toBeVisible();
