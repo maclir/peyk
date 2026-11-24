@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -127,19 +127,30 @@ describe('board', () => {
     expect(tags({})).toEqual([]);
     const url = 'https://github.com/o/r/actions/runs/1';
     const all = tags({ git: { branch: 'fix', upstream: '', dirty: 1, unpushed: 3, ci: { workflow: 'CI', state: 'failure', url } },
-      prototypes: [{ url: 'a' }, { url: 'b' }] });
+      prototypes: [{ url: 'a' }, { url: 'b' }, { url: 'c', kind: 'design' }, { url: 'd', kind: 'html' }, { url: 'e', kind: 'design' }] });
     expect(all.map((t) => [t.kind, t.tone, t.text, t.label])).toEqual([
       ['edit', 'warn', '1', '1 uncommitted file'],
       ['push', 'ok', '3', '3 unpushed commits'],
       ['noremote', '', 'no remote branch', 'no remote branch'],
       ['branch', '', 'fix', 'branch fix'],
       ['ci-failure', 'bad', 'CI', 'CI failed'],
-      ['frame', 'acc', '2', '2 prototypes'],
+      ['proto-html', 'html', '', '1 HTML prototype'],
+      ['proto-design', 'design', '2', '2 Design prototypes'],
+      ['proto', '', '2', '2 prototypes'],
     ]);
     expect(all[4].url).toBe(url);
     expect(tags({ git: { ...pushed, upstream: '' } }).map((t) => t.text)).toEqual(['no remote']);
-    expect(tags({ git: pushed, prototypes: [{ url: 'a' }] })).toEqual([{ kind: 'frame', tone: 'acc', text: '', label: 'prototype' }]);
+    expect(tags({ git: pushed, prototypes: [{ url: 'a' }] })).toEqual([{ kind: 'proto', tone: '', text: '', label: 'prototype' }]);
+    expect(tags({ git: pushed, prototypes: [{ url: 'a', kind: 'slides' }] })[0].kind).toBe('proto');
     expect(tags({ git: { ...pushed, ci: { state: 'mystery' } } })[0].kind).toBe('ci-queued');
+  });
+
+  it('steps a task\'s prototype toggle from off through each kind and back', () => {
+    const seen = [];
+    let kind = '';
+    for (let i = 0; i < 4; i++) seen.push(kind = nextPrototype(kind));
+    expect(seen).toEqual(['html', 'design', 'any', '']);
+    expect(nextPrototype(undefined)).toBe('html');
   });
 
   it('formats ages', () => {

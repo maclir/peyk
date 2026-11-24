@@ -106,6 +106,18 @@ describe('tasks', () => {
     await assertFails(addDoc(tasks, task({ rank: 'first' })));
   });
 
+  it('a task asks for a prototype of a known kind, set or changed while queued', async () => {
+    const tasks = collection(owner(), 'tasks');
+    for (const kind of ['html', 'design', 'any']) await assertSucceeds(addDoc(tasks, task({ prototype: kind })));
+    await assertFails(addDoc(tasks, task({ prototype: 'pdf' })));
+    await assertFails(addDoc(tasks, task({ prototype_url: 'https://claude.ai/artifact/x' })));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { prototype: 'design' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { prototype: deleteField() }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { prototype: 'slides' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { prototype: 'html' }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/finished'), { prototype_url: 'https://claude.ai/artifact/x' }));
+  });
+
   it('a task carries the phone\'s order', async () => {
     await assertSucceeds(addDoc(collection(owner(), 'tasks'), task({ rank: 1763100000000 })));
   });

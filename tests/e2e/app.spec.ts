@@ -608,6 +608,48 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/tasks/${payload.task}`, { headers: admin });
   });
 
+  test('a task asks for a prototype, which its send signs and its done row opens', async () => {
+    await page.goto('/#new');
+    await passkeyOn(page);
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    const toggle = compose.getByRole('button', { name: /^Prototype:/ });
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    for (const name of ['HTML page', 'Design canvas', 'Claude picks the type', 'off', 'HTML page', 'Design canvas']) {
+      await toggle.click();
+      await expect(toggle).toHaveAccessibleName(`Prototype: ${name}`);
+    }
+    await expect(compose.getByRole('status').filter({ hasText: 'Design canvas' })).toBeVisible();
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await page.locator('#task-text').fill('Try card layouts');
+    await compose.getByRole('button', { name: 'Add task' }).click();
+    const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Try card layouts');
+    await expect.poll(async () => (await stored())?.fields.prototype?.stringValue).toBe('design');
+
+    await page.goto('/#new');
+    await expect(page.getByRole('dialog', { name: 'New task' }).getByRole('button', { name: /^Prototype:/ })).toHaveAccessibleName('Prototype: off');
+    await page.goto('/#inbox');
+    const card = page.locator('.task', { hasText: 'Try card layouts' });
+    await expect(card.getByLabel('Prototype: Design canvas')).toHaveText('Design');
+    await card.getByRole('button', { name: /^(Clear and send|Send)$/ }).click();
+    await expect.poll(async () => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')).toBeTruthy();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Try card layouts', prototype: 'design' });
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+
+    // Deleting the queued task makes the inbox read its done tasks again.
+    await put(page, 'tasks/proto-done', { project: 'knip', text: 'Sketch the board', status: 'done', prototype: 'html', prototype_url: 'https://claude.ai/artifact/xyz',
+      created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 90_000), done_at: new Date(Date.now() - 60_000) });
+    await page.request.delete(`${FIRESTORE}/${(await stored())!.name.split('/documents/')[1]}`, { headers: admin });
+    const fold = page.getByRole('button', { name: 'Done', exact: true });
+    if (await fold.getAttribute('aria-expanded') !== 'true') await fold.click();
+    const row = page.locator('.task.done', { hasText: 'Sketch the board' });
+    await expect(row.getByLabel('Prototype: HTML page')).toBeVisible();
+    await row.getByRole('button', { name: /Sketch the board/ }).first().click();
+    await expect(row.getByRole('link', { name: 'Open prototype' })).toHaveAttribute('href', 'https://claude.ai/artifact/xyz');
+    await page.request.delete(`${FIRESTORE}/tasks/proto-done`, { headers: admin });
+  });
+
   test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
     await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
     await page.goto('/#inbox');

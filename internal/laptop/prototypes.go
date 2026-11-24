@@ -81,6 +81,10 @@ func (s *scanned) scan(path string) {
 	s.offset += int64(end + 1)
 }
 
+// designType is the Design Artifact type. A publish result names the type
+// its artifact was made from; a plain HTML page names none.
+const designType = "https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd"
+
 // publishedPrototype reads an Artifact publish result. Reads and listings of
 // artifacts carry no version, so only a publish yields a prototype.
 func publishedPrototype(line []byte) (session.Prototype, bool) {
@@ -99,11 +103,21 @@ func publishedPrototype(line []byte) (session.Prototype, bool) {
 		Title      string `json:"title"`
 		ArtifactID string `json:"artifact_id"`
 		Version    string `json:"version"`
+		Type       *struct {
+			URL string `json:"url"`
+		} `json:"type"`
 	}
 	if json.Unmarshal(e.Result, &r) != nil || r.ArtifactID == "" || r.Version == "" || !strings.HasPrefix(r.URL, "https://claude.ai/") {
 		return session.Prototype{}, false
 	}
-	return session.Prototype{URL: r.URL, Title: r.Title, At: e.Timestamp}, true
+	kind := session.PrototypeHTML
+	if r.Type != nil {
+		kind = session.PrototypeOther
+		if r.Type.URL == designType {
+			kind = session.PrototypeDesign
+		}
+	}
+	return session.Prototype{URL: r.URL, Title: r.Title, Kind: kind, At: e.Timestamp}, true
 }
 
 func newestPrototypes(found map[string]session.Prototype) []session.Prototype {

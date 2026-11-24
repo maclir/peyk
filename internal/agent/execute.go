@@ -89,8 +89,11 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if !proj.Free {
 			return fmt.Errorf("%s is not free: %s", proj.Name, proj.Busy)
 		}
-		text, err := a.attach(ctx, p.Text, p.Images)
+		text, err := prototypeText(p.Text, p.Prototype)
 		if err != nil {
+			return err
+		}
+		if text, err = a.attach(ctx, text, p.Images); err != nil {
 			return err
 		}
 		id := proj.SessionID

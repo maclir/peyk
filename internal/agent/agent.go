@@ -541,6 +541,9 @@ func (a *Agent) finishTasks(ctx context.Context) error {
 		if commit != "" {
 			fields["commit"] = commit
 		}
+		if url := publishedSince(s.Prototypes, t.DispatchedAt); url != "" {
+			fields["prototype_url"] = url
+		}
 		if t.ConversationID == "" && s.Transcript.ID != "" {
 			fields["conversation_id"] = s.Transcript.ID
 		}

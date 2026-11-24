@@ -74,3 +74,29 @@ func TestPrototypesFindsPublishedPagesNewestFirst(t *testing.T) {
 		t.Fatalf("without its own transcript a session has no prototypes: %+v", got)
 	}
 }
+
+func TestPrototypesTellPagesFromDesignsAndOtherTypes(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		published("2026-11-14T08:00:00Z", "https://claude.ai/artifact/H", "Page", "1"),
+		`{"type":"user","timestamp":"2026-11-14T08:01:00Z","toolUseResult":{"url":"https://claude.ai/artifact/D","artifact_id":"d","title":"Canvas","version":"1","type":{"url":"https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd","release":"r"}}}`,
+		`{"type":"user","timestamp":"2026-11-14T08:02:00Z","toolUseResult":{"url":"https://claude.ai/artifact/S","artifact_id":"s","title":"Deck","version":"1","type":{"url":"https://claude.ai/artifact/8jTsAFQMFDb2oA8MsPJ2eL"}}}`,
+	}
+	data := ""
+	for _, l := range lines {
+		data += l + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, p := range (&Prototypes{}).Find(session.Transcript{Dir: dir, ID: "s"}) {
+		kinds[p.Title] = p.Kind
+	}
+	want := map[string]string{"Page": session.PrototypeHTML, "Canvas": session.PrototypeDesign, "Deck": session.PrototypeOther}
+	for title, kind := range want {
+		if kinds[title] != kind {
+			t.Errorf("%s: kind %q, want %q", title, kinds[title], kind)
+		}
+	}
+}

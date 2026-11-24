@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -165,7 +165,7 @@ async function start(cfg) {
 
   const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
-    outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), images: new Map(),
+    outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
@@ -708,6 +708,7 @@ async function start(cfg) {
           onclick: () => { open ? state.openRows.delete(t.id) : state.openRows.add(t.id); render(); } },
           inProject ? null : face(projectNamed(t.project), t.project, "xs"),
           h("span", { class: "rtext" }, inProject ? null : [h("b", {}, t.project), " "], t.text),
+          t.prototype ? prototypeTag(t.prototype) : null,
           h("span", { class: "rstat" }, stat)),
         action),
       h("div", { class: "rmore", hidden: open ? null : "" },
@@ -740,7 +741,7 @@ async function start(cfg) {
       render();
     };
     state.menu = null;
-    sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}) },
+    sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}), ...(t.prototype ? { prototype: t.prototype } : {}) },
       clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, `send:${t.id}`, report, null, { done: "Sent" });
   }
 
@@ -770,6 +771,7 @@ async function start(cfg) {
       h("div", { class: "thead" },
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
+        t.prototype ? prototypeTag(t.prototype) : null,
         h("span", { class: "grow" }),
         order && order.list.length > 1 ? stepButtons(t, order) : null,
         h("div", { class: "wmenu" },
@@ -822,7 +824,7 @@ async function start(cfg) {
   // busy state and its draft images.
   // hold, when given, answers a long press on the submit button while
   // hold.armed() is true; otherwise the press submits as a tap would.
-  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tail = null }) {
+  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tools = null, tail = null }) {
     const imgs = draft(key);
     const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
@@ -832,6 +834,7 @@ async function start(cfg) {
       h("div", { class: "crow" },
         lead,
         h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: imgs.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
+        tools,
         h("span", { class: "grow" }),
         tail,
         busyButton(key, { type: "submit", class: "round go", "aria-label": submitLabel, ...(hold ? longPress(() => hold.armed(text), () => hold.fire(text)) : {}) },
@@ -887,6 +890,35 @@ async function start(cfg) {
     };
   }
 
+  // One button steps a composer's task through an ordinary task and each
+  // kind of prototype; a long press turns it back to ordinary. It redraws
+  // only itself and its note, so the textarea keeps its focus and caret.
+  function prototypeToggle(key, note) {
+    const button = h("button", { type: "button", class: "proto", ...longPress(() => Boolean(state.protos.get(key)), () => set("")) });
+    const paint = () => {
+      const kind = state.protos.get(key) ?? "";
+      const k = PROTOTYPE_KINDS[kind];
+      button.dataset.kind = kind || "off";
+      button.setAttribute("aria-pressed", String(Boolean(kind)));
+      button.setAttribute("aria-label", kind ? `Prototype: ${PROTOTYPE_NOTES[kind].label}` : "Prototype: off");
+      button.title = kind ? `${PROTOTYPE_NOTES[kind].label}. Tap for the next kind; hold to turn off.` : "Ask for a prototype";
+      button.replaceChildren(icon(k ? k.icon : "proto"), k ? h("span", {}, k.name) : null);
+      if (note) {
+        note.textContent = kind ? PROTOTYPE_NOTES[kind].note : "";
+        note.hidden = !kind;
+      }
+    };
+    const set = (kind) => {
+      kind ? state.protos.set(key, kind) : state.protos.delete(key);
+      paint();
+    };
+    // The long press's own click handler runs first and swallows the click
+    // that ends a hold.
+    button.addEventListener("click", (e) => e.defaultPrevented || set(nextPrototype(state.protos.get(key))));
+    paint();
+    return button;
+  }
+
   function projectPill(name, task = null) {
     return h("button", { type: "button", class: "pill", "aria-label": `Project: ${name ?? "none"}`, "aria-haspopup": "dialog", disabled: name ? null : "",
       onclick: () => {
@@ -913,19 +945,24 @@ async function start(cfg) {
       const project = state.picked;
       if (!value || !project) return;
       const attaching = draft(key);
+      const kind = state.protos.get(key) ?? "";
       const from = compose.from;
       text.value = "";
       state.drafts.delete(key);
+      state.protos.delete(key);
+      compose.proto.replaceWith(compose.proto = prototypeToggle(key, compose.pnote));
       state.lastPicked = project;
       const shown = inboxSheet.open;
       if (shown && state.only && state.only !== project) state.only = project;
       close();
-      addTask(project, value, attaching).then((t) => {
+      addTask(project, value, attaching, kind).then((t) => {
         forgetImages(attaching);
         if (andSend) send(t, hasConversation(t), { announce: !inboxSheet.open });
       }, (err) => {
         if (!compose.text.value) compose.text.value = value;
         if (!draft(key).length) state.drafts.set(key, attaching);
+        if (kind && !state.protos.has(key)) state.protos.set(key, kind);
+        compose.proto.replaceWith(compose.proto = prototypeToggle(key, compose.pnote));
         openCompose(project, from);
         alertLine(`Could not add the task: ${err.message}`);
       });
@@ -938,17 +975,19 @@ async function start(cfg) {
       fire: (text) => add(text, true),
     };
     const lead = h("span", { class: "pillslot" });
+    const pnote = h("p", { class: "pnote", role: "status", hidden: "" });
+    const proto = prototypeToggle(key, pnote);
     const form = composerForm({ key, id: "task-text", label: "Task description", placeholder: "Describe a task…",
-      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead });
+      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead, tools: proto });
     const note = h("p", { class: "cnote", role: "status", hidden: "" });
     const alert = h("p", { class: "alert", role: "status" });
     const head = h("div", { class: "sheethead" }, h("h2", {}, "New task"),
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: close }, icon("x")));
     const panel = h("section", { class: "sheet compose", role: "dialog", "aria-modal": "true", "aria-label": "New task", onkeydown: (e) => e.key === "Escape" && close() },
-      sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, note));
+      sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, pnote, note));
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
     document.body.append(scrim);
-    return { scrim, form, lead, note, alert, text: form.querySelector("textarea"), open: false, from: null };
+    return { scrim, form, lead, note, pnote, proto, alert, text: form.querySelector("textarea"), open: false, from: null };
   }
 
   // from names the worker's project when the sheet opens on a worker's page,
@@ -1209,7 +1248,11 @@ async function start(cfg) {
         type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
         onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, "Resume", `resume:${t.id}`, resumed, null, { done: null }),
       }, icon(r.clear ? "clearresume" : "resume")) : null,
-      detail: h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
+      detail: [
+        h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
+        t.prototype_url ? h("a", { class: "plink", href: t.prototype_url, target: "_blank", rel: "noopener noreferrer" },
+          icon(PROTOTYPE_KINDS[t.prototype]?.icon ?? "proto"), "Open prototype") : null,
+      ],
     });
   }
 
@@ -1219,12 +1262,13 @@ async function start(cfg) {
     if (state.filter === "ready" && !projectNamed(project)?.free) state.filter = "all";
   }
 
-  async function addTask(project, text, images) {
+  async function addTask(project, text, images, prototype = "") {
     reveal(project);
     const batch = fs.writeBatch(db);
     const ids = await storeImages(batch, images);
     const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: topRank(state.tasks, Date.now()) };
     if (ids.length) task.images = ids;
+    if (prototype) task.prototype = prototype;
     const ref = fs.doc(fs.collection(db, "tasks"));
     batch.set(ref, task);
     await batch.commit();
@@ -1232,10 +1276,10 @@ async function start(cfg) {
   }
 
   // Images an edit drops go with it, unless another task shares one.
-  async function saveTask(t, text, project, images) {
+  async function saveTask(t, text, project, images, prototype) {
     const batch = fs.writeBatch(db);
     const ids = await storeImages(batch, images);
-    batch.update(fs.doc(db, "tasks", t.id), { text, project, images: ids.length ? ids : fs.deleteField() });
+    batch.update(fs.doc(db, "tasks", t.id), { text, project, images: ids.length ? ids : fs.deleteField(), prototype: prototype || fs.deleteField() });
     const dropped = (t.images || []).filter((id) => !ids.includes(id));
     for (const id of orphanedImages(state.tasks, [{ id: t.id, images: dropped }])) batch.delete(fs.doc(db, "attachments", id));
     await batch.commit();
@@ -1358,6 +1402,7 @@ async function start(cfg) {
     state.menu = null;
     dropDraft(`edit:${t.id}`);
     state.drafts.set(`edit:${t.id}`, (t.images || []).map((id) => ({ id })));
+    t.prototype ? state.protos.set(`edit:${t.id}`, t.prototype) : state.protos.delete(`edit:${t.id}`);
     render();
   }
 
@@ -1367,6 +1412,7 @@ async function start(cfg) {
     const chosen = state.editProject ?? t.project;
     const close = () => {
       dropDraft(key);
+      state.protos.delete(key);
       state.editing = null;
       state.editProject = undefined;
       render();
@@ -1375,7 +1421,7 @@ async function start(cfg) {
       const value = text.value.trim();
       if (!value) return;
       try {
-        await track(key, () => saveTask(t, value, chosen, draft(key)));
+        await track(key, () => saveTask(t, value, chosen, draft(key), state.protos.get(key) ?? ""));
         reveal(chosen);
         close();
       } catch (err) {
@@ -1383,7 +1429,7 @@ async function start(cfg) {
       }
     };
     const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
-      submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null,
+      submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null, tools: prototypeToggle(key, null),
       tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
     form.querySelector("textarea").value = t.text;
     return form;
@@ -2081,10 +2127,23 @@ async function start(cfg) {
   }
 }
 
+const PROTOTYPE_NOTES = {
+  html: { label: "HTML page", note: "The worker publishes an HTML page and leaves the repository unchanged." },
+  design: { label: "Design canvas", note: "The worker publishes a Design canvas and leaves the repository unchanged." },
+  any: { label: "Claude picks the type", note: "The worker publishes an HTML page or a Design canvas, whichever fits, and leaves the repository unchanged." },
+};
+
+function prototypeTag(kind) {
+  const k = PROTOTYPE_KINDS[kind];
+  if (!k) return null;
+  const label = `Prototype: ${PROTOTYPE_NOTES[kind].label}`;
+  return h("span", { class: `tag ${k.icon} ${k.tone}`, title: label, "aria-label": label }, icon(k.icon), k.name);
+}
+
 function prototypes(list, now) {
   return h("ul", { class: "protos" },
     list.map((p) => h("li", {},
-      h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, icon("frame"), h("span", { class: "grow" }, p.title || p.url)),
+      h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", class: `k-${prototypeKind(p.kind)}` }, icon(PROTOTYPE_KINDS[prototypeKind(p.kind)].icon), h("span", { class: "grow" }, p.title || p.url)),
       h("span", { class: "when" }, ago(p.at, now)),
     )),
   );
@@ -2148,7 +2207,11 @@ const ICONS = {
   "ci-success": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>',
   "ci-failure": '<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
   "ci-cancelled": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>',
-  frame: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/>',
+  // A published page is a browser window; its kind is drawn inside.
+  proto: '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/></g>',
+  "proto-html": '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M9.5 11.5l-2.5 2.75 2.5 2.75M14.5 11.5l2.5 2.75-2.5 2.75"/></g>',
+  "proto-design": '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><circle cx="9.25" cy="14.25" r="2"/><path d="M13.25 16.25l2.25-4 2.25 4z"/></g>',
+  "proto-any": '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M12 11.25c.36 1.74.9 2.28 3 3c-2.1.72-2.64 1.26-3 3c-.36-1.74-.9-2.28-3-3c2.1-.72 2.64-1.26 3-3z"/></g>',
 };
 
 function icon(name) {

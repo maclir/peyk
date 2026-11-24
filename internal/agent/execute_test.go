@@ -146,6 +146,9 @@ func TestExecuteCommands(t *testing.T) {
 		{"dispatch to a session already cleared", command.Payload{Type: command.Dispatch, Project: "fresh", Task: "t1", Text: "x", Clear: true}, "send f: x", ""},
 		{"a new session needs no clearing", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login", Clear: true}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
 		{"dispatch to a repository without a session", command.Payload{Type: command.Dispatch, Project: "sakku", Task: "t1", Text: "Fix login"}, "create sakku in /c/sakku|send new-sakku: Fix login", ""},
+		{"dispatch a prototype", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Try layouts", Prototype: session.PrototypeDesign},
+			"send k: Try layouts\n\nDeliver this as a prototype, not a code change: build it on a canvas made from the Design Artifact type and publish it with the Artifact tool. Read the repository as needed, but do not edit, test or commit it.", ""},
+		{"dispatch an unknown kind of prototype", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x", Prototype: "pdf"}, "", `no prototype kind "pdf"`},
 		{"dispatch to a busy session", command.Payload{Type: command.Dispatch, Project: "hamta", Task: "t1", Text: "x"}, "", "hamta is not free: working"},
 		{"dispatch to a session with only unpushed commits", command.Payload{Type: command.Dispatch, Project: "zynk", Task: "t1", Text: "x"}, "send z: x", ""},
 		{"dispatch to a session with uncommitted changes", command.Payload{Type: command.Dispatch, Project: "dorna", Task: "t1", Text: "x"}, "", "dorna is not free: uncommitted changes"},
@@ -357,6 +360,37 @@ func TestDispatchedTaskIsMarkedDoneWhenItsSessionFinishes(t *testing.T) {
 	got := mem.Updated(store.Tasks, "t1")
 	if got["status"] != store.TaskDone || got["commit"] != "3f2a1c4" {
 		t.Fatalf("task = %v", got)
+	}
+}
+
+func TestFinishedTaskLinksThePageItsSessionPublished(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	_ = mem.Put(ctx, store.Tasks, "t1", store.Task{Project: "knip", Text: "Try layouts", Status: store.TaskQueued, Prototype: session.PrototypeAny})
+	sent := a.Now()
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Try layouts", Prototype: session.PrototypeAny}, sent)); err != nil {
+		t.Fatal(err)
+	}
+	later := sent.Add(time.Hour)
+	a.Collect.(*fakeCollector).set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, Message: &session.Message{At: later},
+		Prototypes: []session.Prototype{{URL: "https://claude.ai/artifact/new", Kind: session.PrototypeDesign, At: later}, {URL: "https://claude.ai/artifact/old", At: sent.Add(-time.Hour)}}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1"); got["status"] != store.TaskDone || got["prototype_url"] != "https://claude.ai/artifact/new" {
+		t.Fatalf("task = %v", got)
+	}
+}
+
+func TestPublishedSinceIgnoresPagesFromBeforeTheTask(t *testing.T) {
+	sent := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	old := []session.Prototype{{URL: "https://claude.ai/artifact/old", At: sent.Add(-time.Minute)}}
+	if got := publishedSince(old, sent); got != "" {
+		t.Fatalf("got %q", got)
+	}
+	if got := publishedSince(nil, sent); got != "" {
+		t.Fatalf("got %q", got)
 	}
 }
 

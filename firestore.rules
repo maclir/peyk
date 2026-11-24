@@ -63,6 +63,11 @@ service cloud.firestore {
       return !('rank' in data) || data.rank is number;
     }
 
+    // The kind of page a task asks for instead of a code change.
+    function validPrototype(data) {
+      return !('prototype' in data) || data.prototype in ['html', 'design', 'any'];
+    }
+
     // A task's images are created in the same batch as the task, so they
     // are checked as they will be after it.
     function imageExists(images, i) {
@@ -80,19 +85,21 @@ service cloud.firestore {
     match /tasks/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
-        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank'])
+        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank', 'prototype'])
         && validTarget(request.resource.data)
         && visibleTarget(request.resource.data)
         && validRank(request.resource.data)
+        && validPrototype(request.resource.data)
         && validImages(request.resource.data)
         && request.resource.data.created_at == request.time
         && request.resource.data.status == 'queued';
       allow update: if isOwner()
         && resource.data.status == 'queued'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images', 'prototype'])
         && validTarget(request.resource.data)
         && (request.resource.data.project == resource.data.project || visibleTarget(request.resource.data))
         && validRank(request.resource.data)
+        && validPrototype(request.resource.data)
         && validImages(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
     }

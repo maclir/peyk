@@ -131,9 +131,35 @@ export function tags(s) {
     const ci = ciStatus(g);
     if (ci) out.push({ kind: `ci-${ci.state}`, tone: ci.tone, text: "CI", label: ci.long, url: ci.url });
   }
-  const n = s.prototypes?.length ?? 0;
-  if (n) out.push({ kind: "frame", tone: "acc", text: n > 1 ? String(n) : "", label: n > 1 ? `${n} prototypes` : "prototype" });
+  for (const kind of ["html", "design", "other"]) {
+    const n = (s.prototypes ?? []).filter((p) => prototypeKind(p.kind) === kind).length;
+    if (!n) continue;
+    const k = PROTOTYPE_KINDS[kind];
+    const noun = `${k.name ? `${k.name} ` : ""}prototype${n === 1 ? "" : "s"}`;
+    out.push({ kind: k.icon, tone: k.tone, text: n > 1 ? String(n) : "", label: k.name || n > 1 ? `${n} ${noun}` : noun });
+  }
   return out;
+}
+
+// A published page's kind, and a task's choice of one, share an icon and a
+// tone everywhere they appear. A page from before kinds were read counts as
+// other.
+export const PROTOTYPE_KINDS = {
+  html: { icon: "proto-html", tone: "html", name: "HTML" },
+  design: { icon: "proto-design", tone: "design", name: "Design" },
+  any: { icon: "proto-any", tone: "any", name: "Any" },
+  other: { icon: "proto", tone: "", name: "" },
+};
+
+export function prototypeKind(kind) {
+  return PROTOTYPE_KINDS[kind] && kind !== "any" ? kind : "other";
+}
+
+// The order a task's prototype toggle steps through; "" is an ordinary task.
+const PROTOTYPE_STEPS = ["", "html", "design", "any"];
+
+export function nextPrototype(kind) {
+  return PROTOTYPE_STEPS[(PROTOTYPE_STEPS.indexOf(kind ?? "") + 1) % PROTOTYPE_STEPS.length];
 }
 
 function count(n, noun) {

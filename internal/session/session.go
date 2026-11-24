@@ -184,8 +184,19 @@ type Snapshot struct {
 type Prototype struct {
 	URL   string    `firestore:"url" json:"url"`
 	Title string    `firestore:"title" json:"title"`
+	Kind  string    `firestore:"kind" json:"kind"`
 	At    time.Time `firestore:"at" json:"at"`
 }
+
+// A published page is a plain HTML page, a Design canvas, or another
+// Artifact type. A task asks for HTML, Design, or Any, which leaves the
+// choice between the two to the worker.
+const (
+	PrototypeHTML   = "html"
+	PrototypeDesign = "design"
+	PrototypeOther  = "other"
+	PrototypeAny    = "any"
+)
 
 // Question is one open AskUserQuestion dialog. ID is the tool call's id, so
 // an answer can name the dialog it was given for.

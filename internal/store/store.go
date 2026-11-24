@@ -104,6 +104,12 @@ type Task struct {
 	Images []string `firestore:"images,omitempty" json:"images,omitempty"`
 	// Rank is the phone's order for queued tasks.
 	Rank float64 `firestore:"rank,omitempty" json:"rank,omitempty"`
+	// Prototype is the kind of page the task asks for instead of a code
+	// change, or empty for an ordinary task.
+	Prototype string `firestore:"prototype,omitempty" json:"prototype,omitempty"`
+	// PrototypeURL is the newest page the session published while working
+	// on the task.
+	PrototypeURL string `firestore:"prototype_url,omitempty" json:"prototype_url,omitempty"`
 }
 
 const (
