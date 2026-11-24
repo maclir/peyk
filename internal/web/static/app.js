@@ -2040,6 +2040,8 @@ async function start(cfg) {
   }
 
   function replyBox(s) {
+    const p = projectOf(s);
+    if (s.cleared && p?.free && p.session_id === s.id) return taskBox(s, p);
     const key = `reply:${s.id}`;
     const label = `Reply to ${s.title}`;
     const reply = async (text) => {
@@ -2077,6 +2079,35 @@ async function start(cfg) {
       }
     };
     const form = composerForm({ key, id: `reply-${s.id}`, label: "Reply", placeholder: `Reply to ${s.title}…`, rows: "1", cls: "respond", submitLabel: "Send reply", submitIcon: "prompt", send: reply });
+    const o = outcomeLine(key);
+    if (o) form.prepend(o);
+    return form;
+  }
+
+  // A free worker with no conversation has nothing to reply to, so what is
+  // written there becomes a task that is sent at once, as a long press on
+  // Add task would, and is recorded in the inbox like any other task.
+  function taskBox(s, p) {
+    const key = `reply:${s.id}`;
+    const add = (text) => {
+      const value = text.value.trim();
+      if (!value || state.busy.has(key)) return;
+      const attaching = draft(key);
+      text.value = "";
+      state.drafts.delete(key);
+      render();
+      addTask(p.name, value, attaching).then((t) => {
+        forgetImages(attaching);
+        send(t, hasConversation(t), { announce: true });
+      }, (err) => {
+        const box = document.getElementById(`reply-${s.id}`);
+        if (box && !box.value) box.value = value;
+        if (!draft(key).length) state.drafts.set(key, attaching);
+        setOutcome(key, `Not added: ${err.message}`, false, "bad");
+      });
+    };
+    const form = composerForm({ key, id: `reply-${s.id}`, label: `Task for ${s.title}`, placeholder: `New task for ${s.title}…`, rows: "1", cls: "respond",
+      submitLabel: "Add to inbox and send", submitIcon: "prompt", send: add });
     const o = outcomeLine(key);
     if (o) form.prepend(o);
     return form;

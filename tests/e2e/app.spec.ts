@@ -58,6 +58,13 @@ async function signIn(page: Page) {
   await popup.waitForEvent('close');
 }
 
+// A cleared worker takes a task where a reply would go, so the reply tests
+// give it a conversation and hand it back cleared, as the tests after expect.
+async function setCleared(page: Page, cleared: boolean) {
+  const res = await page.request.patch(`${FIRESTORE}/sessions/k?updateMask.fieldPaths=cleared`, { headers: admin, data: { fields: { cleared: encode(cleared) } } });
+  expect(res.ok()).toBe(true);
+}
+
 async function makeOwner(page: Page) {
   const lookup = await page.request.post(`${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`, {
     headers: admin, data: { email: [EMAIL] },
@@ -608,6 +615,29 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/tasks/${payload.task}`, { headers: admin });
   });
 
+  test('a worker with no conversation takes a task where a reply would go', async () => {
+    await setCleared(page, true);
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    const box = page.locator('form.composer.respond');
+    await expect(box.getByRole('button', { name: 'Send reply' })).toHaveCount(0);
+    await box.getByLabel('Task for knip').fill('Start on the CSV flag');
+    await box.getByRole('button', { name: 'Add to inbox and send' }).click();
+    await expect(box.getByLabel('Task for knip')).toHaveValue('');
+    const dispatch = async () => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch');
+    await expect.poll(dispatch).toBeTruthy();
+    const cmd = (await dispatch())!;
+    const payload = JSON.parse(cmd.fields.payload.stringValue);
+    expect(payload).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Start on the CSV flag', clear: false });
+    expect((await get(page, `tasks/${payload.task}`)).project.stringValue).toBe('knip');
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/tasks/${payload.task}`, { headers: admin });
+
+    await setCleared(page, false);
+    await expect(box.getByRole('button', { name: 'Send reply' })).toBeVisible();
+    await setCleared(page, true);
+  });
+
   test('a task asks for a prototype, which its send signs and its done row opens', async () => {
     await page.goto('/#new');
     await passkeyOn(page);
@@ -750,6 +780,7 @@ test.describe('signed in', () => {
 
   test('a reply carries a screenshot to its worker', async () => {
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+    await setCleared(page, false);
     await page.goto('/#s-k');
     await passkeyOn(page);
     const reply = page.locator('form.composer.respond');
@@ -780,10 +811,12 @@ test.describe('signed in', () => {
     const restored = await page.request.patch(promptOnly, { headers: admin, data: { fields: { prompt: before.prompt } } });
     expect(restored.ok()).toBe(true);
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await setCleared(page, true);
   });
 
   test('a reply written while the laptop is away waits for it', async () => {
     await put(page, 'laptop/status', { online: false, seen_at: new Date(Date.now() - 3600_000) });
+    await setCleared(page, false);
     const bound = await page.request.patch(`${FIRESTORE}/sessions/k?updateMask.fieldPaths=conversation&updateMask.fieldPaths=latest`, {
       headers: admin, data: { fields: { conversation: encode('conv'), latest: encode('m1') } },
     });
@@ -824,6 +857,7 @@ test.describe('signed in', () => {
 
     for (const c of mine) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+    await setCleared(page, true);
   });
 
   test('the inbox filters by state and project, and keeps the order you set', async () => {
