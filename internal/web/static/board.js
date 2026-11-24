@@ -9,12 +9,15 @@ export const STATES = {
   working: { label: "working", tone: "run", group: "Working" },
   stopped: { label: "stopped", tone: "idle", group: "Stopped" },
 };
-const ORDER = Object.keys(STATES);
+const GROUPS = [...new Set(Object.values(STATES).map((st) => st.group))];
 
-// Mirrors session.Compare: state, then most recent activity, then title.
-export function sortSessions(sessions) {
+// The board orders workers by group, then within a group puts a waiting
+// notification first, then the fullest inbox, then the title.
+export function sortSessions(sessions, inboxCount = () => 0) {
+  const counts = new Map(sessions.map((s) => [s, inboxCount(s)]));
   return [...sessions].sort(
-    (a, b) => rank(a.state) - rank(b.state) || activity(b) - activity(a) || String(a.title).localeCompare(String(b.title)),
+    (a, b) => groupRank(a.state) - groupRank(b.state) || Number(Boolean(b.notified)) - Number(Boolean(a.notified))
+      || counts.get(b) - counts.get(a) || String(a.title).localeCompare(String(b.title)),
   );
 }
 
@@ -28,9 +31,9 @@ function time(v) {
   return d && !isNaN(d) ? d.getTime() : 0;
 }
 
-function rank(state) {
-  const i = ORDER.indexOf(state);
-  return i === -1 ? ORDER.length : i;
+function groupRank(state) {
+  const i = GROUPS.indexOf(STATES[state]?.group);
+  return i === -1 ? GROUPS.length : i;
 }
 
 // The laptop is offline when the agent said so on exit, or when it has not

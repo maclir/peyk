@@ -1053,6 +1053,18 @@ test.describe('signed in', () => {
     await expect(knip).not.toHaveClass(/notified/);
   });
 
+  test("a worker counts its project's queued tasks", async () => {
+    await put(page, 'tasks/q1', { project: 'knip', text: 'Count queued', status: 'queued', created_at: new Date() });
+    await put(page, 'tasks/q2', { project: 'knip', text: 'Count queued again', status: 'queued', created_at: new Date() });
+    await page.goto('/');
+    await expect(page.locator('.card', { hasText: 'knip' }).getByRole('img', { name: 'Inbox, 2 queued' })).toHaveText('2');
+    await expect(page.locator('.card', { hasText: 'hamta' }).locator('.qcount')).toHaveCount(0);
+    for (const id of ['q1', 'q2']) {
+      await put(page, `tasks/${id}`, { project: 'knip', text: 'Count queued', status: 'done', created_at: new Date(), done_at: new Date() });
+    }
+    await expect(page.locator('.card', { hasText: 'knip' }).locator('.qcount')).toHaveCount(0);
+  });
+
   test("a worker shows its pushed commit's CI and links to the run", async () => {
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       git: { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0,

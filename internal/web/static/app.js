@@ -1466,7 +1466,11 @@ async function start(cfg) {
 
   function board() {
     const now = Date.now();
-    const list = sortSessions([...state.sessions.keys()].map(shownWorker));
+    const inboxCount = (s) => {
+      const p = projectOf(s);
+      return p ? queuedFor(p.name).length : 0;
+    };
+    const list = sortSessions([...state.sessions.keys()].map(shownWorker), inboxCount);
     const pushRow = state.push === "off"
       ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), busyButton("notify", { type: "button", onclick: () => track("notify", turnOnPush) }, "Turn on notifications"), outcomeLine("notify"))
       : null;
@@ -1482,6 +1486,7 @@ async function start(cfg) {
       }
       const task = currentTask(state.tasks, s.id);
       const at = activity(s);
+      const queued = inboxCount(s);
       const line = s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
         : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
         : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
@@ -1496,6 +1501,7 @@ async function start(cfg) {
               h("span", { class: "tags" }, tagList(s, false), waitingLabel(s.id)),
               h("span", { class: "grow" }),
               st.group === "Needs you" ? chip(st) : null,
+              queued ? h("span", { class: "qcount", role: "img", "aria-label": `Inbox, ${queued} queued` }, icon("tray"), String(queued)) : null,
               at ? h("span", { class: "when" }, ago(at, now)) : null),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
             s.notified

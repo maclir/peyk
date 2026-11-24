@@ -76,28 +76,25 @@ describe('board', () => {
     for (const state of ['working', 'needs_input', 'error', 'dirty']) expect(quickAction(w('idle', state), false)).toBeNull();
   });
 
-  it('sorts by what needs attention, then by title when nothing has happened', () => {
+  it('sorts by group, then by a waiting notification, then by inbox size, then by title', () => {
+    const inbox: Record<string, number> = { c: 1, d: 3, e: 2 };
     const got = sortSessions([
-      { title: 'b', state: 'idle' },
       { title: 'w', state: 'working' },
-      { title: 'z', state: 'needs_input' },
-      { title: 'a', state: 'unpushed' },
       { title: 'a', state: 'idle' },
-    ]).map((s: any) => `${s.state}:${s.title}`);
-    expect(got).toEqual(['needs_input:z', 'unpushed:a', 'idle:a', 'idle:b', 'working:w']);
+      { title: 'b', state: 'idle', notified: true },
+      { title: 'c', state: 'idle' },
+      { title: 'd', state: 'idle' },
+      { title: 'e', state: 'idle', notified: true },
+      { title: 'z', state: 'dirty' },
+      { title: 'y', state: 'needs_input' },
+      { title: 'u', state: 'unpushed' },
+    ], (s: any) => inbox[s.title] ?? 0).map((s: any) => s.title);
+    expect(got).toEqual(['y', 'z', 'u', 'e', 'b', 'd', 'c', 'a', 'w']);
   });
 
-  it('sorts within a state by most recent activity, and unpushed work by its newest commit', () => {
-    const got = sortSessions([
-      { title: 'a', state: 'needs_input', message: { at: '2026-11-17T12:01:00Z' } },
-      { title: 'b', state: 'needs_input', message: { at: '2026-11-17T12:01:00Z' }, prompt: { at: '2026-11-17T12:05:00Z' } },
-      { title: 'c', state: 'error', message: { at: '2026-11-17T12:09:00Z' } },
-      { title: 'd', state: 'unpushed', message: { at: '2026-11-17T12:09:00Z' }, git: { last: { at: '2026-11-17T12:01:00Z' } } },
-      { title: 'e', state: 'unpushed', git: { last: { at: '2026-11-17T12:02:00Z' } } },
-      { title: 'f', state: 'idle' },
-      { title: 'g', state: 'idle', message: { at: new Date('2026-11-17T12:03:00Z') } },
-    ]).map((s: any) => s.title);
-    expect(got).toEqual(['b', 'a', 'c', 'e', 'd', 'g', 'f']);
+  it('sorts by title without inbox counts', () => {
+    const got = sortSessions([{ title: 'b', state: 'idle' }, { title: 'a', state: 'idle' }]).map((s: any) => s.title);
+    expect(got).toEqual(['a', 'b']);
   });
 
   it('treats a laptop not seen for longer than the heartbeat explains as offline', () => {
