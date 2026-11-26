@@ -363,7 +363,7 @@ button.link.more, .more.pending { align-self: center; height: 32px; box-sizing: 
 .sheetfoot .composer { position: static; margin: 0; box-shadow: none; background: var(--bg); }
 .compose .sheetfoot { border-top: 0; padding-top: 0; }
 .cnote { margin: 8px 6px 0; font-size: 0.8rem; color: var(--warn); }
-.pnote { margin: 8px 6px 0; font-size: 0.8rem; color: var(--muted); }
+.pnote { margin: 0 4px; font-size: 0.8rem; color: var(--muted); }
 /* Off, the prototype toggle is a bare icon like the clip beside it; each kind fills it with that kind's tint and names it. */
 button.proto { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 button.proto .ico svg { width: 18px; height: 18px; }

@@ -940,60 +940,78 @@ async function start(cfg) {
     return sortProjects(state.projects.filter((p) => !p.hidden));
   }
 
+  // The New task sheet and a cleared worker's box are one composer, so a
+  // change to how a task is written reaches both. sends makes a tap add the
+  // task and send it, for a box whose worker is known to be free; otherwise
+  // a tap only adds it and a long press also sends it when the worker is free.
+  // A failed add puts the text, images and prototype kind back.
+  function taskComposer({ key, id, cls, project, sends = false, lead = null, added, failed }) {
+    const pnote = h("p", { class: "pnote", role: "status", hidden: "" });
+    const c = { pnote, proto: prototypeToggle(key, pnote) };
+    const repaint = () => c.proto.replaceWith(c.proto = prototypeToggle(key, pnote));
+    const add = (text, andSend) => {
+      const value = text.value.trim();
+      const name = project();
+      if (!value || !name || state.busy.has(key)) return;
+      const attaching = draft(key);
+      const kind = state.protos.get(key) ?? "";
+      text.value = "";
+      state.drafts.delete(key);
+      state.protos.delete(key);
+      repaint();
+      const ctx = added(name);
+      addTask(name, value, attaching, kind).then((t) => {
+        forgetImages(attaching);
+        if (andSend) send(t, hasConversation(t), { announce: !inboxSheet?.open });
+      }, (err) => {
+        const box = document.getElementById(id);
+        if (box && !box.value) box.value = value;
+        if (!draft(key).length) state.drafts.set(key, attaching);
+        if (kind && !state.protos.has(key)) state.protos.set(key, kind);
+        repaint();
+        failed(err, name, ctx);
+      });
+    };
+    const hold = sends ? null : {
+      armed: (text) => Boolean(text.value.trim() && projectNamed(project())?.free),
+      fire: (text) => add(text, true),
+    };
+    const submit = sends ? { submitLabel: "Add to inbox and send", submitIcon: "prompt" } : { submitLabel: "Add task", submitIcon: "addtask" };
+    c.form = composerForm({ key, id, label: "Task description", placeholder: "Describe a task…", cls, ...submit,
+      send: (text) => add(text, sends), hold, lead, tools: c.proto });
+    c.form.append(pnote);
+    return c;
+  }
+
   // The New task sheet takes the project it is opened with, or the one the
   // last task went to. It closes as the task is accepted; a failed add opens
   // it again with the text and images restored.
   function buildCompose() {
-    const key = "add";
     const close = () => closeLayer("compose");
-    const add = (text, andSend = false) => {
-      const value = text.value.trim();
-      const project = state.picked;
-      if (!value || !project) return;
-      const attaching = draft(key);
-      const kind = state.protos.get(key) ?? "";
-      const from = compose.from;
-      text.value = "";
-      state.drafts.delete(key);
-      state.protos.delete(key);
-      compose.proto.replaceWith(compose.proto = prototypeToggle(key, compose.pnote));
-      state.lastPicked = project;
-      const shown = inboxSheet.open;
-      if (shown && state.only && state.only !== project) state.only = project;
-      close();
-      addTask(project, value, attaching, kind).then((t) => {
-        forgetImages(attaching);
-        if (andSend) send(t, hasConversation(t), { announce: !inboxSheet.open });
-      }, (err) => {
-        if (!compose.text.value) compose.text.value = value;
-        if (!draft(key).length) state.drafts.set(key, attaching);
-        if (kind && !state.protos.has(key)) state.protos.set(key, kind);
-        compose.proto.replaceWith(compose.proto = prototypeToggle(key, compose.pnote));
+    const lead = h("span", { class: "pillslot" });
+    const { form } = taskComposer({ key: "add", id: "task-text", cls: "add", project: () => state.picked, lead,
+      added: (project) => {
+        const from = compose.from;
+        const shown = inboxSheet.open;
+        state.lastPicked = project;
+        if (shown && state.only && state.only !== project) state.only = project;
+        close();
+        if (!shown) toast(`Added to ${project}`, "ok");
+        return from;
+      },
+      failed: (err, project, from) => {
         openCompose(project, from);
         alertLine(`Could not add the task: ${err.message}`);
-      });
-      if (!shown) toast(`Added to ${project}`, "ok");
-    };
-    // A long press sends the task straight away, as its Send button would,
-    // when the project's worker is free to take it.
-    const hold = {
-      armed: (text) => Boolean(text.value.trim() && projectNamed(state.picked)?.free),
-      fire: (text) => add(text, true),
-    };
-    const lead = h("span", { class: "pillslot" });
-    const pnote = h("p", { class: "pnote", role: "status", hidden: "" });
-    const proto = prototypeToggle(key, pnote);
-    const form = composerForm({ key, id: "task-text", label: "Task description", placeholder: "Describe a task…",
-      cls: "add", submitLabel: "Add task", submitIcon: "addtask", send: add, hold, lead, tools: proto });
+      } });
     const note = h("p", { class: "cnote", role: "status", hidden: "" });
     const alert = h("p", { class: "alert", role: "status" });
     const head = h("div", { class: "sheethead" }, h("h2", {}, "New task"),
       h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: close }, icon("x")));
     const panel = h("section", { class: "sheet compose", role: "dialog", "aria-modal": "true", "aria-label": "New task", onkeydown: (e) => e.key === "Escape" && close() },
-      sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, pnote, note));
+      sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, note));
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
     document.body.append(scrim);
-    return { scrim, form, lead, note, pnote, proto, alert, text: form.querySelector("textarea"), open: false, from: null };
+    return { scrim, form, lead, note, alert, text: form.querySelector("textarea"), open: false, from: null };
   }
 
   // from names the worker's project when the sheet opens on a worker's page,
@@ -2091,29 +2109,13 @@ async function start(cfg) {
   }
 
   // A free worker with no conversation has nothing to reply to, so what is
-  // written there becomes a task that is sent at once, as a long press on
-  // Add task would, and is recorded in the inbox like any other task.
+  // written there becomes a task that is sent at once and recorded in the
+  // inbox like any other task.
   function taskBox(s, p) {
     const key = `reply:${s.id}`;
-    const add = (text) => {
-      const value = text.value.trim();
-      if (!value || state.busy.has(key)) return;
-      const attaching = draft(key);
-      text.value = "";
-      state.drafts.delete(key);
-      render();
-      addTask(p.name, value, attaching).then((t) => {
-        forgetImages(attaching);
-        send(t, hasConversation(t), { announce: true });
-      }, (err) => {
-        const box = document.getElementById(`reply-${s.id}`);
-        if (box && !box.value) box.value = value;
-        if (!draft(key).length) state.drafts.set(key, attaching);
-        setOutcome(key, `Not added: ${err.message}`, false, "bad");
-      });
-    };
-    const form = composerForm({ key, id: `reply-${s.id}`, label: `Task for ${s.title}`, placeholder: `New task for ${s.title}…`, rows: "1", cls: "respond",
-      submitLabel: "Add to inbox and send", submitIcon: "prompt", send: add });
+    const { form } = taskComposer({ key, id: `reply-${s.id}`, cls: "respond", project: () => p.name, sends: true,
+      added: () => render(),
+      failed: (err) => setOutcome(key, `Not added: ${err.message}`, false, "bad") });
     const o = outcomeLine(key);
     if (o) form.prepend(o);
     return form;
