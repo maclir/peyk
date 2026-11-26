@@ -1568,17 +1568,17 @@ async function start(cfg) {
             // The group heading names the state; only Needs you holds more than one.
             h("span", { class: "top" },
               h("span", { class: "name" }, s.title),
-              h("span", { class: "tags" }, tagList(s, false), waitingLabel(s.id)),
-              h("span", { class: "grow" }),
               st.group === "Needs you" ? chip(st) : null,
-              queued ? h("span", { class: "qcount", role: "img", "aria-label": `Inbox, ${queued} queued` }, icon("tray"), String(queued)) : null,
-              at ? h("span", { class: "when" }, ago(at, now)) : null),
+              h("span", { class: "tags" }, tagList(s, false), waitingLabel(s.id))),
             task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
-            s.notified
-              ? h("span", { class: "mline" }, line || h("span", { class: "msg" }),
-                h("span", { class: "nbell", role: "img", "aria-label": "Notified" }, icon("bell")))
-              : line,
+            line,
           ),
+          // Age and inbox sit on separate lines so a count never reads as part of the age.
+          h("span", { class: "cmeta" },
+            h("span", { class: "cage" },
+              s.notified ? h("span", { class: "nbell", role: "img", "aria-label": "Notified" }, icon("bell")) : null,
+              at ? h("span", { class: "when" }, ago(at, now)) : null),
+            queued ? h("span", { class: "qcount", role: "img", "aria-label": `Inbox, ${queued} queued` }, icon("tray"), String(queued)) : null),
         ),
       );
     }

@@ -118,10 +118,13 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .card .top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .card .name { font-weight: 700; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .top .tags { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
-.card .top .chip, .card .top .when, .card .top .qcount { flex: none; }
-.qcount { display: inline-flex; align-items: center; gap: 2px; font: 600 0.72rem var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+.card .top .chip { flex: none; }
+.cmeta { flex: none; align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 6px; padding-block: 1px; }
+.cage { display: flex; align-items: center; gap: 4px; }
+.qcount { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 600 0.72rem var(--mono); font-variant-numeric: tabular-nums; }
+.card.notified .qcount { background: var(--card); }
 .qcount svg { width: 13px; height: 13px; display: block; }
-.card .when { font: 0.72rem var(--mono); color: var(--muted); white-space: nowrap; }
+.card .when { font: 0.72rem var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card .msg { font-size: 0.84rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* One tag shape on the card and the page; colour comes from what the fact means. */
 .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -145,8 +148,6 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 /* A notification about the worker is waiting to be seen on some device. */
 .card.notified { border-color: var(--accent); background: var(--accent-soft); }
 .card.notified .sdot { box-shadow: 0 0 0 2px var(--accent-soft); }
-.card .mline { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.card .mline .msg { flex: 1 1 auto; min-width: 0; }
 .nbell { flex: none; display: inline-flex; color: var(--accent); }
 .nbell svg { width: 14px; height: 14px; display: block; }
 .facewrap.stopped .face { opacity: 0.55; }
