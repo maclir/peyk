@@ -47,9 +47,19 @@ func WatchPower() (<-chan PowerEvent, error) {
 		}()
 		if <-registered != 0 {
 			power.err = errors.New("register for system power notifications")
+			return
+		}
+		if Asleep() {
+			go awaitFullWake(power.sleeps.Load())
 		}
 	})
 	return power.events, power.err
+}
+
+// Asleep reports a dark wake: the Mac runs with its lid closed.
+func Asleep() bool {
+	c := C.peyk_power_capabilities()
+	return c >= 0 && c&graphicsCapability == 0
 }
 
 //export peykPower

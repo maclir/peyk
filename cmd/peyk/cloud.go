@@ -217,6 +217,7 @@ func runAgent(ctx context.Context) error {
 		LaptopWritten: health.laptopWritten,
 		Checkout:      own,
 		Power:         power,
+		Asleep:        agent.Asleep,
 		Edits:         edits,
 		Transcripts:   transcripts, Replies: replies,
 		Statuses: statuses,

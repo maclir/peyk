@@ -244,6 +244,30 @@ func TestRunGoesOfflineForSleepAndStaysOfflineUntilAFullWake(t *testing.T) {
 	waitFor(t, func() bool { return mem.Laptop().Online })
 }
 
+func TestRunStartedInADarkWakeStaysOfflineUntilAFullWake(t *testing.T) {
+	mem := store.NewMemory()
+	if err := mem.SetLaptop(context.Background(), store.Laptop{Online: true}); err != nil {
+		t.Fatal(err)
+	}
+	a := newAgent(&fakeCollector{}, mem)
+	a.Presence = 5 * time.Millisecond
+	a.Asleep = func() bool { return true }
+	power := make(chan PowerEvent)
+	a.Power = power
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, nil, nil)
+
+	waitFor(t, func() bool { return !mem.Laptop().Online })
+	time.Sleep(30 * time.Millisecond)
+	if mem.Laptop().Online {
+		t.Fatal("an agent started in a dark wake marked the laptop online")
+	}
+
+	power <- PowerEvent{}
+	waitFor(t, func() bool { return mem.Laptop().Online })
+}
+
 type unreachableLaptop struct {
 	*store.Memory
 	err error

@@ -96,7 +96,10 @@ type Agent struct {
 	// Power, when set, reports sleep and wake, so the phone shows a closed
 	// lid at once rather than after a missed presence.
 	Power <-chan PowerEvent
-	Log   *log.Logger
+	// Asleep, when set, reports a dark wake at start. launchd restarts a
+	// failed agent during one, and Power reports only the full wake after it.
+	Asleep func() bool
+	Log    *log.Logger
 
 	// Commands, when set, lets the phone make the laptop act.
 	Commands *Commands
@@ -834,7 +837,8 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	if err := a.Refresh(ctx); err != nil {
 		return err
 	}
-	if err := a.setLaptop(ctx, true); err != nil {
+	asleep := a.Asleep != nil && a.Asleep()
+	if err := a.setLaptop(ctx, !asleep); err != nil {
 		return err
 	}
 	if err := a.PublishUsage(ctx); err != nil {
@@ -846,7 +850,6 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 	presence := time.NewTicker(a.Presence)
 	defer presence.Stop()
 	var debounce, replies, ci, wake <-chan time.Time
-	asleep := false
 	for {
 		if ci == nil && a.ciPending() {
 			ci = time.After(a.CIPoll)
