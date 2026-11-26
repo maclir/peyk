@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, onDefaultBranch, waitingReplies } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -463,5 +463,37 @@ describe('queued replies', () => {
     expect(mergeReply(queued, 'second', ['a', 'b'], 4)).toEqual({ text: 'first\n\nsecond', images: ['a', 'b'] });
     expect(mergeReply({ text: '', images: ['a'] }, 'only', [], 4)).toEqual({ text: 'only', images: ['a'] });
     expect(mergeReply(queued, 'x', ['b', 'c', 'd', 'e'], 4)).toBeNull();
+  });
+});
+
+describe('ideas', () => {
+  it('an ideation task without a focus looks at the whole repository', () => {
+    expect(ideateText('  ')).toBe('Look across the whole repository.');
+    expect(ideateText(' the worker page ')).toBe('the worker page');
+  });
+
+  it('lenses turn on in the offered order and the last one stays on', () => {
+    const ask = { lenses: ['experience'], max: 5 };
+    expect(toggleLens(ask, 'reuse').lenses).toEqual(['reuse', 'experience']);
+    expect(toggleLens(ask, 'experience')).toBe(ask);
+    expect(toggleLens({ lenses: ['reuse', 'experience'], max: 3 }, 'reuse')).toEqual({ lenses: ['experience'], max: 3 });
+  });
+
+  it('names a lens, or shows an id it does not know', () => {
+    expect(lensName('experience')).toBe('One experience');
+    expect(lensName('vibes')).toBe('vibes');
+    expect(LENSES.length).toBe(11);
+  });
+
+  it('lists open ideas newest first, for one project or all', () => {
+    const ideas = [
+      { id: 'a', project: 'knip', status: 'open', created_at: new Date(2026, 10, 26, 9) },
+      { id: 'b', project: 'knip', status: 'open', created_at: new Date(2026, 10, 26, 10) },
+      { id: 'c', project: 'zynk', status: 'open', created_at: new Date(2026, 10, 26, 8) },
+      { id: 'd', project: 'knip', status: 'dismissed', created_at: new Date(2026, 10, 26, 11) },
+    ];
+    expect(openIdeas(ideas, 'knip').map((i) => i.id)).toEqual(['b', 'a']);
+    expect(openIdeas(ideas, null).map((i) => i.id)).toEqual(['b', 'a', 'c']);
+    expect(ideaCount(ideas, 'zynk')).toBe(1);
   });
 });

@@ -693,6 +693,112 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/tasks/proto-done`, { headers: admin });
   });
 
+  test('a task asks for ideas through lenses, and its send signs them', async () => {
+    await page.goto('/#new');
+    await passkeyOn(page);
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    const ideate = compose.getByRole('button', { name: /^Ideate:/ });
+    const proto = compose.getByRole('button', { name: /^Prototype:/ });
+    await ideate.click();
+    await expect(ideate).toHaveAccessibleName('Ideate: on');
+    const lenses = compose.getByRole('group', { name: 'Lenses' });
+    await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'One experience']);
+    await lenses.getByRole('button', { name: 'Security' }).click();
+    await lenses.getByRole('button', { name: 'One experience' }).click();
+    await compose.getByRole('group', { name: 'At most' }).getByRole('button', { name: '10' }).click();
+    await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'Security']);
+    await expect(page.locator('#task-text')).toHaveAttribute('placeholder', /^Focus/);
+
+    // A task asks for a prototype or for ideas; turning one on turns the other off.
+    await proto.click();
+    await expect(ideate).toHaveAccessibleName('Ideate: off');
+    await expect(lenses).toHaveCount(0);
+    await ideate.click();
+    await expect(proto).toHaveAccessibleName('Prototype: off');
+    await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'Security']);
+
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await compose.getByRole('button', { name: 'Add task' }).click();
+    await expect(compose).toBeHidden();
+    const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.ideate);
+    await expect.poll(stored).toBeTruthy();
+    const task = (await stored())!;
+    expect(task.fields.text.stringValue).toBe('Look across the whole repository.');
+    expect(task.fields.ideate.mapValue.fields.lenses.arrayValue.values.map((v: any) => v.stringValue)).toEqual(['reuse', 'security']);
+    expect(task.fields.ideate.mapValue.fields.max.integerValue).toBe('10');
+
+    await page.goto('/#inbox');
+    const card = page.locator('.task', { hasText: 'Look across the whole repository.' });
+    await expect(card.getByLabel('Ideas: Reuse, Security')).toHaveText('Ideas');
+    await card.getByRole('button', { name: /^(Clear and send|Send)$/ }).click();
+    await expect.poll(async () => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')).toBeTruthy();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', ideate: { lenses: ['reuse', 'security'], max: 10 } });
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/${task.name.split('/documents/')[1]}`, { headers: admin });
+  });
+
+  test("a project's ideas wait in its inbox to be added, sent or dismissed", async () => {
+    const idea = (title: string, lens: string, prompt: string, m: number) => ({
+      project: 'knip', task: 'run', lens, title, why: `Why ${title}`, refs: ['app.js:88'], prompt, status: 'open', created_at: new Date(Date.now() - m * 60_000),
+    });
+    await put(page, 'ideas/run-1', idea('Three confirm patterns', 'experience', 'Unify the confirmations', 3));
+    await put(page, 'ideas/run-2', idea('Two date formatters', 'reuse', 'Merge the formatters', 2));
+    await put(page, 'ideas/run-3', idea('Pair link expiry', 'security', 'Expire the pair link', 1));
+    await put(page, 'ideas/gone', { ...idea('Old idea', 'reuse', 'x', 9), status: 'dismissed' });
+    await page.goto('/');
+    await expect(page.locator('a.card', { hasText: 'knip' }).getByRole('img', { name: '3 open ideas' })).toBeVisible();
+
+    await page.goto('/#s-k');
+    await passkeyOn(page);
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'knip inbox' });
+    await expect(sheet.getByRole('heading', { name: 'Ideas 3' })).toBeVisible();
+    await expect(sheet.locator('.task.idea .ititle')).toHaveText(['Pair link expiry', 'Two date formatters', 'Three confirm patterns']);
+    const formatters = sheet.locator('.task.idea', { hasText: 'Two date formatters' });
+    await expect(formatters).toContainText('Reuse');
+    await expect(formatters).toContainText('Why Two date formatters');
+    await expect(formatters.locator('code')).toHaveText('app.js:88');
+
+    await formatters.getByRole('button', { name: 'Add task' }).click();
+    await expect(formatters).toHaveCount(0);
+    await expect.poll(async () => (await get(page, 'ideas/run-2')).status.stringValue).toBe('added');
+    const added = (await get(page, 'ideas/run-2')).added_task.stringValue;
+    expect((await get(page, `tasks/${added}`)).text.stringValue).toBe('Merge the formatters');
+    await expect(sheet.locator('.task:not(.idea) .ttext')).toContainText(['Merge the formatters']);
+
+    // A long press adds the idea and sends it when the worker is free.
+    const expiry = sheet.locator('.task.idea', { hasText: 'Pair link expiry' });
+    const go = expiry.getByRole('button', { name: 'Add task' });
+    await go.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(700);
+    await page.mouse.up();
+    await expect.poll(async () => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')).toBeTruthy();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Expire the pair link' });
+    expect((await get(page, 'ideas/run-3')).status.stringValue).toBe('added');
+
+    const confirms = sheet.locator('.task.idea', { hasText: 'Three confirm patterns' });
+    await confirms.getByRole('button', { name: 'More actions: Three confirm patterns' }).click();
+    await confirms.getByRole('menuitem', { name: 'Dismiss' }).click();
+    await confirms.getByLabel('Why dismiss it (optional)').fill('confirm() is fine for unpair');
+    await confirms.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(confirms).toHaveCount(0);
+    const gone = await get(page, 'ideas/run-1');
+    expect(gone.status.stringValue).toBe('dismissed');
+    expect(gone.note.stringValue).toBe('confirm() is fine for unpair');
+    await expect(sheet.getByRole('heading', { name: /^Ideas/ })).toHaveCount(0);
+    await page.goto('/');
+    await expect(page.locator('a.card', { hasText: 'knip' }).getByRole('img', { name: /open idea/ })).toHaveCount(0);
+
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    for (const t of await list(page, 'tasks')) {
+      if (['Merge the formatters', 'Expire the pair link'].includes(t.fields.text.stringValue)) await page.request.delete(`${FIRESTORE}/${t.name.split('/documents/')[1]}`, { headers: admin });
+    }
+  });
+
   test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
     await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
     await page.goto('/#inbox');

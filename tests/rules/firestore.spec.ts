@@ -118,6 +118,22 @@ describe('tasks', () => {
     await assertFails(updateDoc(doc(owner(), 'tasks/finished'), { prototype_url: 'https://claude.ai/artifact/x' }));
   });
 
+  it('a task asks for ideas through known lenses and a known limit, not with a prototype', async () => {
+    const tasks = collection(owner(), 'tasks');
+    await assertSucceeds(addDoc(tasks, task({ ideate: { lenses: ['reuse', 'experience'], max: 5 } })));
+    await assertSucceeds(addDoc(tasks, task({ ideate: { lenses: ['invariants'], max: 10 } })));
+    await assertFails(addDoc(tasks, task({ ideate: { lenses: [], max: 5 } })));
+    await assertFails(addDoc(tasks, task({ ideate: { lenses: ['vibes'], max: 5 } })));
+    await assertFails(addDoc(tasks, task({ ideate: { lenses: ['reuse'], max: 7 } })));
+    await assertFails(addDoc(tasks, task({ ideate: { lenses: ['reuse'], max: 5, scope: 'all' } })));
+    await assertFails(addDoc(tasks, task({ ideate: { lenses: ['reuse'], max: 5 }, prototype: 'html' })));
+    await assertFails(addDoc(tasks, task({ ideas: 3 })));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { ideate: { lenses: ['security'], max: 3 } }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { prototype: 'html' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { ideate: deleteField() }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { ideate: { lenses: ['reuse'], max: 3 } }));
+  });
+
   it('a task carries the phone\'s order', async () => {
     await assertSucceeds(addDoc(collection(owner(), 'tasks'), task({ rank: 1763100000000 })));
   });
@@ -163,6 +179,56 @@ describe('tasks', () => {
 
   it('the owner cannot write projects', async () => {
     await assertFails(setDoc(doc(owner(), 'projects/new'), { name: 'new' }));
+  });
+});
+
+describe('ideas', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const idea = { project: 'knip', task: 'run', lens: 'reuse', title: 'Two formatters', why: 'w', refs: [], prompt: 'Merge them', created_at: Timestamp.now() };
+      await setDoc(doc(db, 'ideas/open'), { ...idea, status: 'open' });
+      await setDoc(doc(db, 'ideas/gone'), { ...idea, status: 'dismissed', note: 'fine' });
+      await setDoc(doc(db, 'ideas/taken'), { ...idea, status: 'added', added_task: 'queued' });
+    });
+  });
+
+  it('the owner reads ideas; nobody else does', async () => {
+    await assertSucceeds(getDocs(collection(owner(), 'ideas')));
+    await assertFails(getDocs(collection(stranger(), 'ideas')));
+    await assertFails(getDoc(doc(anonymous(), 'ideas/open')));
+  });
+
+  it('only the laptop files ideas, and nobody deletes them', async () => {
+    await assertFails(setDoc(doc(owner(), 'ideas/new'), { project: 'knip', title: 'x', status: 'open' }));
+    await assertFails(deleteDoc(doc(owner(), 'ideas/open')));
+    await assertFails(deleteDoc(doc(owner(), 'ideas/gone')));
+  });
+
+  it('the owner dismisses an open idea, with a short note or none, and takes it back', async () => {
+    await assertFails(updateDoc(doc(owner(), 'ideas/open'), { status: 'dismissed', note: 'x'.repeat(501) }));
+    await assertFails(updateDoc(doc(owner(), 'ideas/open'), { status: 'dismissed', title: 'rewritten' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'ideas/open'), { status: 'dismissed', note: 'confirm() is fine' }));
+    await assertFails(updateDoc(doc(owner(), 'ideas/open'), { status: 'open' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'ideas/open'), { status: 'open', note: deleteField() }));
+    await assertSucceeds(updateDoc(doc(owner(), 'ideas/open'), { status: 'dismissed' }));
+    await assertFails(updateDoc(doc(stranger(), 'ideas/gone'), { status: 'open', note: deleteField() }));
+  });
+
+  it('the owner adds an open idea to its project\'s inbox in the same batch as the task', async () => {
+    const db = owner();
+    const make = (project: string) => {
+      const b = writeBatch(db);
+      const t = doc(collection(db, 'tasks'));
+      b.set(t, { project, text: 'Merge them', created_at: serverTimestamp(), status: 'queued' });
+      b.update(doc(db, 'ideas/open'), { status: 'added', added_task: t.id });
+      return b.commit();
+    };
+    await assertFails(make('hamta'));
+    await assertFails(updateDoc(doc(db, 'ideas/open'), { status: 'added', added_task: 'missing' }));
+    await assertSucceeds(make('knip'));
+    await assertFails(updateDoc(doc(db, 'ideas/taken'), { status: 'open' }));
+    await assertFails(updateDoc(doc(db, 'ideas/gone'), { status: 'added', added_task: 'queued' }));
   });
 });
 

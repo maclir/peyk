@@ -358,3 +358,40 @@ export function mergeReply(queued, text, images, max) {
   if (all.length > max) return null;
   return { text: [queued.text, text].filter(Boolean).join("\n\n"), images: all };
 }
+
+// The lenses an ideation task looks through, in the order the phone offers
+// them. The laptop holds what each one asks, so these are only ids and names.
+export const LENSES = [
+  ["reuse", "Reuse"], ["experience", "One experience"], ["architecture", "Architecture"], ["security", "Security"],
+  ["bugs", "Bugs"], ["features", "Features"], ["simplify", "Simplify"], ["tests", "Tests"],
+  ["performance", "Performance & cost"], ["accessibility", "Accessibility"], ["invariants", "Invariant drift"],
+];
+export const IDEA_LIMITS = [3, 5, 10];
+export const DEFAULT_IDEATE = { lenses: ["reuse", "experience"], max: 5 };
+
+export function lensName(id) {
+  return LENSES.find(([l]) => l === id)?.[1] ?? id;
+}
+
+// An ideation task's text is its focus; with none, it looks everywhere.
+export function ideateText(focus) {
+  return focus.trim() || "Look across the whole repository.";
+}
+
+// A lens is turned on or off; the last one stays, since a run needs one.
+export function toggleLens(ask, id) {
+  const on = ask.lenses.includes(id);
+  if (on && ask.lenses.length === 1) return ask;
+  const lenses = on ? ask.lenses.filter((l) => l !== id) : LENSES.map(([l]) => l).filter((l) => l === id || ask.lenses.includes(l));
+  return { ...ask, lenses };
+}
+
+// The open ideas, newest first, for one project or all of them.
+export function openIdeas(ideas, project) {
+  return ideas.filter((i) => i.status === "open" && (!project || i.project === project))
+    .sort((a, b) => time(b.created_at) - time(a.created_at) || String(a.id).localeCompare(String(b.id)));
+}
+
+export function ideaCount(ideas, project) {
+  return openIdeas(ideas, project).length;
+}

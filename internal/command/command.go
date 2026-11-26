@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+
+	"github.com/maclir/peyk/internal/idea"
 )
 
 const (
@@ -99,6 +101,8 @@ type Payload struct {
 	// Prototype asks a dispatch for a published page of that kind instead
 	// of a code change.
 	Prototype string `json:"prototype,omitempty"`
+	// Ideate asks a dispatch for improvement ideas instead of a code change.
+	Ideate *idea.Ask `json:"ideate,omitempty"`
 	// Images are a dispatch's or reply's attachments, each named by the SHA-256 of its
 	// bytes, so the signature covers the images as well as the text.
 	Images []string `json:"images,omitempty"`

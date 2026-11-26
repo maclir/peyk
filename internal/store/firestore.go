@@ -10,6 +10,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/notify"
 )
 
@@ -174,6 +175,24 @@ func (s *Firestore) DispatchedTasks(ctx context.Context) (map[string]Task, error
 		}
 		out[d.Ref.ID] = t
 	}
+	return out, nil
+}
+
+// Ideas are sorted in Go, oldest first, so the query needs no composite index.
+func (s *Firestore) Ideas(ctx context.Context, project string) ([]idea.Idea, error) {
+	docs, err := s.client.Collection(Ideas).Where("project", "==", project).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("list ideas for %s: %w", project, err)
+	}
+	out := make([]idea.Idea, 0, len(docs))
+	for _, d := range docs {
+		var i idea.Idea
+		if err := d.DataTo(&i); err != nil {
+			return nil, fmt.Errorf("decode idea %s: %w", d.Ref.ID, err)
+		}
+		out = append(out, i)
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].CreatedAt.Before(out[b].CreatedAt) })
 	return out, nil
 }
 

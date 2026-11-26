@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/maclir/peyk/internal/idea"
 )
 
 // State is what a card on the board shows, ordered by how urgently it needs you.
@@ -181,6 +183,10 @@ type Snapshot struct {
 	// AoeHooks is aoe's hook directory for the session, set only when its
 	// Claude Code profile does not run `peyk ping`. It is not published.
 	AoeHooks string `firestore:"-" json:"-"`
+	// Ideas are what an ideation run reported in Message, which then holds
+	// the rest of the reply. They reach the phone as idea documents when
+	// the run's task finishes, not on the snapshot.
+	Ideas []idea.Draft `firestore:"-" json:"-"`
 }
 
 // Prototype is a page a session published with Claude Code's Artifact tool.
@@ -234,6 +240,12 @@ const ClearCommand = "/clear"
 // than a guess at the directory's newest one, has no reply and no prompt
 // other than the /clear that started it.
 func (s *Snapshot) SetExchange(reply, prompt *Message) {
+	s.Ideas = nil
+	if reply != nil {
+		r := *reply
+		r.Text, s.Ideas = idea.Split(r.Text)
+		reply = &r
+	}
 	s.Message, s.Prompt = reply, prompt
 	s.Cleared = s.Transcript.ID != "" && reply == nil && (prompt == nil || prompt.Text == ClearCommand)
 	s.Conversation = s.Transcript.ID

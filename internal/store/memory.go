@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 )
@@ -203,6 +204,33 @@ func (m *Memory) HeldReplies(context.Context) (map[string]command.Command, error
 			out[id] = c
 		}
 	}
+	return out, nil
+}
+
+// Ideas applies Update's changes to stored ideas, as Firestore would.
+func (m *Memory) Ideas(_ context.Context, project string) ([]idea.Idea, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []idea.Idea
+	for id, v := range m.docs[Ideas] {
+		i := v.(idea.Idea)
+		u := m.updates[Ideas][id]
+		if st, ok := u["status"].(string); ok {
+			i.Status = st
+		}
+		if n, ok := u["note"].(string); ok {
+			i.Note = n
+		}
+		if i.Project == project {
+			out = append(out, i)
+		}
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if !out[a].CreatedAt.Equal(out[b].CreatedAt) {
+			return out[a].CreatedAt.Before(out[b].CreatedAt)
+		}
+		return out[a].Title < out[b].Title
+	})
 	return out, nil
 }
 

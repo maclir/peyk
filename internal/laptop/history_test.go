@@ -98,3 +98,16 @@ func TestBoundKeepsTheNewestEntries(t *testing.T) {
 		t.Fatalf("got %+v, truncated %v", got, truncated)
 	}
 }
+
+func TestHistoryLeavesOutAnIdeationRunsIdeasBlock(t *testing.T) {
+	claude := t.TempDir()
+	work := "/w"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:05Z","message":{"content":[{"type":"text","text":"Found one.\n\n`+"```"+`peyk-ideas\n[]\n`+"```"+`"}]}}`,
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:06Z","message":{"content":[{"type":"text","text":"`+"```"+`peyk-ideas\n[]\n`+"```"+`"}]}}`,
+	)
+	got, _ := History(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"})
+	if len(got) != 1 || got[0].Text != "Found one." {
+		t.Fatalf("got %+v", got)
+	}
+}

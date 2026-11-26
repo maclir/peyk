@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/session"
 )
 
@@ -86,7 +87,10 @@ func historyEntries(line []byte) []session.Entry {
 		for _, p := range parts {
 			switch {
 			case p.Type == "text" && strings.TrimSpace(p.Text) != "":
-				out = append(out, session.Entry{Kind: session.EntryReply, Text: strings.TrimSpace(p.Text), At: e.Timestamp})
+				// The ideas reach the phone as idea documents; the block is for the laptop.
+				if text, _ := idea.Split(strings.TrimSpace(p.Text)); text != "" {
+					out = append(out, session.Entry{Kind: session.EntryReply, Text: text, At: e.Timestamp})
+				}
 			case p.Type == "tool_use" && p.Name != "":
 				out = append(out, session.Entry{Kind: session.EntryTool, Tool: p.Name, Text: toolLine(p.Input), At: e.Timestamp})
 			}

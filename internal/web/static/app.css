@@ -123,6 +123,8 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .cage { display: flex; align-items: center; gap: 4px; }
 .qcount { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 600 0.72rem var(--mono); font-variant-numeric: tabular-nums; }
 .card.notified .qcount { background: var(--card); }
+.counts { display: flex; gap: 4px; }
+.qcount.idea { background: var(--warn-soft); color: var(--warn); }
 .qcount svg { width: 13px; height: 13px; display: block; }
 .card .when { font: 0.72rem var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card .msg { font-size: 0.84rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -371,6 +373,7 @@ button.proto .ico svg { width: 18px; height: 18px; }
 button.proto[data-kind="html"] { background: var(--accent-soft); color: var(--accent); }
 button.proto[data-kind="design"] { background: var(--design-soft); color: var(--design); }
 button.proto[data-kind="any"] { background: var(--any-soft); color: var(--any); }
+button.proto[data-kind="ideate"] { background: var(--warn-soft); color: var(--warn); }
 button.proto.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
 .rmeta .plink { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
 .rmeta .plink .ico svg { width: 14px; height: 14px; }
@@ -431,3 +434,17 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 .rev:disabled { cursor: progress; opacity: 1; }
 .rev .spin { position: absolute; right: 100%; top: 50%; margin: -0.45em 2px 0 0; box-sizing: border-box; border-width: 1.5px; }
 .rev.stale { color: var(--warn); background: var(--warn-soft); cursor: pointer; }
+
+/* Ideation: the composer's lenses, a task's tag, and the ideas a run filed. */
+.ideatepanel { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 4px; }
+.ideatepanel .lenses, .ideatepanel .limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ideatepanel .limits > span { font-size: 0.82rem; color: var(--muted); }
+.tag.ideas { background: var(--warn-soft); color: var(--warn); }
+.task.idea .ititle { font-weight: 650; }
+.iwhy { font-size: 0.88rem; line-height: 1.45; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.irefs { display: flex; flex-wrap: wrap; gap: 4px; }
+.irefs code { font-size: 0.72rem; overflow-wrap: anywhere; }
+.iprompt summary { font-size: 0.8rem; color: var(--muted); cursor: pointer; }
+.iprompt .ttext { margin-top: 6px; }
+form.dismiss { display: flex; align-items: center; gap: 8px; }
+.dnote { flex: 1; min-width: 0; font: inherit; font-size: 0.9rem; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); color: var(--ink); }

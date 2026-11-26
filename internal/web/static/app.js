@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -163,7 +163,11 @@ async function start(cfg) {
     fs.connectFirestoreEmulator(db, host, Number(port));
   }
 
-  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+  const state = { sessions: new Map(), projects: [], tasks: [], replies: [], ideas: [],
+    // A composer's ideation ask by its key, and the last one made, which the next starts from.
+    ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
+    // The idea whose dismissal note is being written.
+    dismissing: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -211,6 +215,11 @@ async function start(cfg) {
         state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data(), saving: d.metadata.hasPendingWrites }));
         state.loaded.add("tasks");
         if (snap.docChanges().some((c) => c.type === "removed")) refreshDone();
+        render();
+      }, failed),
+      fs.onSnapshot(fs.query(fs.collection(db, "ideas"), fs.where("status", "==", "open")), (snap) => {
+        state.ideas = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.loaded.add("ideas");
         render();
       }, failed),
       // Replies the laptop has not finished. One that leaves this list was
@@ -715,6 +724,7 @@ async function start(cfg) {
           inProject ? null : face(projectNamed(t.project), t.project, "xs"),
           h("span", { class: "rtext" }, inProject ? null : [h("b", {}, t.project), " "], t.text),
           t.prototype ? prototypeTag(t.prototype) : null,
+          t.ideate ? ideateTag(t.ideate) : null,
           h("span", { class: "rstat" }, stat)),
         action),
       h("div", { class: "rmore", hidden: open ? null : "" },
@@ -747,7 +757,7 @@ async function start(cfg) {
       render();
     };
     state.menu = null;
-    sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}), ...(t.prototype ? { prototype: t.prototype } : {}) },
+    sendCommand("dispatch", { project: t.project, task: t.id, text: t.text, clear, ...(t.images?.length ? { images: t.images } : {}), ...(t.prototype ? { prototype: t.prototype } : {}), ...(t.ideate ? { ideate: t.ideate } : {}) },
       clear ? `Clear ${t.project} and send` : `Send to ${t.project}`, `send:${t.id}`, report, null, { done: "Sent" });
   }
 
@@ -778,6 +788,7 @@ async function start(cfg) {
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         t.prototype ? prototypeTag(t.prototype) : null,
+        t.ideate ? ideateTag(t.ideate) : null,
         h("span", { class: "grow" }),
         order && order.list.length > 1 ? stepButtons(t, order) : null,
         h("div", { class: "wmenu" },
@@ -899,7 +910,7 @@ async function start(cfg) {
   // One button steps a composer's task through an ordinary task and each
   // kind of prototype; a long press turns it back to ordinary. It redraws
   // only itself and its note, so the textarea keeps its focus and caret.
-  function prototypeToggle(key, note) {
+  function prototypeToggle(key, note, onSet = null) {
     const button = h("button", { type: "button", class: "proto", ...longPress(() => Boolean(state.protos.get(key)), () => set("")) });
     const paint = () => {
       const kind = state.protos.get(key) ?? "";
@@ -917,12 +928,47 @@ async function start(cfg) {
     const set = (kind) => {
       kind ? state.protos.set(key, kind) : state.protos.delete(key);
       paint();
+      onSet?.(kind);
     };
     // The long press's own click handler runs first and swallows the click
     // that ends a hold.
     button.addEventListener("click", (e) => e.defaultPrevented || set(nextPrototype(state.protos.get(key))));
     paint();
     return button;
+  }
+
+  // Ideate turns a composer's task into an ideation run: its text becomes an
+  // optional focus, and a panel picks the lenses and how many ideas. A task
+  // asks for a prototype or for ideas, not both. The toggle and panel redraw
+  // only themselves, so the textarea keeps its focus and caret.
+  function ideateToggle(key, onSet) {
+    const button = h("button", { type: "button", class: "proto ideate", title: "Ask for improvement ideas" });
+    const panel = h("div", { class: "ideatepanel", hidden: "" });
+    const paint = () => {
+      const ask = state.ideates.get(key);
+      button.dataset.kind = ask ? "ideate" : "off";
+      button.setAttribute("aria-pressed", String(Boolean(ask)));
+      button.setAttribute("aria-label", ask ? "Ideate: on" : "Ideate: off");
+      button.replaceChildren(icon("bulb"), ask ? h("span", {}, "Ideate") : null);
+      panel.hidden = !ask;
+      if (!ask) return panel.replaceChildren();
+      const change = (next) => { state.ideates.set(key, next); state.lastIdeate = next; paint(); };
+      panel.replaceChildren(
+        h("div", { class: "lenses", role: "group", "aria-label": "Lenses" }, LENSES.map(([id, name]) =>
+          h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.lenses.includes(id)), onclick: () => change(toggleLens(ask, id)) }, name))),
+        h("div", { class: "limits", role: "group", "aria-label": "At most" }, h("span", {}, "At most"),
+          IDEA_LIMITS.map((n) => h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.max === n), onclick: () => change({ ...ask, max: n }) }, String(n))),
+          h("span", {}, "ideas")),
+      );
+    };
+    const set = (ask) => {
+      ask ? state.ideates.set(key, ask) : state.ideates.delete(key);
+      paint();
+      onSet?.(ask);
+    };
+    button.addEventListener("click", () => set(state.ideates.has(key) ? null : state.lastIdeate));
+    paint();
+    return { button, panel, set };
   }
 
   function projectPill(name, task = null) {
@@ -947,20 +993,32 @@ async function start(cfg) {
   // A failed add puts the text, images and prototype kind back.
   function taskComposer({ key, id, cls, project, sends = false, lead = null, added, failed }) {
     const pnote = h("p", { class: "pnote", role: "status", hidden: "" });
-    const c = { pnote, proto: prototypeToggle(key, pnote) };
-    const repaint = () => c.proto.replaceWith(c.proto = prototypeToggle(key, pnote));
+    const c = { pnote };
+    const placeholder = () => (state.ideates.has(key) ? "Focus, or leave empty for the whole repository…" : "Describe a task…");
+    // Turning one kind on turns the other off.
+    const onProto = (kind) => { if (kind && state.ideates.has(key)) c.ideate.set(null); };
+    const onIdeate = (ask) => {
+      if (ask && state.protos.has(key)) { state.protos.delete(key); repaint(); }
+      const box = c.form?.querySelector("textarea");
+      if (box) box.placeholder = placeholder();
+    };
+    c.proto = prototypeToggle(key, pnote, onProto);
+    c.ideate = ideateToggle(key, onIdeate);
+    const repaint = () => c.proto.replaceWith(c.proto = prototypeToggle(key, pnote, onProto));
     const add = (text, andSend) => {
       const value = text.value.trim();
       const name = project();
-      if (!value || !name || state.busy.has(key)) return;
+      const ask = state.ideates.get(key) ?? null;
+      if ((!value && !ask) || !name || state.busy.has(key)) return;
       const attaching = draft(key);
       const kind = state.protos.get(key) ?? "";
       text.value = "";
       state.drafts.delete(key);
       state.protos.delete(key);
       repaint();
+      if (ask) c.ideate.set(null);
       const ctx = added(name);
-      addTask(name, value, attaching, kind).then((t) => {
+      addTask(name, ask ? ideateText(value) : value, attaching, kind, ask).then((t) => {
         forgetImages(attaching);
         if (andSend) send(t, hasConversation(t), { announce: !inboxSheet?.open });
       }, (err) => {
@@ -969,17 +1027,18 @@ async function start(cfg) {
         if (!draft(key).length) state.drafts.set(key, attaching);
         if (kind && !state.protos.has(key)) state.protos.set(key, kind);
         repaint();
+        if (ask) c.ideate.set(ask);
         failed(err, name, ctx);
       });
     };
     const hold = sends ? null : {
-      armed: (text) => Boolean(text.value.trim() && projectNamed(project())?.free),
+      armed: (text) => Boolean((text.value.trim() || state.ideates.has(key)) && projectNamed(project())?.free),
       fire: (text) => add(text, true),
     };
     const submit = sends ? { submitLabel: "Add to inbox and send", submitIcon: "prompt" } : { submitLabel: "Add task", submitIcon: "addtask" };
-    c.form = composerForm({ key, id, label: "Task description", placeholder: "Describe a task…", cls, ...submit,
-      send: (text) => add(text, sends), hold, lead, tools: c.proto });
-    c.form.append(pnote);
+    c.form = composerForm({ key, id, label: "Task description", placeholder: placeholder(), cls, ...submit,
+      send: (text) => add(text, sends), hold, lead, tools: [c.proto, c.ideate.button] });
+    c.form.append(c.ideate.panel, pnote);
     return c;
   }
 
@@ -1274,6 +1333,7 @@ async function start(cfg) {
       }, icon(r.clear ? "clearresume" : "resume")) : null,
       detail: [
         h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
+        t.ideate ? h("button", { type: "button", class: "link", onclick: () => openInbox(t.project) }, icon("bulb"), `${t.ideas ?? 0} idea${t.ideas === 1 ? "" : "s"}`) : null,
         t.prototype_url ? h("a", { class: "plink", href: t.prototype_url, target: "_blank", rel: "noopener noreferrer" },
           icon(PROTOTYPE_KINDS[t.prototype]?.icon ?? "proto"), "Open prototype") : null,
       ],
@@ -1286,13 +1346,14 @@ async function start(cfg) {
     if (state.filter === "ready" && !projectNamed(project)?.free) state.filter = "all";
   }
 
-  async function addTask(project, text, images, prototype = "") {
+  async function addTask(project, text, images, prototype = "", ideate = null) {
     reveal(project);
     const batch = fs.writeBatch(db);
     const ids = await storeImages(batch, images);
     const task = { project, text, created_at: fs.serverTimestamp(), status: "queued", rank: topRank(state.tasks, Date.now()) };
     if (ids.length) task.images = ids;
     if (prototype) task.prototype = prototype;
+    if (ideate) task.ideate = { lenses: [...ideate.lenses], max: ideate.max };
     const ref = fs.doc(fs.collection(db, "tasks"));
     batch.set(ref, task);
     await batch.commit();
@@ -1453,7 +1514,7 @@ async function start(cfg) {
       }
     };
     const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
-      submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null, tools: prototypeToggle(key, null),
+      submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null, tools: t.ideate ? null : prototypeToggle(key, null),
       tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
     form.querySelector("textarea").value = t.text;
     return form;
@@ -1557,6 +1618,7 @@ async function start(cfg) {
       const task = currentTask(state.tasks, s.id);
       const at = activity(s);
       const queued = inboxCount(s);
+      const ideas = projectOf(s) ? ideaCount(state.ideas, projectOf(s).name) : 0;
       const line = s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
         : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
         : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
@@ -1578,7 +1640,9 @@ async function start(cfg) {
             h("span", { class: "cage" },
               s.notified ? h("span", { class: "nbell", role: "img", "aria-label": "Notified" }, icon("bell")) : null,
               at ? h("span", { class: "when" }, ago(at, now)) : null),
-            queued ? h("span", { class: "qcount", role: "img", "aria-label": `Inbox, ${queued} queued` }, icon("tray"), String(queued)) : null),
+            queued || ideas ? h("span", { class: "counts" },
+              ideas ? h("span", { class: "qcount idea", role: "img", "aria-label": `${ideas} open idea${ideas === 1 ? "" : "s"}` }, icon("bulb"), String(ideas)) : null,
+              queued ? h("span", { class: "qcount", role: "img", "aria-label": `Inbox, ${queued} queued` }, icon("tray"), String(queued)) : null) : null),
         ),
       );
     }
@@ -1786,6 +1850,75 @@ async function start(cfg) {
       (text, busy, tone) => setOutcome(`worker:${s.id}`, text, busy, tone), null, { done: DONE[label] });
   }
 
+  // An idea is added to its project's inbox the way a composer adds a task:
+  // a tap adds it, and a long press also sends it when the worker is free.
+  function ideaCard(i, now, inProject) {
+    const key = `idea:${i.id}`;
+    const open = state.menu === key;
+    const dismissing = state.dismissing === i.id;
+    const note = dismissing ? h("input", { type: "text", class: "dnote", maxlength: "500", "aria-label": "Why dismiss it (optional)", placeholder: "Why, for later runs (optional)" }) : null;
+    const p = projectNamed(i.project);
+    const hold = longPress(() => Boolean(projectNamed(i.project)?.free), () => addIdea(i, true));
+    // The long press swallows the click that ends a hold; any other click adds.
+    const onclick = (e) => { hold.onclick(e); if (!e.defaultPrevented) addIdea(i, false); };
+    return h("article", { class: "task idea" },
+      h("div", { class: "thead" },
+        inProject ? null : [face(projectNamed(i.project), i.project, "sm"), h("span", { class: "proj" }, i.project)],
+        h("span", { class: "tag ideas" }, lensName(i.lens)),
+        h("span", { class: "when" }, ago(i.created_at, now)),
+        h("span", { class: "grow" }),
+        h("div", { class: "wmenu" },
+          h("button", { type: "button", class: "icon", "aria-label": `More actions: ${i.title}`, "aria-haspopup": "menu", "aria-expanded": String(open),
+            onclick: () => { state.menu = open ? null : key; render(); } }, icon("more")),
+          open ? h("div", { class: "pop", role: "menu", onkeydown: (e) => { if (e.key === "Escape") { state.menu = null; render(); } } },
+            h("button", { type: "button", role: "menuitem", class: "danger", onclick: () => { state.menu = null; state.dismissing = i.id; render(); document.querySelector(".dnote")?.focus(); } }, icon("x"), "Dismiss")) : null)),
+      h("div", { class: "ttext ititle" }, i.title),
+      i.why ? h("div", { class: "iwhy" }, i.why) : null,
+      i.refs?.length ? h("div", { class: "irefs" }, i.refs.map((r) => h("code", {}, r))) : null,
+      h("details", { class: "iprompt" }, h("summary", {}, "Task"), h("div", { class: "ttext" }, i.prompt)),
+      dismissing ? h("form", { class: "dismiss", onsubmit: (e) => { e.preventDefault(); dismissIdea(i, note.value.trim()); } },
+        note,
+        h("button", { type: "button", class: "link", onclick: () => { state.dismissing = null; render(); } }, "Cancel"),
+        busyButton(`dismiss:${i.id}`, { type: "submit" }, "Dismiss")) : null,
+      h("div", { class: "tfoot" },
+        h("span", { class: "tstatus" }, !p ? "" : p.free ? (p.session_id ? "Free" : "Starts a new worker") : `Waiting · ${p.busy}`),
+        busyButton(key, { type: "button", class: "round go", "aria-label": "Add task", title: "Add task", ...hold, onclick },
+          icon("addtask"), heldIcon())),
+    );
+  }
+
+  async function addIdea(i, andSend) {
+    const key = `idea:${i.id}`;
+    if (state.busy.has(key)) return;
+    let t;
+    try {
+      t = await track(key, async () => {
+        reveal(i.project);
+        const batch = fs.writeBatch(db);
+        const task = { project: i.project, text: i.prompt, created_at: fs.serverTimestamp(), status: "queued", rank: topRank(state.tasks, Date.now()) };
+        const ref = fs.doc(fs.collection(db, "tasks"));
+        batch.set(ref, task);
+        batch.update(fs.doc(db, "ideas", i.id), { status: "added", added_task: ref.id });
+        await batch.commit();
+        return { ...task, id: ref.id };
+      });
+    } catch (err) {
+      return alertLine(`Could not add the idea: ${err.message}`);
+    }
+    if (andSend) send(t, hasConversation(t), { announce: true });
+    else toast(`Added to ${i.project}`, "ok");
+  }
+
+  async function dismissIdea(i, note) {
+    try {
+      await track(`dismiss:${i.id}`, () => fs.updateDoc(fs.doc(db, "ideas", i.id), note ? { status: "dismissed", note } : { status: "dismissed" }));
+      state.dismissing = null;
+      render();
+    } catch (err) {
+      alertLine(`Could not dismiss the idea: ${err.message}`);
+    }
+  }
+
   function queuedFor(project) {
     return queue(state.tasks, state.projects).filter((t) => t.project === project);
   }
@@ -1959,10 +2092,15 @@ async function start(cfg) {
       : h("p", { class: "empty" }, only && !counts.all ? "Nothing queued." : all.length ? "Nothing here for this filter." : "No tasks queued.");
     const sent = sentTasks(state.tasks).filter((t) => !only || t.project === only);
     const rest = state.filter !== "waiting";
+    const ideas = openIdeas(state.ideas, only);
     sh.body.replaceChildren(...[
       h("div", { class: "filters" }, chips),
       strip,
       h("div", { class: "tasks" }, items),
+      ...(ideas.length && rest ? [
+        h("h2", { class: "group" }, "Ideas", h("span", { class: "n" }, ` ${ideas.length}`)),
+        h("div", { class: "tasks" }, ideas.map((i) => ideaCard(i, now, inProject))),
+      ] : []),
       ...(sent.length && rest ? [
         h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
         h("div", { class: "rows" }, sent.map((t) => sentRow(t, now))),
@@ -2179,6 +2317,11 @@ function prototypeTag(kind) {
   return h("span", { class: `tag ${k.icon} ${k.tone}`, title: label, "aria-label": label }, icon(k.icon), k.name);
 }
 
+function ideateTag(ask) {
+  const label = `Ideas: ${ask.lenses.map(lensName).join(", ")}`;
+  return h("span", { class: "tag ideas", title: label, "aria-label": label }, icon("bulb"), "Ideas");
+}
+
 function prototypes(list, now) {
   return h("ul", { class: "protos" },
     list.map((p) => h("li", {},
@@ -2228,6 +2371,7 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
   bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   broom: '<g transform="translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g>',
   clearstop: '<g transform="translate(-0.3 -0.4) scale(.85) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><rect x="15" y="15" width="6.5" height="6.5" rx="1.5"/>',

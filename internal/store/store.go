@@ -16,6 +16,7 @@
 //	attachments/{sha256}       Attachment           phone creates and deletes
 //	history/{aoe session id}   History              phone requests and deletes, agent fills
 //	seen/{aoe session id}      {seen_at}            phone writes, agent deletes
+//	ideas/{task id}-{n}        idea.Idea            agent creates, phone dismisses or adds
 package store
 
 import (
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/notify"
 )
 
@@ -36,6 +38,7 @@ const (
 	Attachments   = "attachments"
 	History       = "history"
 	Seen          = "seen"
+	Ideas         = "ideas"
 )
 
 // Attachment is an image added to a task. Its id is the SHA-256 of Data in
@@ -110,6 +113,10 @@ type Task struct {
 	// PrototypeURL is the newest page the session published while working
 	// on the task.
 	PrototypeURL string `firestore:"prototype_url,omitempty" json:"prototype_url,omitempty"`
+	// Ideate asks for improvement ideas instead of a code change.
+	Ideate *idea.Ask `firestore:"ideate,omitempty" json:"ideate,omitempty"`
+	// Ideas counts the ideas an ideation task reported.
+	Ideas int `firestore:"ideas,omitempty" json:"ideas,omitempty"`
 }
 
 const (
@@ -151,6 +158,11 @@ type NotifiedReader interface {
 // HeldReader finds the replies held for the phone to send again or cancel.
 type HeldReader interface {
 	HeldReplies(ctx context.Context) (map[string]command.Command, error)
+}
+
+// IdeaReader finds a project's ideas, as the phone last left them.
+type IdeaReader interface {
+	Ideas(ctx context.Context, project string) ([]idea.Idea, error)
 }
 
 // TaskReader finds tasks the agent is waiting on.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/session"
 )
 
@@ -282,5 +283,48 @@ func TestFirestoreFindsNotifiedSessions(t *testing.T) {
 	}
 	if !contains(ids, "it-notified") || contains(ids, "it-quiet") {
 		t.Fatalf("NotifiedSessions = %v", ids)
+	}
+}
+
+func TestFirestoreListsAProjectsIdeasOldestFirst(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("run with make test-integration")
+	}
+	ctx := context.Background()
+	s, err := NewFirestore(ctx, "peyk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	at := time.Date(2026, 11, 26, 9, 0, 0, 0, time.UTC)
+	ask := &idea.Ask{Lenses: []string{"reuse"}, Max: 3}
+	if err := s.Put(ctx, Tasks, "it-ideate", Task{Project: "it-ideas", Text: "x", Status: TaskDispatched, Ideate: ask}); err != nil {
+		t.Fatal(err)
+	}
+	for id, i := range map[string]idea.Idea{
+		"it-ideate-2": {Project: "it-ideas", Title: "Newer", Status: idea.Open, CreatedAt: at.Add(time.Minute)},
+		"it-ideate-1": {Project: "it-ideas", Title: "Older", Status: idea.Open, CreatedAt: at, Refs: []string{"a.go:1"}},
+		"it-other-1":  {Project: "it-elsewhere", Title: "Other", Status: idea.Open, CreatedAt: at},
+	} {
+		if err := s.Put(ctx, Ideas, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Update(ctx, Ideas, "it-ideate-1", map[string]any{"status": idea.Dismissed, "note": "fine"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Ideas(ctx, "it-ideas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Title != "Older" || got[0].Status != idea.Dismissed || got[0].Note != "fine" || got[0].Refs[0] != "a.go:1" || got[1].Title != "Newer" {
+		t.Fatalf("ideas = %+v", got)
+	}
+	tasks, err := s.DispatchedTasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk := tasks["it-ideate"]; tk.Ideate == nil || tk.Ideate.Max != 3 || tk.Ideate.Lenses[0] != "reuse" {
+		t.Fatalf("task = %+v", tk)
 	}
 }

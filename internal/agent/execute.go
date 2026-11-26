@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/maclir/peyk/internal/command"
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
 )
@@ -92,6 +93,18 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		text, err := prototypeText(p.Text, p.Prototype)
 		if err != nil {
 			return err
+		}
+		if p.Ideate != nil {
+			if p.Prototype != "" {
+				return errors.New("a task asks for a prototype or for ideas, not both")
+			}
+			known, err := a.ideas(ctx, proj.Name)
+			if err != nil {
+				return err
+			}
+			if text, err = idea.Prompt(p.Text, *p.Ideate, known); err != nil {
+				return err
+			}
 		}
 		if text, err = a.attach(ctx, text, p.Images); err != nil {
 			return err

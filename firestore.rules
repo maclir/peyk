@@ -68,6 +68,19 @@ service cloud.firestore {
       return !('prototype' in data) || data.prototype in ['html', 'design', 'any'];
     }
 
+    // An ideation task's lenses and limit, which the laptop checks again.
+    // A task asks for a prototype or for ideas, not both.
+    function validIdeate(data) {
+      return !('ideate' in data)
+        || (!('prototype' in data)
+          && data.ideate is map
+          && data.ideate.keys().hasOnly(['lenses', 'max'])
+          && data.ideate.lenses is list
+          && data.ideate.lenses.size() >= 1 && data.ideate.lenses.size() <= 11
+          && data.ideate.lenses.hasOnly(['reuse', 'experience', 'architecture', 'security', 'bugs', 'features', 'simplify', 'tests', 'performance', 'accessibility', 'invariants'])
+          && data.ideate.max in [3, 5, 10]);
+    }
+
     // A task's images are created in the same batch as the task, so they
     // are checked as they will be after it.
     function imageExists(images, i) {
@@ -85,23 +98,61 @@ service cloud.firestore {
     match /tasks/{id} {
       allow read: if isOwner();
       allow create: if isOwner()
-        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank', 'prototype'])
+        && request.resource.data.keys().hasOnly(['project', 'text', 'created_at', 'status', 'images', 'rank', 'prototype', 'ideate'])
         && validTarget(request.resource.data)
         && visibleTarget(request.resource.data)
         && validRank(request.resource.data)
         && validPrototype(request.resource.data)
+        && validIdeate(request.resource.data)
         && validImages(request.resource.data)
         && request.resource.data.created_at == request.time
         && request.resource.data.status == 'queued';
       allow update: if isOwner()
         && resource.data.status == 'queued'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images', 'prototype'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['project', 'text', 'rank', 'images', 'prototype', 'ideate'])
         && validTarget(request.resource.data)
         && (request.resource.data.project == resource.data.project || visibleTarget(request.resource.data))
         && validRank(request.resource.data)
         && validPrototype(request.resource.data)
+        && validIdeate(request.resource.data)
         && validImages(request.resource.data);
       allow delete: if isOwner() && resource.data.status in ['queued', 'done'];
+    }
+
+    // An idea the laptop filed from an ideation run. The phone dismisses an
+    // open idea, with an optional note for later runs, or takes the
+    // dismissal back; or it adds the idea to the inbox, in the same batch as
+    // the task it becomes. Ideas are never deleted, so later runs are told
+    // about them.
+    match /ideas/{id} {
+      allow read: if isOwner();
+      allow update: if isOwner() && (dismissIdea() || reopenIdea() || addIdea());
+    }
+
+    function ideaChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function dismissIdea() {
+      return resource.data.status == 'open'
+        && request.resource.data.status == 'dismissed'
+        && ideaChanges(['status', 'note'])
+        && (!('note' in request.resource.data) || boundedString(request.resource.data.note, 500));
+    }
+
+    function reopenIdea() {
+      return resource.data.status == 'dismissed'
+        && request.resource.data.status == 'open'
+        && ideaChanges(['status', 'note'])
+        && !('note' in request.resource.data);
+    }
+
+    function addIdea() {
+      return resource.data.status == 'open'
+        && request.resource.data.status == 'added'
+        && ideaChanges(['status', 'added_task'])
+        && boundedString(request.resource.data.added_task, 100)
+        && getAfter(/databases/$(database)/documents/tasks/$(request.resource.data.added_task)).data.project == resource.data.project;
     }
 
     // An image attached to a task, named by the SHA-256 of its bytes, which

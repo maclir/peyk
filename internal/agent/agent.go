@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
@@ -563,11 +564,47 @@ func (a *Agent) finishTasks(ctx context.Context) error {
 		if t.ConversationID == "" && s.Transcript.ID != "" {
 			fields["conversation_id"] = s.Transcript.ID
 		}
+		if t.Ideate != nil {
+			n, err := a.fileIdeas(ctx, id, t, s.Ideas)
+			if err != nil {
+				return err
+			}
+			fields["ideas"] = n
+		}
 		if err := a.Store.Update(ctx, store.Tasks, id, fields); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// ideas returns a project's earlier ideas, or none when the store cannot
+// list them.
+func (a *Agent) ideas(ctx context.Context, project string) ([]idea.Idea, error) {
+	ir, ok := a.Store.(store.IdeaReader)
+	if !ok {
+		return nil, nil
+	}
+	return ir.Ideas(ctx, project)
+}
+
+// fileIdeas publishes what an ideation task's run reported. Each idea's id
+// is the task's and its place, so filing a task's ideas twice rewrites them
+// rather than adding copies.
+func (a *Agent) fileIdeas(ctx context.Context, taskID string, t store.Task, drafts []idea.Draft) (int, error) {
+	known, err := a.ideas(ctx, t.Project)
+	if err != nil {
+		return 0, err
+	}
+	at := a.Now()
+	ideas := idea.Accept(drafts, *t.Ideate, known)
+	for n, i := range ideas {
+		i.Project, i.Task, i.CreatedAt = t.Project, taskID, at
+		if err := a.Store.Put(ctx, store.Ideas, fmt.Sprintf("%s-%d", taskID, n+1), i); err != nil {
+			return n, err
+		}
+	}
+	return len(ideas), nil
 }
 
 // serveHistory answers a history request. A failure only logs: the phone may

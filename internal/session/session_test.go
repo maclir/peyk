@@ -155,3 +155,15 @@ func TestCompareOrdersByStateThenRecentActivityThenTitle(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestSetExchangeTakesAnIdeationRunsIdeasOutOfItsReply(t *testing.T) {
+	var s Snapshot
+	s.SetExchange(&Message{ID: "r", Text: "Found one.\n\n```peyk-ideas\n[{\"lens\":\"reuse\",\"title\":\"T\",\"task\":\"x\"}]\n```"}, nil)
+	if s.Message.Text != "Found one." || len(s.Ideas) != 1 || s.Ideas[0].Title != "T" {
+		t.Fatalf("message = %q, ideas = %+v", s.Message.Text, s.Ideas)
+	}
+	s.SetExchange(&Message{ID: "r2", Text: "Plain"}, nil)
+	if s.Message.Text != "Plain" || s.Ideas != nil {
+		t.Fatalf("message = %q, ideas = %+v", s.Message.Text, s.Ideas)
+	}
+}
