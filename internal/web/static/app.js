@@ -919,7 +919,7 @@ async function start(cfg) {
       button.setAttribute("aria-pressed", String(Boolean(kind)));
       button.setAttribute("aria-label", kind ? `Prototype: ${PROTOTYPE_NOTES[kind].label}` : "Prototype: off");
       button.title = kind ? `${PROTOTYPE_NOTES[kind].label}. Tap for the next kind; hold to turn off.` : "Ask for a prototype";
-      button.replaceChildren(icon(k ? k.icon : "proto"), k ? h("span", {}, k.name) : null);
+      button.replaceChildren(icon(k ? k.icon : "proto"), ...(k ? [h("span", {}, k.name)] : []));
       if (note) {
         note.textContent = kind ? PROTOTYPE_NOTES[kind].note : "";
         note.hidden = !kind;
@@ -949,7 +949,7 @@ async function start(cfg) {
       button.dataset.kind = ask ? "ideate" : "off";
       button.setAttribute("aria-pressed", String(Boolean(ask)));
       button.setAttribute("aria-label", ask ? "Ideate: on" : "Ideate: off");
-      button.replaceChildren(icon("bulb"), ask ? h("span", {}, "Ideate") : null);
+      button.replaceChildren(icon("bulb"), ...(ask ? [h("span", {}, "Ideate")] : []));
       panel.hidden = !ask;
       if (!ask) return panel.replaceChildren();
       const change = (next) => { state.ideates.set(key, next); state.lastIdeate = next; paint(); };

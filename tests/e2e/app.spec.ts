@@ -712,9 +712,11 @@ test.describe('signed in', () => {
     // A task asks for a prototype or for ideas; turning one on turns the other off.
     await proto.click();
     await expect(ideate).toHaveAccessibleName('Ideate: off');
+    await expect(ideate).toHaveText('');
     await expect(lenses).toHaveCount(0);
     await ideate.click();
     await expect(proto).toHaveAccessibleName('Prototype: off');
+    await expect(proto).toHaveText('');
     await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'Security']);
 
     await compose.getByRole('button', { name: /^Project:/ }).click();
