@@ -95,7 +95,7 @@ func TestAcceptKeepsWhatWasAskedForWithinTheLimit(t *testing.T) {
 	ask := Ask{Lenses: []string{"reuse", "security"}, Max: 3}
 	drafts := []Draft{
 		{Lens: "reuse", Title: "  Two\nformatters ", Task: "Merge them", Refs: []string{"a.js:1", " "}},
-		{Lens: "bugs", Title: "Not asked for", Task: "x"},
+		{Lens: "tests", Title: "Not asked for", Task: "x"},
 		{Lens: "reuse", Title: "No task"},
 		{Lens: "security", Title: "already KNOWN", Task: "x"},
 		{Lens: "security", Title: "two formatters", Task: "a copy of the first"},

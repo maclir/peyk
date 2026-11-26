@@ -121,7 +121,7 @@ describe('tasks', () => {
   it('a task asks for ideas through known lenses and a known limit, not with a prototype', async () => {
     const tasks = collection(owner(), 'tasks');
     await assertSucceeds(addDoc(tasks, task({ ideate: { lenses: ['reuse', 'experience'], max: 5 } })));
-    await assertSucceeds(addDoc(tasks, task({ ideate: { lenses: ['invariants'], max: 10 } })));
+    await assertSucceeds(addDoc(tasks, task({ ideate: { lenses: ['show'], max: 10 } })));
     await assertFails(addDoc(tasks, task({ ideate: { lenses: [], max: 5 } })));
     await assertFails(addDoc(tasks, task({ ideate: { lenses: ['vibes'], max: 5 } })));
     await assertFails(addDoc(tasks, task({ ideate: { lenses: ['reuse'], max: 7 } })));

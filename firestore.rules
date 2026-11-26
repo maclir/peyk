@@ -77,7 +77,7 @@ service cloud.firestore {
           && data.ideate.keys().hasOnly(['lenses', 'max'])
           && data.ideate.lenses is list
           && data.ideate.lenses.size() >= 1 && data.ideate.lenses.size() <= 11
-          && data.ideate.lenses.hasOnly(['reuse', 'experience', 'architecture', 'security', 'bugs', 'features', 'simplify', 'tests', 'performance', 'accessibility', 'invariants'])
+          && data.ideate.lenses.hasOnly(['reuse', 'experience', 'architecture', 'security', 'features', 'simplify', 'tests', 'performance', 'accessibility', 'ui', 'show'])
           && data.ideate.max in [3, 5, 10]);
     }
 

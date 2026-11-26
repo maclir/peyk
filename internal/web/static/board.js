@@ -363,8 +363,8 @@ export function mergeReply(queued, text, images, max) {
 // them. The laptop holds what each one asks, so these are only ids and names.
 export const LENSES = [
   ["reuse", "Reuse"], ["experience", "One experience"], ["architecture", "Architecture"], ["security", "Security"],
-  ["bugs", "Bugs"], ["features", "Features"], ["simplify", "Simplify"], ["tests", "Tests"],
-  ["performance", "Performance & cost"], ["accessibility", "Accessibility"], ["invariants", "Invariant drift"],
+  ["features", "Features"], ["simplify", "Simplify"], ["tests", "Tests"],
+  ["performance", "Performance & cost"], ["accessibility", "Accessibility"], ["ui", "UI polish"], ["show", "Show, don't tell"],
 ];
 export const IDEA_LIMITS = [3, 5, 10];
 export const DEFAULT_IDEATE = { lenses: ["reuse", "experience"], max: 5 };

@@ -28,13 +28,13 @@ var Lenses = []Lens{
 	{"experience", "One experience", "the same concept that looks, reads or behaves differently in different places, such as wording, layout, confirmations, empty states or gestures"},
 	{"architecture", "Architecture", "boundaries, dependencies or data flow that make changes harder than they need to be"},
 	{"security", "Security", "ways an attacker, a leaked credential or untrusted input could do harm"},
-	{"bugs", "Bugs", "behaviour that is wrong for a concrete input or state"},
 	{"features", "Features", "small features the existing code almost supports and a user would notice"},
 	{"simplify", "Simplify", "dead code, needless indirection, or abstractions with one caller"},
 	{"tests", "Tests", "behaviour no test covers, or tests that are slow or flaky"},
 	{"performance", "Performance & cost", "work, reads, writes or startup time that could be avoided"},
 	{"accessibility", "Accessibility", "controls, contrast, labels or focus that fail a screen reader, keyboard or small screen"},
-	{"invariants", "Invariant drift", "code that breaks a rule in the repository's agent instructions, or a rule the code no longer follows"},
+	{"ui", "UI polish", "spacing, alignment, visual hierarchy or touch targets that look unfinished on a phone, and interactions or states that give no visual feedback: press states, loading indications, progress, success, empty, error and disabled"},
+	{"show", "Show, don't tell", "labels, hints, notes, titles or messages that explain what a control, icon, layout or state could show; first propose removing the text and letting an icon, shape, colour, position or state carry the meaning, and only shorten text the UI cannot replace"},
 }
 
 func lens(id string) (Lens, bool) {

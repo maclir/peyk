@@ -80,7 +80,7 @@ func TestFinishedIdeationTaskFilesTheIdeasItsRunReported(t *testing.T) {
 		Ideas: []idea.Draft{
 			{Lens: "reuse", Title: "Two formatters", Why: "w", Refs: []string{"a.js:1"}, Task: "Merge them"},
 			{Lens: "security", Title: "already known", Task: "x"},
-			{Lens: "bugs", Title: "Not asked for", Task: "x"},
+			{Lens: "tests", Title: "Not asked for", Task: "x"},
 		}})
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
