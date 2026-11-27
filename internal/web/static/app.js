@@ -2487,9 +2487,11 @@ async function start(cfg) {
 
   // The reply stands in for the prompt from when the laptop has typed it.
   function delivered(s, text, images) {
-    const after = state.sessions.get(s.id)?.prompt?.id ?? "";
+    const cur = state.sessions.get(s.id);
+    const after = cur?.prompt?.id ?? "";
+    const conversation = cur?.conversation ?? "";
     return () => {
-      state.delivered.set(s.id, { text, images: images.length, at: new Date(), after });
+      state.delivered.set(s.id, { text, images: images.length, at: new Date(), after, conversation });
       render();
     };
   }

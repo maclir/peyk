@@ -690,3 +690,34 @@ func TestADispatchAfterAMoveGoesToTheNewSession(t *testing.T) {
 		t.Fatalf("calls = %q, want the dispatch sent to the new session", acts.calls)
 	}
 }
+
+func TestClearingAnAntigravitySessionMovesItsTranscriptDir(t *testing.T) {
+	ph := newPhone(t)
+	c := &fakeCollector{replies: map[string]*session.Message{"conv-1": {Text: "Old reply"}}}
+	stale := session.Snapshot{
+		ID: "g", Title: "gemi", Path: "/c/gemi", Tool: session.Antigravity, State: session.Idle,
+		Transcript: session.Transcript{Tool: session.Antigravity, AppDir: "/app", Workdir: "/c/gemi"}.WithID("conv-1"),
+	}
+	stale.SetExchange(c.Exchange(stale.Transcript))
+	c.set(stale)
+	mem := store.NewMemory()
+	a := newAgent(c, mem)
+	a.Commands = &Commands{Act: &fakeActions{}, Keys: func() ([]command.Key, error) { return []command.Key{ph.key}, nil }, Origin: testOrigin, RPID: testRP}
+	ctx := context.Background()
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Clear, Session: "g"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	wantDir := "/app/brain/cleared-g/.system_generated/logs"
+	if got := a.sessions["g"].Transcript.Dir; got != wantDir {
+		t.Fatalf("after clear: Transcript.Dir = %q, want %q", got, wantDir)
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.sessions["g"].Transcript.Dir; got != wantDir {
+		t.Fatalf("after refresh while stale: Transcript.Dir = %q, want %q", got, wantDir)
+	}
+}

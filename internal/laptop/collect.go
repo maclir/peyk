@@ -57,7 +57,7 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		Path:       s.Path,
 		AoeStatus:  s.Status,
 		Tool:       t.Tool,
-		State:      session.Derive(activity(s.Status, t), Backgrounded(t), git),
+		State:      session.Derive(c.activity(ctx, s, t), Backgrounded(t), git),
 		Git:        git,
 		Transcript: t,
 		UpdatedAt:  c.Now(),
@@ -71,12 +71,16 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 }
 
 // activity is aoe's status, corrected where aoe misreads the pane. aoe
-// reports an Antigravity session parked at its prompt in auto mode as
-// waiting, because the footer says "auto-approved"; its transcript, ending
-// in a finished reply, shows that nothing is asked.
-func activity(status string, t session.Transcript) string {
-	if status == "waiting" && t.Tool == session.Antigravity && antigravityParked(t) {
-		return "idle"
+// reports an Antigravity session in auto mode as waiting both while parked
+// at its prompt and while working; its transcript and, during a tool call,
+// its tmux pane distinguish idle, running, and an approval prompt.
+func (c Collector) activity(ctx context.Context, s AoeSession, t session.Transcript) string {
+	if s.Status != "waiting" || t.Tool != session.Antigravity {
+		return s.Status
+	}
+	status, toolCall := antigravityStepStatus(t)
+	if toolCall && c.Aoe.Run != nil && c.Aoe.antigravityRunning(ctx, s.ID) {
+		return "running"
 	}
 	return status
 }

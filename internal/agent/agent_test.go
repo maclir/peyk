@@ -23,14 +23,15 @@ type fakeCollector struct {
 	snaps []session.Snapshot
 	err   error
 	calls int
-	// replies holds what each transcript, by id, now says.
+	// replies and prompts hold what each transcript, by id, now says.
 	replies map[string]*session.Message
+	prompts map[string]*session.Message
 }
 
 func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.replies[t.ID], nil
+	return f.replies[t.ID], f.prompts[t.ID]
 }
 
 func (f *fakeCollector) Transcribe(s *session.Snapshot) {
@@ -960,5 +961,72 @@ func TestRefreshFollowsAoeHooksOnlyForSessionsThatHaveThem(t *testing.T) {
 	}
 	if strings.Join(w.dirs, ",") != "/hooks/b" {
 		t.Fatalf("watched %v", w.dirs)
+	}
+}
+
+func TestAntigravityTranscriptWritesRefreshOnConversationOrExchangeChanges(t *testing.T) {
+	ctx := context.Background()
+	app := t.TempDir()
+	mem := store.NewMemory()
+	c := &fakeCollector{
+		prompts: map[string]*session.Message{"c1": {ID: "0", Text: "start"}},
+		replies: map[string]*session.Message{"c1": {ID: "3", Text: "done"}},
+	}
+	tr := session.Transcript{Tool: session.Antigravity, AppDir: app, Workdir: "/c/gemi"}.WithID("c1")
+	snap := session.Snapshot{ID: "g", Title: "gemi", Path: "/c/gemi", Tool: session.Antigravity, State: session.Idle, Transcript: tr}
+	c.Transcribe(&snap)
+	c.set(snap)
+	w := &recordingWatcher{}
+	a := newAgent(c, mem)
+	a.Transcripts = w
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wantDirs := filepath.Join(app, "cache") + "," + filepath.Join(app, "brain", "c1")
+	if strings.Join(w.dirs, ",") != wantDirs {
+		t.Fatalf("watched %v, want %s", w.dirs, wantDirs)
+	}
+	// Mid-turn tool steps leave prompt and reply unchanged: no full refresh.
+	if err := a.RefreshReplies(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() != 1 {
+		t.Fatalf("unchanged Antigravity transcript caused %d full refreshes", c.count()-1)
+	}
+	// A new prompt triggers a full refresh.
+	c.prompts["c1"] = &session.Message{ID: "4", Text: "next"}
+	c.Transcribe(&snap)
+	c.set(snap)
+	if err := a.RefreshReplies(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() != 2 {
+		t.Fatalf("new prompt: refreshes = %d, want 2", c.count())
+	}
+	// A new reply triggers a full refresh.
+	c.replies["c1"] = &session.Message{ID: "7", Text: "replied"}
+	c.Transcribe(&snap)
+	c.set(snap)
+	if err := a.RefreshReplies(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() != 3 {
+		t.Fatalf("new reply: refreshes = %d, want 3", c.count())
+	}
+	// Switching to a new conversation in cache/last_conversations.json triggers a full refresh.
+	if err := os.MkdirAll(filepath.Join(app, "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "cache", "last_conversations.json"), []byte(`{"/c/gemi":"c2"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap.Transcript = tr.WithID("c2")
+	c.Transcribe(&snap)
+	c.set(snap)
+	if err := a.RefreshReplies(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() != 4 {
+		t.Fatalf("conversation switch: refreshes = %d, want 4", c.count())
 	}
 }

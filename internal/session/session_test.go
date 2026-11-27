@@ -167,3 +167,17 @@ func TestSetExchangeTakesAnIdeationRunsIdeasOutOfItsReply(t *testing.T) {
 		t.Fatalf("message = %q, ideas = %+v", s.Message.Text, s.Ideas)
 	}
 }
+
+func TestTranscriptWithIDUpdatesAntigravityDir(t *testing.T) {
+	claude := Transcript{Dir: "/c/projects/-w", ID: "old"}.WithID("new")
+	if claude.ID != "new" || claude.Dir != "/c/projects/-w" {
+		t.Fatalf("claude = %+v", claude)
+	}
+	agy := Transcript{Tool: Antigravity, AppDir: "/a", Dir: "/a/brain/old/.system_generated/logs", ID: "old"}.WithID("new")
+	if agy.ID != "new" || agy.Dir != "/a/brain/new/.system_generated/logs" {
+		t.Fatalf("antigravity = %+v", agy)
+	}
+	if empty := agy.WithID(""); empty.ID != "" || empty.Dir != "" {
+		t.Fatalf("cleared antigravity = %+v", empty)
+	}
+}

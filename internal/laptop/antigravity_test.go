@@ -119,6 +119,47 @@ func TestClearingAnAntigravitySessionWaitsForItsNewConversation(t *testing.T) {
 	}
 }
 
+func TestClearingAnAntigravitySessionFindsItsNewBrainDirBeforeLastConversationsUpdates(t *testing.T) {
+	app := t.TempDir()
+	tr := writeConversation(t, app, "/c/knip", "conv-1", []string{agyPrompt}, nil)
+	if err := os.MkdirAll(filepath.Join(app, "brain", "older"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sent := make(chan struct{})
+	run := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "aoe" && strings.Contains(strings.Join(args, " "), "/clear") {
+			close(sent)
+		}
+		return nil, nil
+	}
+	go func() {
+		<-sent
+		_ = os.MkdirAll(filepath.Join(app, "brain", "conv-2", "scratch"), 0o755)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", tr, time.Millisecond)
+	if err != nil || id != "conv-2" {
+		t.Fatalf("Clear = %q, %v; want conv-2", id, err)
+	}
+
+	// An empty new brain directory wins over another conversation that already has a transcript.
+	before := antigravityConversations(app)
+	active := filepath.Join(app, "brain", "subagent", ".system_generated", "logs")
+	if err := os.MkdirAll(active, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(active, "transcript.jsonl"), []byte(agyPrompt+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(app, "brain", "conv-3", "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := newAntigravityConversation(app, before, "conv-1"); got != "conv-3" {
+		t.Fatalf("newAntigravityConversation = %q, want conv-3", got)
+	}
+}
+
 func TestAoeListsAntigravitySessions(t *testing.T) {
 	run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
 		if args[2] == "list" {
@@ -158,26 +199,50 @@ func TestAntigravityModelsReadsEachIdAndName(t *testing.T) {
 	}
 }
 
-func TestAnAntigravitySessionParkedAfterItsReplyIsIdleThoughAoeSaysWaiting(t *testing.T) {
+func TestAnAntigravitySessionStatusIsDerivedFromItsTranscriptAndPaneThoughAoeSaysWaiting(t *testing.T) {
 	app := t.TempDir()
 	notGit := func(context.Context, string, string, ...string) ([]byte, error) {
 		return nil, errors.New("not a repository")
 	}
-	c := Collector{Run: notGit, AntigravityDir: app, Now: time.Now}
-	agy := AoeSession{ID: "a", Path: "/c/knip", Tool: session.Antigravity, Status: "waiting"}
+	var paneText string
+	tmux := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "tmux" && len(args) > 0 && args[0] == "list-sessions" {
+			return []byte("aoe_knip_12345678\n"), nil
+		}
+		if name == "tmux" && len(args) > 0 && args[0] == "capture-pane" {
+			return []byte(paneText), nil
+		}
+		return nil, errors.New("unexpected call")
+	}
+	c := Collector{Aoe: Aoe{Run: tmux}, Run: notGit, AntigravityDir: app, Now: time.Now}
+	agy := AoeSession{ID: "12345678abcd", Path: "/c/knip", Tool: session.Antigravity, Status: "waiting"}
+	agyAsk := `{"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": [{"name": "ask_question", "args": {}}]}`
+	runningPane := "⣿ Running command... 14s\n└ Tip: Use /skills\n────────\n>\n────────\nesc to cancel   auto · Gemini 4 Neon · high\n"
+	approvalPane := "Allow running command?\n1. Allow once\n2. Deny\n"
 	tests := []struct {
 		name  string
 		lines []string
+		pane  string
 		want  session.State
 	}{
-		{"a finished reply", []string{agyPrompt, agyTool, agyResult, agyReply}, session.Idle},
-		{"a tool call awaiting approval", []string{agyPrompt, agyTool}, session.NeedsInput},
-		{"a prompt not yet answered", []string{agyPrompt}, session.NeedsInput},
+		{"a finished reply", []string{agyPrompt, agyTool, agyResult, agyReply}, "", session.Idle},
+		{"a prompt being answered", []string{agyPrompt}, "", session.Working},
+		{"a tool result back to the model", []string{agyPrompt, agyTool, agyResult}, "", session.Working},
+		{"a tool call running in the pane", []string{agyPrompt, agyTool}, runningPane, session.Working},
+		{"a tool call awaiting approval", []string{agyPrompt, agyTool}, approvalPane, session.NeedsInput},
+		{"an ask_question tool call", []string{agyPrompt, agyAsk}, runningPane, session.NeedsInput},
 	}
 	for _, tt := range tests {
+		paneText = tt.pane
 		writeConversation(t, app, "/c/knip", "conv-1", tt.lines, []string{agyFull})
 		if s := c.Snapshot(context.Background(), agy); s.State != tt.want {
 			t.Errorf("%s: state = %v, want %v", tt.name, s.State, tt.want)
 		}
+	}
+	// An empty conversation with no transcript yet is idle, not asking for input.
+	setLatest(t, app, "/c/empty", "conv-empty")
+	empty := AoeSession{ID: "12345678abcd", Path: "/c/empty", Tool: session.Antigravity, Status: "waiting"}
+	if s := c.Snapshot(context.Background(), empty); s.State != session.Idle {
+		t.Errorf("empty conversation: state = %v, want %v", s.State, session.Idle)
 	}
 }

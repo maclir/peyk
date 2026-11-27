@@ -349,6 +349,7 @@ export function pendingLabel(s) {
 // session's own prompt changes. The laptop publishes that prompt only after the next full refresh.
 export function withDelivered(s, d) {
   if (!d || (s.prompt?.id ?? "") !== d.after) return s;
+  if (d.conversation !== undefined && (s.conversation ?? "") !== d.conversation) return s;
   // A reply written after the send answered it, so the session's own prompt
   // is current even when the laptop could not tell this one apart.
   if (toDate(s.message?.at) > d.at) return s;

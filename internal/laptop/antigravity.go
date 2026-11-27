@@ -31,16 +31,15 @@ func AntigravityTranscript(appDir, workdir, id string) session.Transcript {
 	if id == "" {
 		id = LatestAntigravityConversation(appDir, workdir)
 	}
-	t := session.Transcript{Tool: session.Antigravity, ID: id, AppDir: appDir, Workdir: workdir}
-	if id != "" {
-		t.Dir = filepath.Join(appDir, "brain", id, ".system_generated", "logs")
-	}
-	return t
+	return session.Transcript{Tool: session.Antigravity, AppDir: appDir, Workdir: workdir}.WithID(id)
 }
 
 // LatestAntigravityConversation is the conversation Antigravity CLI last
 // started in workdir, or "" when it has started none.
 func LatestAntigravityConversation(appDir, workdir string) string {
+	if appDir == "" {
+		return ""
+	}
 	b, err := os.ReadFile(filepath.Join(appDir, "cache", "last_conversations.json"))
 	if err != nil {
 		return ""
@@ -50,6 +49,59 @@ func LatestAntigravityConversation(appDir, workdir string) string {
 		return ""
 	}
 	return latest[workdir]
+}
+
+// antigravityConversations returns the conversation directories present under
+// appDir/brain.
+func antigravityConversations(appDir string) map[string]bool {
+	if appDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(appDir, "brain"))
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			seen[e.Name()] = true
+		}
+	}
+	return seen
+}
+
+// newAntigravityConversation returns the newest conversation directory under
+// appDir/brain that was not in before, preferring one with no transcript yet.
+// Antigravity creates brain/<id> immediately on /clear and updates
+// cache/last_conversations.json only once the conversation gets a prompt.
+func newAntigravityConversation(appDir string, before map[string]bool, oldID string) string {
+	if appDir == "" {
+		return ""
+	}
+	brain := filepath.Join(appDir, "brain")
+	entries, err := os.ReadDir(brain)
+	if err != nil {
+		return ""
+	}
+	var best string
+	var bestEmpty bool
+	var bestMod time.Time
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, ".") || before[name] || name == oldID {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		_, err = os.Stat(filepath.Join(brain, name, ".system_generated", "logs", "transcript.jsonl"))
+		empty := os.IsNotExist(err)
+		if best == "" || (empty && !bestEmpty) || (empty == bestEmpty && info.ModTime().After(bestMod)) {
+			best, bestEmpty, bestMod = name, empty, info.ModTime()
+		}
+	}
+	return best
 }
 
 // step is one line of an Antigravity transcript: a prompt, a reply, a tool
@@ -128,21 +180,81 @@ func antigravityExchange(t session.Transcript) (reply, prompt *session.Message) 
 	return reply, prompt
 }
 
-// antigravityParked reports whether an Antigravity conversation's last step
-// is a reply that calls no tool, so the turn is over and nothing waits on an
-// approval.
-func antigravityParked(t session.Transcript) bool {
+// antigravityStepStatus derives an Antigravity session's status from the last
+// step of its transcript: "idle" once it has replied without calling a tool
+// (or before any step is recorded), "waiting" while a tool call has no result
+// yet, and "running" while the model is working after a prompt, tool result,
+// or system message. toolCall is true when waiting on a non-question tool call
+// that may still be running rather than awaiting approval.
+func antigravityStepStatus(t session.Transcript) (status string, toolCall bool) {
 	if t.ID == "" {
-		return false
+		return "idle", false
 	}
 	lines := tail(antigravityTranscript(t))
 	for i := len(lines) - 1; i >= 0; i-- {
 		var s step
-		if json.Unmarshal(lines[i], &s) == nil {
-			return s.reply() && len(s.ToolCalls) == 0
+		if json.Unmarshal(lines[i], &s) != nil {
+			continue
+		}
+		if s.reply() && len(s.ToolCalls) == 0 {
+			return "idle", false
+		}
+		if len(s.ToolCalls) > 0 {
+			for _, c := range s.ToolCalls {
+				if c.Name == "ask_question" {
+					return "waiting", false
+				}
+			}
+			return "waiting", true
+		}
+		return "running", false
+	}
+	return "idle", false
+}
+
+// AntigravityAsking reports whether the last step in t is an open
+// ask_question tool call waiting for the user.
+func AntigravityAsking(t session.Transcript) bool {
+	status, toolCall := antigravityStepStatus(t)
+	return status == "waiting" && !toolCall
+}
+
+// antigravityRunning reports whether an Antigravity session's tmux pane shows
+// an active spinner and "esc to cancel", meaning a tool call is running
+// rather than waiting on an approval prompt.
+func (a Aoe) antigravityRunning(ctx context.Context, id string) bool {
+	pane, err := a.pane(ctx, id)
+	if err != nil {
+		return false
+	}
+	screen, err := a.Run(ctx, "", "tmux", "capture-pane", "-p", "-t", pane)
+	if err != nil {
+		return false
+	}
+	return antigravityPaneRunning(screen)
+}
+
+func antigravityPaneRunning(screen []byte) bool {
+	lines := strings.Split(string(screen), "\n")
+	var bottom []string
+	for i := len(lines) - 1; i >= 0 && len(bottom) < 8; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			bottom = append(bottom, line)
 		}
 	}
-	return false
+	var hasCancel, hasSpinner bool
+	for _, line := range bottom {
+		if strings.Contains(line, "esc to cancel") {
+			hasCancel = true
+		}
+		for _, r := range line {
+			if r >= 0x2801 && r <= 0x28ff {
+				hasSpinner = true
+			}
+			break
+		}
+	}
+	return hasCancel && hasSpinner
 }
 
 // fullContent finds a step's whole content in transcript_full.jsonl, or

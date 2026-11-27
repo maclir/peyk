@@ -109,11 +109,15 @@ func (a Aoe) Send(ctx context.Context, id, text string) error {
 func (a Aoe) Clear(ctx context.Context, id string, t session.Transcript, poll time.Duration) (string, error) {
 	// Transcript timestamps have millisecond precision.
 	since := time.Now().Truncate(time.Millisecond)
+	var before map[string]bool
+	if t.Tool == session.Antigravity {
+		before = antigravityConversations(t.AppDir)
+	}
 	if err := a.Send(ctx, id, "/clear"); err != nil {
 		return "", err
 	}
 	for {
-		if c := clearedTo(t, since); c != "" {
+		if c := clearedTo(t, since, before); c != "" {
 			return c, nil
 		}
 		select {
@@ -125,14 +129,15 @@ func (a Aoe) Clear(ctx context.Context, id string, t session.Transcript, poll ti
 }
 
 // clearedTo is the conversation a /clear opened, or "" until there is one.
-// Antigravity records no /clear in the new conversation, only that it is now
-// the working directory's latest.
-func clearedTo(t session.Transcript, since time.Time) string {
+// Antigravity writes cache/last_conversations.json only on a conversation's
+// first prompt, so /clear is also observed from the directory it creates
+// under brain/.
+func clearedTo(t session.Transcript, since time.Time, before map[string]bool) string {
 	if t.Tool == session.Antigravity {
-		if c := LatestAntigravityConversation(t.AppDir, t.Workdir); c != t.ID {
+		if c := LatestAntigravityConversation(t.AppDir, t.Workdir); c != "" && c != t.ID {
 			return c
 		}
-		return ""
+		return newAntigravityConversation(t.AppDir, before, t.ID)
 	}
 	return ClearedSince(t.Dir, since)
 }

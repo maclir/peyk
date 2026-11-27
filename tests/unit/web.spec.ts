@@ -337,6 +337,9 @@ describe('delivered reply', () => {
     expect(withDelivered(moved, { text: 'next', images: 0, at, after: 'p1' })).toBe(moved);
     const answered = { ...s, message: { text: 'answer', at: new Date(2026, 0, 2, 1) } };
     expect(withDelivered(answered, { text: 'next', images: 0, at, after: 'p1' })).toBe(answered);
+    // Antigravity numbers steps from 0 in every conversation, so a new conversation drops the stand-in.
+    const nextConv = { ...s, conversation: 'conv-2', prompt: { id: '0', text: 'new', at } };
+    expect(withDelivered(nextConv, { text: 'new', images: 0, at, after: '0', conversation: 'conv-1' })).toBe(nextConv);
   });
 });
 

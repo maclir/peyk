@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/maclir/peyk/internal/idea"
+	"github.com/maclir/peyk/internal/laptop"
 	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
@@ -219,9 +221,27 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	if a.Transcripts != nil {
 		var dirs []string
+		seen := map[string]bool{}
+		add := func(d string) {
+			if d != "" && !seen[d] {
+				seen[d] = true
+				dirs = append(dirs, d)
+			}
+		}
 		for _, s := range snaps {
+			if s.Tool == session.Antigravity {
+				if s.Transcript.AppDir != "" {
+					add(filepath.Join(s.Transcript.AppDir, "cache"))
+					if s.Transcript.ID != "" {
+						add(filepath.Join(s.Transcript.AppDir, "brain", s.Transcript.ID))
+					}
+				} else {
+					add(s.Transcript.Dir)
+				}
+				continue
+			}
 			if (s.State == session.Working || s.Question != nil) && s.Transcript.Dir != "" {
-				dirs = append(dirs, s.Transcript.Dir)
+				add(s.Transcript.Dir)
 			}
 		}
 		if err := a.Transcripts.Set(ctx, dirs); err != nil {
@@ -376,7 +396,7 @@ func (a *Agent) followClears(snaps []session.Snapshot) {
 			delete(a.clears, s.ID)
 			continue
 		}
-		s.Transcript.ID = c.id
+		s.Transcript = s.Transcript.WithID(c.id)
 		a.Collect.Transcribe(s)
 	}
 	for id := range a.clears {
@@ -397,7 +417,7 @@ func (a *Agent) cleared(ctx context.Context, id, transcript string) error {
 		a.clears = map[string]clearedTo{}
 	}
 	a.clears[id] = clearedTo{stale: stale, id: transcript}
-	s.Transcript.ID = transcript
+	s.Transcript = s.Transcript.WithID(transcript)
 	a.Collect.Transcribe(&s)
 	a.sessions[id] = s
 	if err := a.publishSessions(ctx); err != nil {
@@ -524,7 +544,7 @@ func (a *Agent) RefreshCI(ctx context.Context) error {
 
 // RefreshReplies rereads the transcripts of working sessions and publishes
 // the ones whose reply or prompt changed. Their state is left to Refresh,
-// unless a session has an open question.
+// unless a session has an open question or an Antigravity session moved on.
 func (a *Agent) RefreshReplies(ctx context.Context) error {
 	if a.sessions == nil {
 		return nil
@@ -532,6 +552,9 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 	for _, s := range a.sessions {
 		// The question may have been answered, which changes its state.
 		if s.Question != nil {
+			return a.Refresh(ctx)
+		}
+		if s.Tool == session.Antigravity && a.antigravityMoved(s) {
 			return a.Refresh(ctx)
 		}
 	}
@@ -542,6 +565,34 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 		}
 	}
 	return a.publishSessions(ctx)
+}
+
+// antigravityMoved reports whether an Antigravity session switched
+// conversations or got a new prompt or reply since the last refresh.
+// Antigravity has no hook pinging the agent on turn boundaries, so a
+// transcript or cache write triggers a full refresh only when one of those
+// changed, ignoring mid-turn tool steps.
+func (a *Agent) antigravityMoved(s session.Snapshot) bool {
+	if latest := laptop.LatestAntigravityConversation(s.Transcript.AppDir, s.Transcript.Workdir); latest != "" && latest != s.Transcript.ID {
+		if c, ok := a.clears[s.ID]; !ok || latest != c.stale {
+			return true
+		}
+	}
+	if s.State != session.NeedsInput && laptop.AntigravityAsking(s.Transcript) {
+		return true
+	}
+	reply, prompt := a.Collect.Exchange(s.Transcript)
+	return !sameMessage(reply, s.Message) || !sameMessage(prompt, s.Prompt)
+}
+
+func sameMessage(a, b *session.Message) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.ID != "" || b.ID != "" {
+		return a.ID == b.ID
+	}
+	return a.Text == b.Text
 }
 
 // finishTasks marks dispatched tasks done once their session has finished

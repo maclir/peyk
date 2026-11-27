@@ -280,6 +280,21 @@ type Transcript struct {
 // and a Snapshot that runs it.
 const Antigravity = "antigravity"
 
+// WithID returns t pointing at conversation id. Claude Code keeps every
+// conversation for a directory in Dir; Antigravity gives each its own log
+// directory under AppDir/brain/<id>.
+func (t Transcript) WithID(id string) Transcript {
+	t.ID = id
+	if t.Tool == Antigravity && t.AppDir != "" {
+		if id == "" {
+			t.Dir = ""
+		} else {
+			t.Dir = filepath.Join(t.AppDir, "brain", id, ".system_generated", "logs")
+		}
+	}
+	return t
+}
+
 // Derive turns aoe's status, whether the agent has tasks still running in the
 // background, and the repository state into one board state. What the agent
 // is doing wins over what it left behind, because a running agent is
