@@ -57,3 +57,34 @@ func LoadUsage(path string) (*session.Usage, error) {
 	}
 	return &u, nil
 }
+
+// Usage files in the directory `peyk usage` writes to: one per coding tool,
+// since each tool's status line reports only its own limits.
+const (
+	ClaudeUsageFile      = "claude.json"
+	AntigravityUsageFile = "antigravity.json"
+)
+
+// LoadAllUsage merges what each tool's status line saved in dir; nil when
+// neither has saved anything yet.
+func LoadAllUsage(dir string) (*session.Usage, error) {
+	claude, err := LoadUsage(filepath.Join(dir, ClaudeUsageFile))
+	if err != nil {
+		return nil, err
+	}
+	ag, err := LoadUsage(filepath.Join(dir, AntigravityUsageFile))
+	if err != nil {
+		return nil, err
+	}
+	if claude == nil && ag == nil {
+		return nil, nil
+	}
+	u := &session.Usage{}
+	if claude != nil {
+		u.FiveHour, u.SevenDay = claude.FiveHour, claude.SevenDay
+	}
+	if ag != nil {
+		u.Antigravity = ag.Antigravity
+	}
+	return u, nil
+}

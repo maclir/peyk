@@ -31,11 +31,11 @@ func socketPath() string {
 	return filepath.Join(home, ".peyk", "agent.sock")
 }
 
-// usagePath is where `peyk usage` saves the rate limits; it sits in a
+// usageDir is where `peyk usage` saves each tool's rate limits; it is a
 // directory of its own so the agent's watcher sees nothing else.
-func usagePath() string {
+func usageDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".peyk", "usage", "claude.json")
+	return filepath.Join(home, ".peyk", "usage")
 }
 
 // healthPath is where the agent says it is publishing, for the menu bar app.
@@ -195,10 +195,10 @@ func runAgent(ctx context.Context) error {
 	usage := make(chan struct{}, 1)
 	usageWatch := agent.NewEditWatcher(usage)
 	defer usageWatch.Close()
-	if err := os.MkdirAll(filepath.Dir(usagePath()), 0o700); err != nil {
+	if err := os.MkdirAll(usageDir(), 0o700); err != nil {
 		return err
 	}
-	if err := usageWatch.Set(ctx, []string{filepath.Dir(usagePath())}); err != nil {
+	if err := usageWatch.Set(ctx, []string{usageDir()}); err != nil {
 		return err
 	}
 	power, err := agent.WatchPower()
@@ -224,7 +224,7 @@ func runAgent(ctx context.Context) error {
 		Notify:   notifier{store: fs, sender: notify.Sender{Keys: keys, Subscriber: o.String()}},
 		Collect:  c, Store: fs, Watch: watcher, Now: time.Now, Log: logger,
 		Debounce: 2 * time.Second, Presence: 10 * time.Minute,
-		Usage:        func() (*session.Usage, error) { return laptop.LoadUsage(usagePath()) },
+		Usage:        func() (*session.Usage, error) { return laptop.LoadAllUsage(usageDir()) },
 		UsageChanged: usage,
 		UsageRead:    health.usage,
 		ActionsRead:  health.actions,

@@ -36,3 +36,30 @@ func TestSaveUsageRoundTripsAndLeavesAnUnchangedFileAlone(t *testing.T) {
 		t.Fatalf("LoadUsage = %+v, want %+v", got, u)
 	}
 }
+
+func TestLoadAllUsageMergesEachToolsFile(t *testing.T) {
+	dir := t.TempDir()
+	if u, err := LoadAllUsage(dir); err != nil || u != nil {
+		t.Fatalf("LoadAllUsage before any save = %v, %v; want nil, nil", u, err)
+	}
+	reset := time.Unix(1738425600, 0).UTC()
+	if err := SaveUsage(filepath.Join(dir, AntigravityUsageFile), &session.Usage{Antigravity: []session.Pool{{Name: "Gemini", SevenDay: &session.Window{Used: 6, ResetsAt: reset}}}}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := LoadAllUsage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.FiveHour != nil || len(u.Antigravity) != 1 || u.Antigravity[0].SevenDay.Used != 6 {
+		t.Fatalf("LoadAllUsage with only Antigravity = %+v", u)
+	}
+	if err := SaveUsage(filepath.Join(dir, ClaudeUsageFile), &session.Usage{FiveHour: &session.Window{Used: 23.5, ResetsAt: reset}}); err != nil {
+		t.Fatal(err)
+	}
+	if u, err = LoadAllUsage(dir); err != nil {
+		t.Fatal(err)
+	}
+	if u.FiveHour == nil || u.FiveHour.Used != 23.5 || len(u.Antigravity) != 1 {
+		t.Fatalf("LoadAllUsage with both = %+v", u)
+	}
+}

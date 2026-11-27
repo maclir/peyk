@@ -77,8 +77,23 @@ struct Window: Decodable {
 struct Usage: Decodable {
     let fiveHour: Window?
     let sevenDay: Window?
+    let antigravity: [Pool]?
 
     enum CodingKeys: String, CodingKey {
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+        case antigravity
+    }
+}
+
+/// One Antigravity quota, shared by a group of models such as Gemini.
+struct Pool: Decodable {
+    let name: String
+    let fiveHour: Window?
+    let sevenDay: Window?
+
+    enum CodingKeys: String, CodingKey {
+        case name
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
     }
@@ -105,12 +120,26 @@ struct Meter: Hashable {
 /// Claude's 5-hour and 7-day windows, as board.js usageLeft reads them: a
 /// window past its reset, or one Claude Code no longer reports, is whole.
 func claudeMeters(_ u: Usage?, now: Date) -> [Meter] {
-    guard let u else { return [] }
-    return [("5h", u.fiveHour), ("7d", u.sevenDay)].map { label, w in
-        guard let w, w.resetsAt > now else { return Meter(left: 100, line: "Claude \(label): 100% left") }
+    guard let u, u.fiveHour != nil || u.sevenDay != nil else { return [] }
+    return windowMeters("Claude", u.fiveHour, u.sevenDay, now: now)
+}
+
+func windowMeters(_ name: String, _ fiveHour: Window?, _ sevenDay: Window?, now: Date) -> [Meter] {
+    [("5h", fiveHour), ("7d", sevenDay)].map { label, w in
+        guard let w, w.resetsAt > now else { return Meter(left: 100, line: "\(name) \(label): 100% left") }
         let left = max(0, min(100, Int((100 - w.used).rounded())))
-        return Meter(left: left, line: "Claude \(label): \(left)% left · resets in \(ago(w.resetsAt.timeIntervalSince(now)))")
+        return Meter(left: left, line: "\(name) \(label): \(left)% left · resets in \(ago(w.resetsAt.timeIntervalSince(now)))")
     }
+}
+
+/// Each Antigravity pool's two windows, as board.js antigravityLeft reads
+/// them: the menu lists every pool, and the icon shows the tightest pool
+/// for each window, as board.js tightest picks it.
+func antigravityMeters(_ u: Usage?, now: Date) -> (bars: [Meter], lines: [Meter]) {
+    let pools = (u?.antigravity ?? []).map { windowMeters("Antigravity \($0.name)", $0.fiveHour, $0.sevenDay, now: now) }
+    guard !pools.isEmpty else { return ([], []) }
+    let bars = (0..<2).map { i in pools.map { $0[i] }.min { $0.left < $1.left }! }
+    return (bars, pools.flatMap { $0 })
 }
 
 /// The month's included Actions minutes left, as board.js actionsLeft reads
@@ -187,6 +216,7 @@ final class Model: ObservableObject {
     @Published var state = AgentState.starting
     @Published var detail: [String] = []
     @Published var claude: [Meter] = []
+    @Published var antigravity: (bars: [Meter], lines: [Meter]) = ([], [])
     @Published var actions: Meter?
     /// The last check's answer: nil until checked, then the version or why
     /// the check failed.
@@ -226,11 +256,13 @@ final class Model: ObservableObject {
                 if let line = lastLogLine() { detail = [String(line.prefix(80))] }
             }
             let claude = claudeMeters(health?.usage, now: now)
+            let antigravity = antigravityMeters(health?.usage, now: now)
             let actions = actionsMeter(health?.actions, now: now)
             DispatchQueue.main.async {
                 self.state = state
                 self.detail = detail
                 self.claude = claude
+                self.antigravity = antigravity
                 self.actions = actions
             }
         }
@@ -294,14 +326,19 @@ func launchctl(_ args: [String]) -> (status: Int32, output: String) {
     return (p.terminationStatus, String(decoding: data, as: UTF8.self))
 }
 
-/// The Peyk mark, then the phone header's quota bars: Claude's two windows
-/// and, set apart below, the month's Actions minutes. Each bar fills with
-/// what is used. It is a template image so macOS tints it for the menu bar,
-/// which leaves a bar's length, not the phone's amber and red, to show a
-/// quota running out.
-func icon(_ state: AgentState, claude: [Meter], actions: Meter?) -> NSImage {
-    let bars: [(y: CGFloat, left: Int)] = claude.enumerated().map { (CGFloat(3 + 4 * $0.offset), $0.element.left) }
-        + (actions.map { [(12, $0.left)] } ?? [])
+/// The Peyk mark, then the phone header's quota bars in one column: Claude
+/// Code's two windows, Antigravity's two, and the month's Actions minutes,
+/// each group set apart. Each bar fills with what is used. It is a template
+/// image so macOS tints it for the menu bar, which leaves no amber or red:
+/// a quota running low shows by its bar thinning, as on the phone, to half
+/// under 10% left and to a hairline once nothing is.
+func icon(_ state: AgentState, claude: [Meter], antigravity: [Meter], actions: Meter?) -> NSImage {
+    let slots: [(y: CGFloat, meter: Meter?)] = [
+        (1, claude.first), (4, claude.dropFirst().first),
+        (8, antigravity.first), (11, antigravity.dropFirst().first),
+        (15, actions),
+    ]
+    let bars: [(y: CGFloat, left: Int)] = slots.compactMap { slot in slot.meter.map { (slot.y, $0.left) } }
     let barX: CGFloat = 21, barWidth: CGFloat = 16
     let width: CGFloat = bars.isEmpty ? 18 : barX + barWidth
     let image = NSImage(size: NSSize(width: width, height: 18), flipped: true) { _ in
@@ -310,12 +347,14 @@ func icon(_ state: AgentState, claude: [Meter], actions: Meter?) -> NSImage {
         defer {
             ctx.restoreGraphicsState()
             for bar in bars {
+                let thick: CGFloat = bar.left <= 0 ? 0.5 : bar.left < 10 ? 1 : 2
+                let y = bar.y + (2 - thick) / 2
                 NSColor.black.withAlphaComponent(0.35).setFill()
-                NSBezierPath(roundedRect: NSRect(x: barX, y: bar.y, width: barWidth, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+                NSBezierPath(roundedRect: NSRect(x: barX, y: y, width: barWidth, height: thick), xRadius: thick / 2, yRadius: thick / 2).fill()
                 NSColor.black.setFill()
                 let used = barWidth * CGFloat(100 - bar.left) / 100
                 if used > 0 {
-                    NSBezierPath(roundedRect: NSRect(x: barX, y: bar.y, width: used, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+                    NSBezierPath(roundedRect: NSRect(x: barX, y: y, width: used, height: thick), xRadius: thick / 2, yRadius: thick / 2).fill()
                 }
             }
         }
@@ -365,7 +404,7 @@ func icon(_ state: AgentState, claude: [Meter], actions: Meter?) -> NSImage {
         return true
     }
     image.isTemplate = true
-    image.accessibilityDescription = (["Peyk agent \(state.word)"] + claude.map(\.line) + (actions.map { [$0.line] } ?? []))
+    image.accessibilityDescription = (["Peyk agent \(state.word)"] + (claude + antigravity + (actions.map { [$0] } ?? [])).map(\.line))
         .joined(separator: "; ")
     return image
 }
@@ -385,10 +424,13 @@ struct PeykMenu: App {
         MenuBarExtra {
             Text("Peyk agent — \(model.state.word)")
             ForEach(model.detail, id: \.self) { Text($0) }
-            if !model.claude.isEmpty || model.actions != nil {
+            if !model.claude.isEmpty || !model.antigravity.lines.isEmpty || model.actions != nil {
                 Divider()
                 ForEach(model.claude, id: \.self) { m in
                     Button(m.line) { NSWorkspace.shared.open(URL(string: "https://claude.ai/settings/usage")!) }
+                }
+                ForEach(model.antigravity.lines, id: \.self) { m in
+                    Button(m.line) { NSWorkspace.shared.open(URL(string: "https://antigravity.google/docs/cli/commands/usage")!) }
                 }
                 if let m = model.actions {
                     Button(m.line) { NSWorkspace.shared.open(URL(string: "https://github.com/settings/billing")!) }
@@ -419,7 +461,7 @@ struct PeykMenu: App {
             Divider()
             Button("Quit menu bar app") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
-            Image(nsImage: icon(model.state, claude: model.claude, actions: model.actions))
+            Image(nsImage: icon(model.state, claude: model.claude, antigravity: model.antigravity.bars, actions: model.actions))
         }
         .menuBarExtraStyle(.menu)
     }

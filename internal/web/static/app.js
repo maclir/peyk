@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -379,26 +379,27 @@ async function start(cfg) {
     renderUsage(now);
   }
 
-  // The header shows Claude's windows and the month's Actions minutes as bars;
-  // the popover names them, and each row opens that quota's own page.
+  // The header stacks each quota's bars in one column: Claude Code's two
+  // windows, Antigravity's tightest pool for each window, then the month's
+  // Actions minutes. The popover lays them out as a table and names a number
+  // only where a quota runs low; each row opens that quota's own page.
   function renderUsage(now) {
     const claude = usageLeft(state.usage, now);
+    const ag = antigravityLeft(state.usage, now);
     const gh = actionsLeft(state.actions, now);
-    const open = state.menu === "usage" && Boolean(claude || gh);
-    usageEl.hidden = !claude && !gh;
+    const any = Boolean(claude || ag || gh);
+    const open = state.menu === "usage" && any;
+    usageEl.hidden = !any;
     usagePopEl.hidden = !open;
     usageEl.setAttribute("aria-expanded", String(open));
-    const meters = usageEl.querySelectorAll(".meter");
-    meters.forEach((m, i) => {
-      const left = i < 2 ? claude?.[i].left : gh?.pct;
-      m.hidden = left == null;
-      m.classList.toggle("low", left < 10);
-      m.classList.toggle("out", left <= 0);
-      m.firstElementChild.style.width = `${100 - (left ?? 100)}%`;
-    });
+    const agTight = ag && tightest(ag);
+    const lefts = [claude?.[0].left, claude?.[1].left, agTight?.[0].left, agTight?.[1].left, gh?.pct];
+    usageEl.querySelectorAll(".meter").forEach((m, i) => meter(m, lefts[i]));
     const minutes = (n) => n.toLocaleString("en-US");
+    const windows = (ws) => ws.map((w) => `${w.label} ${w.left}% left`).join(", ");
     const said = [
-      claude && `Claude ${claude.map((w) => `${w.label} ${w.left}% left`).join(", ")}`,
+      claude && `Claude ${windows(claude)}`,
+      ...(ag ?? []).map((p) => `Antigravity ${p.name} ${windows(p.windows)}`),
       gh && `Actions ${minutes(gh.left)} of ${minutes(gh.included)} minutes left`,
     ].filter(Boolean);
     usageEl.setAttribute("aria-label", `Usage: ${said.join("; ")}`);
@@ -407,21 +408,33 @@ async function start(cfg) {
       usagePopEl.replaceChildren();
       return;
     }
-    const row = (label, left, text) => h("span", { class: "uwin" }, h("span", {}, label),
-      h("span", { class: `meter${left <= 0 ? " low out" : left < 10 ? " low" : ""}` }, h("i", { style: `width: ${100 - left}%` })), h("span", {}, text));
-    const link = (href, ...children) => h("a", { href, target: "_blank", rel: "noopener", onclick: () => { state.menu = null; render(); } }, ...children);
     const day = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const parts = [];
-    if (claude) {
-      parts.push(link("https://claude.ai/settings/usage", h("strong", {}, "Claude"),
-        claude.map((w) => row(w.label, w.left, `${w.left}%` + (w.resetsAt ? ` · ${ago(now, w.resetsAt.getTime())}` : "")))));
+    // A cell shows what is left only once it runs low, and when it comes back
+    // once nothing is.
+    const cell = (left, back, kind, wide) => {
+      const s = quotaState(left);
+      const note = s === "out" ? back : s === "low" ? `${left}%` : "";
+      return h("span", { class: `ucell${wide ? " wide" : ""}` }, meter(h("span", { class: `meter ${kind}` }, h("i")), left),
+        note ? h("span", { class: `unote ${s}` }, note) : null);
+    };
+    const windowCells = (ws, kind) => ws.map((w) => cell(w.left, w.resetsAt ? ago(now, w.resetsAt.getTime()) : "", kind));
+    const row = (href, name, label, cells, sub) => h("a", {
+      class: `urow${sub ? " sub" : ""}`, href, target: "_blank", rel: "noopener", "aria-label": label,
+      onclick: () => { state.menu = null; render(); },
+    }, h("span", { class: "uname" }, name), ...cells);
+    const parts = [h("span", { class: "uhead", "aria-hidden": "true" }, h("span"), h("span", {}, "5 hours"), h("span", {}, "Week"))];
+    if (claude) parts.push(row("https://claude.ai/settings/usage", "Claude Code", `Claude Code: ${windows(claude)}`, windowCells(claude, "cc")));
+    if (ag) {
+      parts.push(h("span", { class: "ugroup" }, "Antigravity"));
+      for (const p of ag) {
+        parts.push(row("https://antigravity.google/docs/cli/commands/usage", p.name, `Antigravity ${p.name}: ${windows(p.windows)}`, windowCells(p.windows, "ag"), true));
+      }
     }
-    if (claude && gh) parts.push(h("hr"));
     if (gh) {
-      const most = gh.repos.map((r) => `${r.repo.split("/").pop()} ${minutes(r.minutes)}`).join(" · ");
-      parts.push(link("https://github.com/settings/billing", h("strong", {}, "GitHub Actions"),
-        row("min", gh.pct, `${minutes(gh.left)} left` + (gh.resetsAt ? ` · ${day(gh.resetsAt)}` : "")),
-        most ? h("span", { class: "hint" }, `Most used: ${most}`) : null));
+      if (claude || ag) parts.push(h("hr"));
+      parts.push(row("https://github.com/settings/billing", "GitHub Actions",
+        `GitHub Actions: ${minutes(gh.left)} of ${minutes(gh.included)} minutes left`,
+        [cell(gh.pct, gh.resetsAt ? day(gh.resetsAt) : "", "gh", true)]));
     }
     usagePopEl.replaceChildren(...parts);
     // The bars sit beside the logo, so a popover hung from them can pass the
@@ -429,6 +442,16 @@ async function start(cfg) {
     usagePopEl.style.left = "";
     const past = usagePopEl.getBoundingClientRect().right - (document.documentElement.clientWidth - 16);
     if (past > 0) usagePopEl.style.left = `${usagePopEl.offsetLeft - past}px`;
+  }
+
+  // meter fills a bar with what is used; an unreported quota hides its bar.
+  function meter(m, left) {
+    m.hidden = left == null;
+    const s = quotaState(left ?? 100);
+    m.classList.toggle("low", s === "low");
+    m.classList.toggle("out", s === "out");
+    m.firstElementChild.style.width = `${100 - (left ?? 100)}%`;
+    return m;
   }
 
   // #inbox and #new open a sheet over the workers. The sheet then holds the

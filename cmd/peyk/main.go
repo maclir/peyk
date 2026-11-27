@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -22,7 +23,7 @@ const usage = `usage: peyk <command>
   status         print every live aoe session: state, last commit, push state, last reply
   agent          publish session state for the phone until stopped
   ping           tell a running agent that something changed (for hooks)
-  usage          save the Claude rate limits from status line JSON on stdin (for statusLine)
+  usage          save Claude Code's or Antigravity's limits from status line JSON on stdin (for statusLine)
   owner <email>  admit this Google account to peyk after its first sign-in
   import-tasks   add tasks from a JSON array on stdin: [{"project","text","created_at"}]
   pair <label>   trust a new passkey for signing commands
@@ -63,11 +64,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		agent.Ping(socketPath())
 		return nil
 	case "usage":
-		u, err := session.ParseStatusLine(os.Stdin)
-		if err != nil || u == nil {
-			return err
-		}
-		return laptop.SaveUsage(usagePath(), u)
+		return saveUsage(os.Stdin)
 	case "pair":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: peyk pair <label>")
@@ -100,6 +97,28 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}
+}
+
+// saveUsage keeps the limits a status line reports. Claude Code reports
+// rate_limits and Antigravity a quota; each goes to its own file, so neither
+// overwrites the other's.
+func saveUsage(in io.Reader) error {
+	b, err := io.ReadAll(in)
+	if err != nil {
+		return err
+	}
+	pools, err := session.ParseQuota(b)
+	if err != nil {
+		return err
+	}
+	if pools != nil {
+		return laptop.SaveUsage(filepath.Join(usageDir(), laptop.AntigravityUsageFile), &session.Usage{Antigravity: pools})
+	}
+	u, err := session.ParseStatusLine(bytes.NewReader(b))
+	if err != nil || u == nil {
+		return err
+	}
+	return laptop.SaveUsage(filepath.Join(usageDir(), laptop.ClaudeUsageFile), u)
 }
 
 func collector() laptop.Collector {

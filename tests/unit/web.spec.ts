@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -402,6 +402,35 @@ describe('usageLeft', () => {
   it('counts a reset or unreported window as whole', () => {
     const left = usageLeft({ five_hour: { used: 90, resets_at: at(-1) } }, now);
     expect(left.map((w: any) => [w.label, w.left, w.resetsAt])).toEqual([['5h', 100, null], ['7d', 100, null]]);
+  });
+});
+
+describe('antigravityLeft', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const at = (h: number) => new Date(now + h * 3600_000);
+
+  it('is nothing until Antigravity has reported a pool', () => {
+    expect(antigravityLeft(null, now)).toBeNull();
+    expect(antigravityLeft({ five_hour: { used: 1, resets_at: at(1) } }, now)).toBeNull();
+  });
+
+  it('gives each pool its windows, and the tightest per window across pools', () => {
+    const pools = antigravityLeft({ antigravity: [
+      { name: 'Gemini', five_hour: { used: 20, resets_at: at(1) }, seven_day: { used: 40, resets_at: at(50) } },
+      { name: 'Claude', seven_day: { used: 92, resets_at: at(60) } },
+    ] }, now);
+    expect(pools.map((p: any) => [p.name, p.windows.map((w: any) => w.left)])).toEqual([['Gemini', [80, 60]], ['Claude', [100, 8]]]);
+    expect(tightest(pools).map((w: any) => [w.label, w.left])).toEqual([['5h', 80], ['7d', 8]]);
+  });
+
+  it('leaves Claude Code unreported when only Antigravity has reported', () => {
+    expect(usageLeft({ antigravity: [{ name: 'Gemini' }] }, now)).toBeNull();
+  });
+});
+
+describe('quotaState', () => {
+  it('is plain while enough is left, low under 10%, out at none', () => {
+    expect([100, 10, 9, 1, 0].map(quotaState)).toEqual(['', '', 'low', 'low', 'out']);
   });
 });
 

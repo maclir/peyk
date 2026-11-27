@@ -42,22 +42,36 @@ a, button { }
 .laptop.on::after, .laptop.off::after { content: ""; position: absolute; right: 8px; bottom: 12px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--bg); }
 .laptop.on::after { background: var(--ok); }
 .laptop.off::after { background: var(--bad); }
-/* Claude's 5-hour window over its week, then the month's Actions minutes, set apart. */
+/* One column: Claude Code's two windows, Antigravity's two, then the month's
+   Actions minutes, each group set apart. */
 /* The padding is the tap target; the negative margin keeps it from growing the header. */
-.usage { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 10px 4px; margin: -10px -4px; border: 0; border-radius: 6px; background: none; }
+.usage { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 4px; margin: -10px -4px; border: 0; border-radius: 6px; background: none; }
 .usage[aria-expanded="true"] { background: var(--run-soft); }
-.meter.gh { margin-top: 2px; }
-.meter.gh i { background: var(--accent); }
-.wmenu .upop { right: auto; left: -4px; top: 34px; box-sizing: border-box; width: min(280px, calc(100vw - 32px)); padding: 4px; }
-.upop a { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
-.upop a:hover, .upop a:focus-visible { background: var(--paper); outline: none; }
-.upop strong { font-weight: 600; }
-.upop .uwin { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; font: 0.75rem var(--mono); color: var(--muted); }
-.upop .uwin .meter { width: auto; }
-.upop .hint { font-size: 0.75rem; }
+.usage .meter { height: 3px; }
+.usage .meter.cc + .meter.ag, .usage .meter.gh { margin-top: 3px; }
+.wmenu .upop { right: auto; left: -4px; top: 34px; box-sizing: border-box; width: min(300px, calc(100vw - 32px)); padding: 12px 4px 8px; }
+.upop .uhead, .upop .urow { display: grid; grid-template-columns: minmax(0, 1fr) 64px 64px; column-gap: 16px; align-items: center; padding: 0 14px; }
+.upop .uhead { padding-bottom: 4px; font-size: 0.7rem; color: var(--muted); }
+.upop .urow { min-height: 44px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
+.upop .urow:hover, .upop .urow:focus-visible { background: var(--paper); outline: none; }
+.upop .urow.sub .uname { padding-left: 12px; }
+.upop .ugroup { margin: 6px 14px 0; font-size: 0.88rem; }
+.upop hr { border: 0; border-top: 1px solid var(--line); margin: 6px 14px; }
+.upop .ucell { position: relative; }
+.upop .ucell.wide { grid-column: span 2; }
+.upop .ucell .meter { width: auto; }
+.upop .unote { position: absolute; top: 8px; left: 0; font-size: 0.7rem; font-weight: 600; line-height: 1; }
+.upop .unote.low { color: var(--warn); }
+.upop .unote.out { color: var(--bad); }
+/* A bar fills with what is used, in its quota's color. */
 .meter { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--muted); }
-/* Amber while some quota remains, red once none does. */
+.meter.cc i { background: var(--design); }
+.meter.ag i { background: var(--accent); }
+/* Running low thins the bar and turns it amber; a red hairline once nothing
+   is left. Color alone would not tell a group's own hue from a warning. */
+.meter.low { transform: scaleY(0.6); }
+.meter.out { transform: scaleY(0.34); }
 .meter.low i { background: var(--warn); }
 .meter.out i { background: var(--bad); }
 .notice { color: var(--muted); margin-top: 2rem; }

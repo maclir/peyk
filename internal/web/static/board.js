@@ -73,12 +73,41 @@ export function onDefaultBranch(git) {
 // past its reset is whole again, and so is one Claude Code no longer reports:
 // it drops a window once that window resets.
 export function usageLeft(usage, now) {
-  if (!usage) return null;
-  return [["5h", usage.five_hour], ["7d", usage.seven_day]].map(([label, w]) => {
+  if (!usage?.five_hour && !usage?.seven_day) return null;
+  return windowsLeft(usage, now);
+}
+
+function windowsLeft(limits, now) {
+  return [["5h", limits.five_hour], ["7d", limits.seven_day]].map(([label, w]) => {
     const resetsAt = w && toDate(w.resets_at);
     if (!resetsAt || resetsAt.getTime() <= now) return { label, left: 100, resetsAt: null };
     return { label, left: Math.max(0, Math.min(100, Math.round(100 - w.used))), resetsAt };
   });
+}
+
+// antigravityLeft is usageLeft for each of Antigravity's pools, which share
+// limits within a group of models such as Gemini.
+export function antigravityLeft(usage, now) {
+  const pools = usage?.antigravity ?? [];
+  if (!pools.length) return null;
+  return pools.map((p) => ({ name: p.name, windows: windowsLeft(p, now) }));
+}
+
+// tightest is the least left in each window across pools, so one bar per
+// window never hides a pool that is about to run out.
+export function tightest(pools) {
+  return ["5h", "7d"].map((label, i) => pools.reduce(
+    (min, p) => (p.windows[i].left < min.left ? p.windows[i] : min),
+    { label, left: 100, resetsAt: null },
+  ));
+}
+
+// quotaState is how a bar shows what is left: thinner and amber under 10%,
+// a red hairline once nothing is.
+export function quotaState(left) {
+  if (left <= 0) return "out";
+  if (left < 10) return "low";
+  return "";
 }
 
 // actionsLeft is what is left of the month's included GitHub Actions
