@@ -87,10 +87,13 @@ const homeEl = document.getElementById("home");
 const hpageEl = document.getElementById("hpage");
 const config = document.body.dataset.firebase;
 // Checking for updates and updating start from the header, so their result
-// shows under it; the toast carries results whose control is gone.
+// shows under it.
 const hpopEl = hstatEl.appendChild(Object.assign(document.createElement("p"), { className: "hpop", hidden: true }));
 hpopEl.setAttribute("role", "status");
-const toastEl = document.body.appendChild(Object.assign(document.createElement("div"), { className: "toast", hidden: true }));
+// A result drawn by a render is a new element each time, which screen readers
+// do not announce; this one region, never shown, says it once.
+const liveEl = document.body.appendChild(Object.assign(document.createElement("p"), { className: "sronly" }));
+liveEl.setAttribute("role", "status");
 // How long a result that needs nothing more from you stays on screen.
 const SETTLED_MS = 3000;
 // The commands a worker's header sends.
@@ -176,7 +179,7 @@ async function start(cfg) {
     // The idea whose dismissal note is being written.
     dismissing: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
-    outcomes: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
+    outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
@@ -344,8 +347,11 @@ async function start(cfg) {
     }
     state.user = user;
     listen();
-    receiveShare().catch((err) => alertLine(`Could not attach what was shared: ${err.message}`));
-    checkPush().then(render, (err) => toast(`Cannot check notifications: ${err.message}`, "bad"));
+    receiveShare().catch((err) => {
+      openCompose(null, null);
+      composeAlert(`Could not attach what was shared: ${err.message}`);
+    });
+    refreshPush();
   });
 
   function renderLaptop() {
@@ -567,15 +573,23 @@ async function start(cfg) {
         : h("button", { type: "button", class: "icon dismiss", "aria-label": "Dismiss", onclick: () => setOutcome(key, "") }, icon("x")));
   }
 
-  // A result with no control left on screen to show it beside.
-  function toast(text, tone = "") {
-    clearTimeout(toastEl.timer);
-    toastEl.replaceChildren(h("span", { class: "grow" }, text),
-      h("button", { type: "button", class: "icon dismiss", "aria-label": "Dismiss", onclick: () => { toastEl.hidden = true; } }, icon("x")));
-    toneOf(toastEl, tone);
-    toastEl.setAttribute("role", tone === "bad" ? "alert" : "status");
-    toastEl.hidden = false;
-    if (tone !== "bad") toastEl.timer = setTimeout(() => { toastEl.hidden = true; }, SETTLED_MS);
+  function announce(text) {
+    liveEl.textContent = "";
+    requestAnimationFrame(() => { liveEl.textContent = text; });
+  }
+
+  // A task added while its inbox is out of sight is shown arriving there:
+  // the inbox button names the project until the result settles.
+  function addedTo(project) {
+    const a = { project };
+    state.added = a;
+    announce(`Added to ${project}`);
+    setTimeout(() => {
+      if (state.added !== a) return;
+      state.added = null;
+      render();
+    }, SETTLED_MS);
+    render();
   }
 
   function toneOf(el, tone) {
@@ -749,6 +763,8 @@ async function start(cfg) {
           t.ideate ? ideateTag(t.ideate) : null,
           h("span", { class: "rstat" }, stat)),
         action),
+      outcomeLine(`task:${t.id}`),
+      outcomeLine(`resume:${t.id}`),
       h("div", { class: "rmore", hidden: open ? null : "" },
         h("div", { class: "rfull" }, t.text),
         taskImages(t),
@@ -771,11 +787,12 @@ async function start(cfg) {
   }
 
   // A send's outcome stays on its task, which may have moved since, rather
-  // than in a status line scrolled out of view.
-  function send(t, clear, { announce = false } = {}) {
+  // than in a status line scrolled out of view. also gets each report too,
+  // for a send started from another card.
+  function send(t, clear, { also = null } = {}) {
     const report = (text, busy = false, tone = "") => {
       state.sends.set(t.id, { text, busy, tone });
-      if (announce && text && !busy) toast(`${t.project}: ${text}`, tone);
+      if (also) also(text, busy, tone);
       render();
     };
     state.menu = null;
@@ -824,6 +841,7 @@ async function start(cfg) {
         status,
         t.ready ? sendButton(t, clears, () => sendWith(t, clears)) : null,
       ),
+      outcomeLine(`task:${t.id}`),
     );
   }
 
@@ -855,7 +873,7 @@ async function start(cfg) {
     const i = list.findIndex((x) => x.id === t.id);
     state.menu = null;
     fs.updateDoc(fs.doc(db, "tasks", t.id), { rank: rankAt(list, i, to) })
-      .catch((err) => alertLine(`Could not move the task: ${err.message}`));
+      .catch((err) => setOutcome(`task:${t.id}`, `Could not move the task: ${err.message}`, false, "bad"));
   }
 
   // New tasks, edits and replies share one composer, so each takes text,
@@ -870,6 +888,7 @@ async function start(cfg) {
     return h("form", { class: `composer ${cls}`, onsubmit: (e) => { e.preventDefault(); send(text); } },
       imgs.length ? h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))) : null,
       text,
+      outcomeLine(`attach:${key}`),
       h("div", { class: "crow" },
         lead,
         h("button", { type: "button", class: "icon round", title: "Attach an image or screenshot", "aria-label": "Attach image", disabled: imgs.length >= MAX_IMAGES ? "" : null, onclick: () => files.click() }, icon("clip")),
@@ -1077,12 +1096,12 @@ async function start(cfg) {
         state.lastPicked = project;
         if (shown && state.only && state.only !== project) state.only = project;
         close();
-        if (!shown) toast(`Added to ${project}`, "ok");
+        if (!shown) addedTo(project);
         return from;
       },
       failed: (err, project, from) => {
         openCompose(project, from);
-        alertLine(`Could not add the task: ${err.message}`);
+        composeAlert(`Could not add the task: ${err.message}`);
       } });
     const note = h("p", { class: "cnote", role: "status", hidden: "" });
     const alert = h("p", { class: "alert", role: "status" });
@@ -1277,7 +1296,7 @@ async function start(cfg) {
       for (const d of done.values()) d.tasks = d.tasks.filter((x) => x.id !== t.id);
       render();
     } catch (err) {
-      alertLine(`Could not delete: ${err.message}`);
+      setOutcome(`task:${t.id}`, `Could not delete: ${err.message}`, false, "bad");
     }
   }
 
@@ -1351,7 +1370,7 @@ async function start(cfg) {
       stat: r?.current ? `current · ${ago(t.done_at, now)}` : ago(t.done_at, now),
       action: r && !r.current ? busyButton(`resume:${t.id}`, {
         type: "button", class: "icon", title: r.busy ? `${t.project} is ${r.busy}` : label, "aria-label": `${label}: ${t.text}`, disabled: r.busy ? "" : null,
-        onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, "Resume", `resume:${t.id}`, resumed, null, { done: null }),
+        onclick: () => sendCommand("resume", { session: p.session_id, conversation: t.conversation_id }, "Resume", `resume:${t.id}`, resumed(t), null, { done: null }),
       }, icon(r.clear ? "clearresume" : "resume")) : null,
       detail: [
         h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
@@ -1426,13 +1445,13 @@ async function start(cfg) {
   async function attachImages(key, files) {
     const imgs = draft(key);
     const room = MAX_IMAGES - imgs.length;
-    if (files.length > room) alertLine(`At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
+    if (files.length > room) attachNote(key, `At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
     for (const file of files.slice(0, Math.max(0, room))) {
       try {
         const img = await prepareImage(file);
         imgs.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
       } catch (err) {
-        alertLine(`Could not attach: ${err.message}`);
+        attachNote(key, `Could not attach: ${err.message}`, "bad");
       }
     }
     render();
@@ -1450,7 +1469,7 @@ async function start(cfg) {
     const all = shared.files || [];
     const files = all.filter((f) => f.type.startsWith("image/"));
     if (files.length) await attachImages("add", files);
-    if (files.length < all.length) alertLine("Only images can be attached; the other files were left out.", "warn");
+    if (files.length < all.length) composeAlert("Only images can be attached; the other files were left out.", "warn");
   }
 
   function pasteImages(key, e) {
@@ -1532,29 +1551,46 @@ async function start(cfg) {
         reveal(chosen);
         close();
       } catch (err) {
-        alertLine(`Could not save: ${err.code === "permission-denied" ? "the task was already sent" : err.message}`);
+        setOutcome(`task:${t.id}`, `Could not save: ${err.code === "permission-denied" ? "the task was already sent" : err.message}`, false, "bad");
       }
     };
     const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
       submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null, tools: t.ideate ? null : prototypeToggle(key, null),
       tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
     form.querySelector("textarea").value = t.text;
+    const o = outcomeLine(`task:${t.id}`);
+    if (o) form.append(o);
     return form;
   }
 
-  // Each sheet has its own alert line; with neither open, a toast says it.
-  function alertLine(text, tone = "bad") {
-    const el = compose?.open ? compose.alert : inboxSheet?.open ? inboxSheet.alert : null;
-    if (!el) return text && toast(text, tone);
-    el.textContent = text;
-    toneOf(el, tone);
+  // The New task sheet is never redrawn, so it reports in a line of its own.
+  function composeAlert(text, tone = "bad") {
+    compose.alert.textContent = text;
+    toneOf(compose.alert, tone);
+  }
+
+  // Every other composer is redrawn, so it shows the outcome under its text.
+  function attachNote(key, text, tone) {
+    if (key === "add") return composeAlert(text, tone);
+    setOutcome(`attach:${key}`, text, false, tone);
   }
 
   // A resume that went through closes the inbox sheet, as a sent task does;
   // the worker's new conversation is the result.
-  function resumed(text, busy, tone) {
-    if (!busy && !text && inboxSheet?.open) return closeLayer("inbox");
-    alertLine(busy && !text ? "" : text, tone);
+  function resumed(t) {
+    return (text, busy, tone) => {
+      setOutcome(`resume:${t.id}`, text, busy, tone);
+      if (!busy && !text && inboxSheet?.open) closeLayer("inbox");
+    };
+  }
+
+  // A failed check leaves the notifications row up with the error, so the
+  // check can run again from there.
+  function refreshPush() {
+    return checkPush().then(() => setOutcome("notify", ""), (err) => {
+      state.push = "failed";
+      setOutcome("notify", `Cannot check notifications: ${err.message}`, false, "bad");
+    });
   }
 
   // Whether this browser already receives notifications, checked once per
@@ -1596,8 +1632,7 @@ async function start(cfg) {
         endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, created_at: fs.serverTimestamp(),
       });
       state.push = "on";
-      toast("Notifications are on for this device.", "ok");
-      render();
+      setOutcome("notify", "Notifications are on for this device.", false, "ok");
     } catch (err) {
       setOutcome("notify", `Could not turn on notifications: ${err.message}`, false, "bad");
     }
@@ -1624,8 +1659,12 @@ async function start(cfg) {
       return p ? queuedFor(p.name).length : 0;
     };
     const list = sortSessions([...state.sessions.keys()].map(shownWorker), inboxCount);
-    const pushRow = state.push === "off"
-      ? h("div", { class: "pushrow" }, h("span", {}, "Get notified when a worker finishes or needs you."), busyButton("notify", { type: "button", onclick: () => track("notify", turnOnPush) }, "Turn on notifications"), outcomeLine("notify"))
+    // Turning notifications on keeps the row up until its result settles.
+    const pushButton = state.push === "off" ? busyButton("notify", { type: "button", onclick: () => track("notify", turnOnPush) }, "Turn on notifications")
+      : state.push === "failed" ? busyButton("notify", { type: "button", onclick: () => track("notify", refreshPush) }, "Check again")
+        : null;
+    const pushRow = pushButton || state.outcomes.has("notify")
+      ? h("div", { class: "pushrow" }, pushButton ? h("span", {}, "Get notified when a worker finishes or needs you.") : null, pushButton, outcomeLine("notify"))
       : null;
     if (!state.loaded.has("sessions")) return loading("Loading workers…");
     if (!list.length) return h("div", {}, pushRow, h("p", { class: "notice" }, "No workers published yet. Start the agent on the laptop with make serve."));
@@ -1748,7 +1787,7 @@ async function start(cfg) {
     const out = [g && g.unpushed > 0 ? pushCard(s, now) : null, facts(s, now, true)];
     if (!p) return out.filter(Boolean);
     const list = queuedFor(p.name);
-    const ideas = openIdeas(state.ideas, p.name);
+    const ideas = shownIdeas(p.name);
     const sent = sentTasks(state.tasks).filter((t) => t.project === p.name);
     out.push(
       h("div", { class: "group panehead" }, h("span", { class: "grow" }, "Inbox"), addButton(p.name, p.name)),
@@ -1776,7 +1815,7 @@ async function start(cfg) {
       whole.data = snap.exists() ? snap.data() : null;
       whole.nodes = null;
       render();
-    }, (err) => toast(`Cannot read the conversation: ${err.message}`, "bad"));
+    }, (err) => failHistory(whole, `Cannot read the conversation: ${err.message}`));
     requestHistory(whole);
     render();
   }
@@ -1793,7 +1832,13 @@ async function start(cfg) {
 
   function requestHistory(whole) {
     fs.setDoc(fs.doc(db, "history", whole.id), { requested_at: fs.serverTimestamp() }, { merge: true })
-      .catch((err) => toast(`Cannot ask the laptop for the conversation: ${err.message}`, "bad"));
+      .catch((err) => failHistory(whole, `Cannot ask the laptop for the conversation: ${err.message}`));
+  }
+
+  function failHistory(whole, text) {
+    if (state.history !== whole) return;
+    whole.error = text;
+    render();
   }
 
   function closeHistory() {
@@ -1830,6 +1875,11 @@ async function start(cfg) {
       h("span", {}, "Whole conversation"),
       h("button", { type: "button", class: "link", onclick: () => collapseHistory(bar) }, icon("down"), "Latest only"));
     const data = whole.data;
+    if (whole.error) {
+      return [bar, h("p", { class: "outcome", role: "status", "data-tone": "bad" },
+        h("span", { class: "grow" }, whole.error),
+        h("button", { type: "button", class: "link", onclick: () => openHistory(s) }, "Try again"))];
+    }
     if (!data?.served_at) {
       return [bar, laptopOnline(state.laptop, now)
         ? loading("Reading the conversation on the laptop…")
@@ -1903,10 +1953,26 @@ async function start(cfg) {
       (text, busy, tone) => setOutcome(`worker:${s.id}`, text, busy, tone), null, { done: DONE[label] });
   }
 
+  // Only open ideas are listened to, so an added one is kept here to hold
+  // its place while its result is on screen.
+  function shownIdeas(project) {
+    const open = new Set(state.ideas.map((i) => i.id));
+    const settled = [...state.settledIdeas.values()].filter((i) => !open.has(i.id) && state.outcomes.has(`idea:${i.id}`)).map((i) => ({ ...i, settled: true }));
+    return openIdeas([...state.ideas, ...settled], project);
+  }
+
   // An idea is added to its project's inbox the way a composer adds a task:
   // a tap adds it, and a long press also sends it when the worker is free.
   function ideaCard(i, now, inProject) {
     const key = `idea:${i.id}`;
+    if (i.settled) {
+      return h("article", { class: "task idea settled" },
+        h("div", { class: "thead" },
+          inProject ? null : [face(projectNamed(i.project), i.project, "sm"), h("span", { class: "proj" }, i.project)],
+          h("span", { class: "tag ideas" }, lensName(i.lens))),
+        h("div", { class: "ttext ititle" }, i.title),
+        outcomeLine(key));
+    }
     const open = state.menu === key;
     const dismissing = state.dismissing === i.id;
     const note = dismissing ? h("input", { type: "text", class: "dnote", maxlength: "500", "aria-label": "Why dismiss it (optional)", placeholder: "Why, for later runs (optional)" }) : null;
@@ -1937,6 +2003,7 @@ async function start(cfg) {
         h("span", { class: "tstatus" }, !p ? "" : p.free ? (p.session_id ? "Free" : "Starts a new worker") : `Waiting · ${p.busy}`),
         busyButton(key, { type: "button", class: "round go", "aria-label": "Add task", title: "Add task", ...hold, onclick },
           icon("addtask"), heldIcon())),
+      outcomeLine(key),
     );
   }
 
@@ -1956,10 +2023,12 @@ async function start(cfg) {
         return { ...task, id: ref.id };
       });
     } catch (err) {
-      return alertLine(`Could not add the idea: ${err.message}`);
+      return setOutcome(key, `Could not add the idea: ${err.message}`, false, "bad");
     }
-    if (andSend) send(t, hasConversation(t), { announce: true });
-    else toast(`Added to ${i.project}`, "ok");
+    state.settledIdeas.set(i.id, i);
+    if (andSend) send(t, hasConversation(t), { also: (text, busy, tone) => setOutcome(key, text, busy, tone) });
+    else setOutcome(key, `Added to ${i.project}'s inbox`, false, "ok");
+    addedTo(i.project);
   }
 
   async function dismissIdea(i, note) {
@@ -1968,7 +2037,7 @@ async function start(cfg) {
       state.dismissing = null;
       render();
     } catch (err) {
-      alertLine(`Could not dismiss the idea: ${err.message}`);
+      setOutcome(`idea:${i.id}`, `Could not dismiss the idea: ${err.message}`, false, "bad");
     }
   }
 
@@ -2016,10 +2085,12 @@ async function start(cfg) {
   function inboxButton(p) {
     const n = p ? queuedFor(p.name).length : readyCount();
     const ideas = p ? ideaCount(state.ideas, p.name) : 0;
-    const label = ["Inbox", n ? (p ? `${n} queued` : `${n} ready`) : null, ideas ? `${ideas} idea${ideas === 1 ? "" : "s"}` : null].filter(Boolean).join(", ");
-    return h("button", { type: "button", class: "icon tool inboxbtn", title: "Inbox", "aria-label": label, "aria-haspopup": "dialog",
+    const added = state.added && (!p || p.name === state.added.project) ? state.added.project : null;
+    const label = ["Inbox", n ? (p ? `${n} queued` : `${n} ready`) : null, ideas ? `${ideas} idea${ideas === 1 ? "" : "s"}` : null,
+      added ? `added to ${added}` : null].filter(Boolean).join(", ");
+    return h("button", { type: "button", class: `icon tool inboxbtn${added ? " added" : ""}`, title: "Inbox", "aria-label": label, "aria-haspopup": "dialog",
       onclick: () => openInbox(p?.name ?? null) },
-    icon("tray"), n ? h("span", { class: "count" }, String(n)) : null,
+    icon("tray"), added ? h("span", { class: "addedto" }, p ? "+1" : `${added} +1`) : n ? h("span", { class: "count" }, String(n)) : null,
     ideas ? h("span", { class: "ideas" }, icon("bulb"), h("span", { class: "icount" }, String(ideas))) : null);
   }
 
@@ -2070,13 +2141,12 @@ async function start(cfg) {
   function buildInbox() {
     const close = () => closeLayer("inbox");
     const head = h("div", { class: "sheethead" });
-    const alert = h("p", { class: "alert", role: "status" });
     const body = h("div", { class: "sheetbody inboxbody" });
     const panel = h("section", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Inbox", onkeydown: (e) => e.key === "Escape" && close() },
-      sheetTop(head, close), alert, body);
+      sheetTop(head, close), body);
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
     document.body.append(scrim);
-    return { scrim, panel, head, alert, body, open: false, from: null };
+    return { scrim, panel, head, body, open: false, from: null };
   }
 
   // The workers' tray opens every project's tasks, a worker's its own
@@ -2092,7 +2162,6 @@ async function start(cfg) {
     ensureSheets();
     Object.assign(state, { only: project, filter: project ? "all" : "ready", menu: null, sheetSent: null });
     inboxSheet.from = project && shownSession() ? project : null;
-    inboxSheet.alert.textContent = "";
     inboxSheet.open = true;
     inboxSheet.scrim.hidden = false;
     openLayer("inbox");
@@ -2102,7 +2171,6 @@ async function start(cfg) {
   function hideInbox() {
     inboxSheet.open = false;
     inboxSheet.scrim.hidden = true;
-    inboxSheet.alert.textContent = "";
     Object.assign(state, { menu: null, sheetSent: null });
     if (state.editing && inboxSheet.body.contains(document.getElementById(`edit-${state.editing}`))) {
       dropDraft(`edit:${state.editing}`);
@@ -2164,7 +2232,7 @@ async function start(cfg) {
       : h("p", { class: "empty" }, only && !counts.all ? "Nothing queued." : all.length ? "Nothing here for this filter." : "No tasks queued.");
     const sent = sentTasks(state.tasks).filter((t) => !only || t.project === only);
     const rest = state.filter !== "waiting";
-    const ideas = openIdeas(state.ideas, only);
+    const ideas = shownIdeas(only);
     return [
       h("div", { class: "filters" }, chips),
       strip,

@@ -818,6 +818,9 @@ test.describe('signed in', () => {
     await expect(formatters.locator('code')).toHaveText('app.js:88');
 
     await formatters.getByRole('button', { name: 'Add task' }).click();
+    // The added idea keeps its place, showing where it went, until the result settles.
+    await expect(formatters.getByRole('status')).toHaveText("Added to knip's inbox");
+    await expect(formatters.getByRole('button', { name: 'Add task' })).toHaveCount(0);
     await expect(formatters).toHaveCount(0);
     await expect.poll(async () => (await get(page, 'ideas/run-2')).status.stringValue).toBe('added');
     const added = (await get(page, 'ideas/run-2')).added_task.stringValue;
@@ -835,6 +838,10 @@ test.describe('signed in', () => {
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', text: 'Expire the pair link' });
     expect((await get(page, 'ideas/run-3')).status.stringValue).toBe('added');
+    await expect(expiry.getByRole('status')).toHaveText('Waiting for the laptop…');
+    await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
+    await expect(expiry.getByRole('status')).toHaveText('Sent');
+    await expect(expiry).toHaveCount(0);
 
     const confirms = sheet.locator('.task.idea', { hasText: 'Three confirm patterns' });
     await confirms.getByRole('button', { name: 'More actions: Three confirm patterns' }).click();
@@ -883,8 +890,11 @@ test.describe('signed in', () => {
     await expect(compose).toBeHidden();
     await expect(page.locator('#task-text')).toHaveValue('');
     await expect(page.locator('form.add .thumb')).toHaveCount(0);
-    await expect(page.locator('.toast')).toContainText('Added to knip');
-    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const tray = page.locator('.hpage').getByRole('button', { name: /^Inbox/ });
+    await expect(tray).toHaveAccessibleName(/, added to knip$/);
+    await expect(tray.locator('.addedto')).toHaveText('knip +1');
+    await expect(page.getByRole('status').filter({ hasText: 'Added to knip' })).toHaveCount(1);
+    await tray.click();
 
     const task = page.locator('.task', { hasText: 'Match this layout' });
     await expect(task.locator('.thumb img')).toHaveCount(1);
@@ -1158,17 +1168,16 @@ test.describe('signed in', () => {
     await expect(old).toContainText('3f2a1c4');
 
     await old.getByRole('button', { name: 'Clear and resume: Detect unused exports' }).click();
-    await expect(sheet.getByRole('status')).toHaveText('Waiting for the laptop…');
+    await expect(old.getByRole('status')).toHaveText('Waiting for the laptop…');
     const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'resume')!;
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'resume', session: 'k', conversation: 'c-old' });
     expect(cmd.fields.grant).toBeDefined();
     await put(page, `commands/${cmd.name.split('/').pop()}`, { ...plain(cmd.fields), status: 'done' });
     await expect(sheet).toBeHidden();
-    await expect(page.locator('.toast')).toBeHidden();
+    await expect(page.locator('.task.done .outcome')).toHaveCount(0);
 
     await conversation('c-old');
     await page.getByRole('button', { name: /^Inbox/ }).click();
-    await expect(sheet.locator('.alert')).toBeEmpty();
     await expect(old).toContainText('current conversation');
     await expect(old.getByRole('button', { name: /resume/i })).toHaveCount(0);
     await fold.click();
