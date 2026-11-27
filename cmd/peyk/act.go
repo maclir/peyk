@@ -68,7 +68,8 @@ func (a actions) Push(ctx context.Context, dir string) error {
 
 // Swap moves a worker to another tool. The old session goes to aoe's trash,
 // its conversation remembered for a move back, and the new one takes its
-// title, so the worker keeps its name on the phone.
+// title, so the worker keeps its name on the phone. If the new one cannot
+// start, the old one comes back so the worker is never lost.
 func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error) {
 	if err := a.conversations.Set(s.Path, s.Tool, s.Transcript.ID); err != nil {
 		return "", fmt.Errorf("remember %s's conversation: %w", s.Title, err)
@@ -87,7 +88,7 @@ func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model strin
 			return "", err
 		}
 	}
-	if err := a.aoe.Remove(ctx, s.ID); err != nil {
+	if err := a.aoe.Trash(ctx, s.ID, s.Title); err != nil {
 		return "", err
 	}
 	aoeTool := tool
@@ -96,7 +97,10 @@ func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model strin
 	}
 	id, err := a.aoe.Add(ctx, s.Path, s.Title, a.group, aoeTool, "--model "+model)
 	if err != nil {
-		return "", fmt.Errorf("start %s on %s (the old session is in aoe's trash): %w", s.Title, model, err)
+		if rerr := a.aoe.Restore(ctx, s.ID, s.Title); rerr != nil {
+			return "", fmt.Errorf("start %s on %s: %w; restore the old session from aoe's trash: %v", s.Title, model, err, rerr)
+		}
+		return "", fmt.Errorf("start %s on %s (the old session is back, stopped): %w", s.Title, model, err)
 	}
 	if back != "" {
 		if err := a.aoe.SetConversation(ctx, id, back); err != nil {

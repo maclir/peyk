@@ -706,3 +706,22 @@ func TestLastExchangeNamesTheModelThatWroteTheReply(t *testing.T) {
 		t.Fatalf("reply = %+v, want it named for claude-sonnet-5-5", m)
 	}
 }
+
+func TestTrashFreesTitleAndRestoreReturnsIt(t *testing.T) {
+	var calls []string
+	a := Aoe{Profile: "personal", Run: func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args[2:], " "))
+		return nil, nil
+	}}
+	if err := a.Trash(context.Background(), "7ab0c36356b64513", "peyk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Restore(context.Background(), "7ab0c36356b64513", "peyk"); err != nil {
+		t.Fatal(err)
+	}
+	want := "session rename 7ab0c36356b64513 -t peyk~7ab0c363|remove 7ab0c36356b64513|" +
+		"session restore 7ab0c36356b64513|session rename 7ab0c36356b64513 -t peyk"
+	if got := strings.Join(calls, "|"); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+}

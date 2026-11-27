@@ -204,10 +204,31 @@ func (a Aoe) Add(ctx context.Context, dir, title, group, tool, args string) (str
 	return s.ID, nil
 }
 
-// Remove moves a session to aoe's trash; its conversation stays on disk.
-func (a Aoe) Remove(ctx context.Context, id string) error {
+// Trash moves a session to aoe's trash; its conversation stays on disk.
+// aoe refuses a new session whose title and path match one in the trash, so
+// the session is first renamed after its ID to free title for a successor.
+func (a Aoe) Trash(ctx context.Context, id, title string) error {
+	if _, err := a.cmd(ctx, "session", "rename", id, "-t", trashedTitle(id, title)); err != nil {
+		return err
+	}
 	_, err := a.cmd(ctx, "remove", id)
 	return err
+}
+
+// Restore undoes Trash: the session leaves the trash under its old title.
+func (a Aoe) Restore(ctx context.Context, id, title string) error {
+	if _, err := a.cmd(ctx, "session", "restore", id); err != nil {
+		return err
+	}
+	_, err := a.cmd(ctx, "session", "rename", id, "-t", title)
+	return err
+}
+
+func trashedTitle(id, title string) string {
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return title + "~" + id
 }
 
 // SetConversation points a stopped session at conversation, which it opens
