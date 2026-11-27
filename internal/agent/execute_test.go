@@ -672,3 +672,21 @@ func TestPublishModelsListsAntigravitysModelsOrNoneWhenSignedOut(t *testing.T) {
 		t.Fatalf("published %+v after a failed listing", got)
 	}
 }
+
+func TestADispatchAfterAMoveGoesToTheNewSession(t *testing.T) {
+	ph := newPhone(t)
+	a, _, acts := commandAgent(t, ph)
+	c := a.Collect.(*fakeCollector)
+	ctx := context.Background()
+	// What aoe lists once the move is done; no hook reports it.
+	c.set(session.Snapshot{ID: "swapped-k", Title: "knip", Path: "/c/knip", State: session.Idle, Tool: session.Antigravity})
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Model, Session: "k", Text: "gemini-4-neon-high"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.execute(ctx, ph.command("c2", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if last := acts.calls[len(acts.calls)-1]; last != "send swapped-k: x" {
+		t.Fatalf("calls = %q, want the dispatch sent to the new session", acts.calls)
+	}
+}

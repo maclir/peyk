@@ -2,6 +2,7 @@ package laptop
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,11 +44,11 @@ func setLatest(t *testing.T, app, workdir, id string) {
 }
 
 const (
-	agyPrompt = `{"step_index": "0", "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-09-10T09:56:17Z", "content": "<USER_REQUEST>\nShould we move to 3.8 Flash?\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-09-10T11:56:17+02:00.\n</ADDITIONAL_METADATA>\n<USER_SETTINGS_CHANGE>\nThe user changed setting ` + "`Model Selection`" + ` from None to Gemini 3.8 Flash (High). No need to comment on this change.\n</USER_SETTINGS_CHANGE>"}`
-	agyTool   = `{"step_index": "1", "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:56:20Z", "thinking": "**Looking**", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"grep -r gemini .\"", "toolSummary": "\"Finding Gemini callers\""}}]}`
-	agyResult = `{"step_index": "2", "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-09-10T09:56:21Z", "content": "Created At: 2026-09-10T11:56:21+02:00\nOutput"}`
-	agyReply  = `{"step_index": "3", "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:57:00Z", "content": "### Short answer\n\nYes, for", "truncated_fields": ["content"]}`
-	agyFull   = `{"step_index": "3", "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:57:00Z", "content": "### Short answer\n\nYes, for four of five projects."}`
+	agyPrompt = `{"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-09-10T09:56:17Z", "content": "<USER_REQUEST>\nShould we move to 3.8 Flash?\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-09-10T11:56:17+02:00.\n</ADDITIONAL_METADATA>\n<USER_SETTINGS_CHANGE>\nThe user changed setting ` + "`Model Selection`" + ` from None to Gemini 3.8 Flash (High). No need to comment on this change.\n</USER_SETTINGS_CHANGE>"}`
+	agyTool   = `{"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:56:20Z", "thinking": "**Looking**", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"grep -r gemini .\"", "toolSummary": "\"Finding Gemini callers\""}}]}`
+	agyResult = `{"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-09-10T09:56:21Z", "content": "Created At: 2026-09-10T11:56:21+02:00\nOutput"}`
+	agyReply  = `{"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:57:00Z", "content": "### Short answer\n\nYes, for", "truncated_fields": ["content"]}`
+	agyFull   = `{"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T09:57:00Z", "content": "### Short answer\n\nYes, for four of five projects."}`
 )
 
 func TestAntigravityExchangeReadsThePromptTheReplyAndTheModelPicked(t *testing.T) {
@@ -154,5 +155,29 @@ func TestAntigravityModelsReadsEachIdAndName(t *testing.T) {
 	}
 	if _, err := AntigravityModels(context.Background(), signedOut, "/bin/agy"); err == nil {
 		t.Fatal("a signed-out CLI listed models")
+	}
+}
+
+func TestAnAntigravitySessionParkedAfterItsReplyIsIdleThoughAoeSaysWaiting(t *testing.T) {
+	app := t.TempDir()
+	notGit := func(context.Context, string, string, ...string) ([]byte, error) {
+		return nil, errors.New("not a repository")
+	}
+	c := Collector{Run: notGit, AntigravityDir: app, Now: time.Now}
+	agy := AoeSession{ID: "a", Path: "/c/knip", Tool: session.Antigravity, Status: "waiting"}
+	tests := []struct {
+		name  string
+		lines []string
+		want  session.State
+	}{
+		{"a finished reply", []string{agyPrompt, agyTool, agyResult, agyReply}, session.Idle},
+		{"a tool call awaiting approval", []string{agyPrompt, agyTool}, session.NeedsInput},
+		{"a prompt not yet answered", []string{agyPrompt}, session.NeedsInput},
+	}
+	for _, tt := range tests {
+		writeConversation(t, app, "/c/knip", "conv-1", tt.lines, []string{agyFull})
+		if s := c.Snapshot(context.Background(), agy); s.State != tt.want {
+			t.Errorf("%s: state = %v, want %v", tt.name, s.State, tt.want)
+		}
 	}
 }

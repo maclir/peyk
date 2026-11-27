@@ -55,11 +55,11 @@ func LatestAntigravityConversation(appDir, workdir string) string {
 // step is one line of an Antigravity transcript: a prompt, a reply, a tool
 // call or its result. Each step's index is its id within the conversation.
 type step struct {
-	Index     string    `json:"step_index"`
-	Source    string    `json:"source"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
-	Content   string    `json:"content"`
+	Index     json.Number `json:"step_index"`
+	Source    string      `json:"source"`
+	Type      string      `json:"type"`
+	CreatedAt time.Time   `json:"created_at"`
+	Content   string      `json:"content"`
 	ToolCalls []struct {
 		Name string                     `json:"name"`
 		Args map[string]json.RawMessage `json:"args"`
@@ -110,12 +110,12 @@ func antigravityExchange(t session.Transcript) (reply, prompt *session.Message) 
 		case s.reply() && reply == nil:
 			text := s.Content
 			if contains(s.Truncated, "content") {
-				text = fullContent(t, s.Index, text)
+				text = fullContent(t, s.Index.String(), text)
 			}
-			reply = &session.Message{ID: s.Index, Text: strings.TrimSpace(text), At: s.CreatedAt}
+			reply = &session.Message{ID: s.Index.String(), Text: strings.TrimSpace(text), At: s.CreatedAt}
 		case s.prompt():
 			if prompt == nil {
-				prompt = &session.Message{ID: s.Index, Text: promptText(s.Content), At: s.CreatedAt}
+				prompt = &session.Message{ID: s.Index.String(), Text: promptText(s.Content), At: s.CreatedAt}
 			}
 			if m := modelChange.FindStringSubmatch(s.Content); m != nil && model == "" {
 				model = m[1]
@@ -128,6 +128,23 @@ func antigravityExchange(t session.Transcript) (reply, prompt *session.Message) 
 	return reply, prompt
 }
 
+// antigravityParked reports whether an Antigravity conversation's last step
+// is a reply that calls no tool, so the turn is over and nothing waits on an
+// approval.
+func antigravityParked(t session.Transcript) bool {
+	if t.ID == "" {
+		return false
+	}
+	lines := tail(antigravityTranscript(t))
+	for i := len(lines) - 1; i >= 0; i-- {
+		var s step
+		if json.Unmarshal(lines[i], &s) == nil {
+			return s.reply() && len(s.ToolCalls) == 0
+		}
+	}
+	return false
+}
+
 // fullContent finds a step's whole content in transcript_full.jsonl, or
 // keeps the cut one when that file does not have it.
 func fullContent(t session.Transcript, index, cut string) string {
@@ -136,14 +153,12 @@ func fullContent(t session.Transcript, index, cut string) string {
 		return cut
 	}
 	defer f.Close()
-	want := []byte(`"step_index": "` + index + `"`)
-	want2 := []byte(`"step_index":"` + index + `"`)
 	r := bufio.NewReaderSize(f, 64<<10)
 	for {
 		line, err := r.ReadBytes('\n')
-		if bytes.Contains(line, want) || bytes.Contains(line, want2) {
+		if bytes.Contains(line, []byte(index)) {
 			var s step
-			if json.Unmarshal(line, &s) == nil && s.Index == index {
+			if json.Unmarshal(line, &s) == nil && s.Index.String() == index {
 				return s.Content
 			}
 		}
@@ -175,7 +190,7 @@ func antigravityHistory(t session.Transcript) (entries []session.Entry, truncate
 			case s.reply():
 				text := s.Content
 				if contains(s.Truncated, "content") {
-					text = fullContent(t, s.Index, text)
+					text = fullContent(t, s.Index.String(), text)
 				}
 				entries = append(entries, session.Entry{Kind: session.EntryReply, Text: strings.TrimSpace(text), At: s.CreatedAt})
 			}

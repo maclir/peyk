@@ -57,7 +57,7 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 		Path:       s.Path,
 		AoeStatus:  s.Status,
 		Tool:       t.Tool,
-		State:      session.Derive(s.Status, Backgrounded(t), git),
+		State:      session.Derive(activity(s.Status, t), Backgrounded(t), git),
 		Git:        git,
 		Transcript: t,
 		UpdatedAt:  c.Now(),
@@ -68,6 +68,17 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 	}
 	c.Transcribe(&snap)
 	return snap
+}
+
+// activity is aoe's status, corrected where aoe misreads the pane. aoe
+// reports an Antigravity session parked at its prompt in auto mode as
+// waiting, because the footer says "auto-approved"; its transcript, ending
+// in a finished reply, shows that nothing is asked.
+func activity(status string, t session.Transcript) string {
+	if status == "waiting" && t.Tool == session.Antigravity && antigravityParked(t) {
+		return "idle"
+	}
+	return status
 }
 
 // Transcribe fills in what a snapshot reads from its transcript.

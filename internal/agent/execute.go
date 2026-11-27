@@ -62,7 +62,16 @@ func (a *Agent) execute(ctx context.Context, in store.Incoming) error {
 		fields["status"], fields["error"] = command.Failed, err.Error()
 		a.Log.Printf("command %s (%s) failed: %v", in.ID, in.Command.Type, err)
 	}
-	return a.Store.Update(ctx, store.Commands, in.ID, fields)
+	if err := a.Store.Update(ctx, store.Commands, in.ID, fields); err != nil {
+		return err
+	}
+	// A session the command added or replaced is itself the event: no hook
+	// reports it before the next command, which would act on the old one.
+	if a.sessionsChanged {
+		a.sessionsChanged = false
+		return a.Refresh(ctx)
+	}
+	return nil
 }
 
 func (a *Agent) run(ctx context.Context, in store.Incoming) error {
@@ -119,6 +128,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			if id, err = act.Create(ctx, proj.Path, proj.Name); err != nil {
 				return err
 			}
+			a.sessionsChanged = true
 		} else if p.Clear && !a.sessions[id].Cleared {
 			t, err := act.Clear(ctx, id, a.sessions[id].Transcript)
 			if err != nil {
@@ -370,6 +380,7 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 	if err != nil {
 		return err
 	}
+	a.sessionsChanged = true
 	return act.Send(ctx, id, catchUp(s))
 }
 

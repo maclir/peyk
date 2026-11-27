@@ -123,6 +123,8 @@ type Agent struct {
 	// restart is set once an update has landed; Run then returns, and
 	// launchd starts the agent again, which rebuilds it.
 	restart bool
+	// sessionsChanged is set by a command that added or replaced a session.
+	sessionsChanged bool
 
 	// Refreshed, when set, is told the sessions after every refresh that
 	// published them.
