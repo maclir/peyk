@@ -145,6 +145,12 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 /* One tag shape on the card and the page; colour comes from what the fact means. */
 .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .tag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--paper); color: var(--muted); font: 600 0.64rem var(--mono); white-space: nowrap; text-decoration: none; }
+/* The model chip sits with the tags; its dot is the model's family. The
+   padding is the tap target; the negative margin keeps the tag row's height. */
+.modelchip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 13px 8px; margin: -13px 0; border: 0; border-radius: 99px; background: none; color: var(--ink); font: 600 0.7rem var(--mono); }
+.modelchip .mdot, .mrow .mdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.modelchip.cc .mdot, .mrow.cc .mdot { background: var(--design); }
+.modelchip .spin { width: 10px; height: 10px; }
 .tag .ico svg { width: 12px; height: 12px; display: block; }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }
 .tag.ok { background: var(--ok-soft); color: var(--ok); }
@@ -489,3 +495,19 @@ html.wide .inboxpane { display: flex; flex-direction: column; gap: 8px; padding-
 html.wide .inboxpane .sheethead { padding: 4px 0 0; }
 html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); align-items: start; }
 .card[aria-current="page"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+
+/* The model sheet: a pool's name beside its quota bars, then its models,
+   each with the budget a task uses as 1 to 5 pips. */
+.msheet .sheetbody { display: flex; flex-direction: column; gap: 16px; }
+.mpool { display: flex; flex-direction: column; gap: 2px; }
+.mhead { display: flex; align-items: center; gap: 10px; padding: 0 4px 6px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.mquota { display: flex; flex-direction: column; gap: 3px; }
+.mrow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: none; font-weight: 400; text-align: left; }
+.mrow[aria-pressed="true"] { font-weight: 600; background: var(--design-soft); }
+.mrow .mname { flex: 0 0 120px; }
+.mrow .pips { flex: 1 1 auto; display: flex; gap: 3px; }
+.mrow .pips i { width: 12px; height: 6px; border-radius: 3px; background: var(--line); }
+.mrow.cc .pips i.on { background: var(--design); }
+.mrow .mcheck { display: flex; color: var(--design); visibility: hidden; }
+.mrow .mcheck svg { width: 18px; height: 18px; }
+.mrow[aria-pressed="true"] .mcheck { visibility: visible; }

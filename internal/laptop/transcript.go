@@ -140,6 +140,8 @@ type entry struct {
 	Message struct {
 		// A string for a typed prompt, a list of parts otherwise.
 		Content json.RawMessage `json:"content"`
+		// Model is the model that wrote an assistant entry.
+		Model string `json:"model"`
 	} `json:"message"`
 	// Attachment holds a prompt sent while the agent was working, which
 	// Claude Code records as a queued command instead of a user entry.
@@ -300,7 +302,7 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		}
 		if isReply && e.Type == "assistant" {
 			if text := e.text(); text != "" {
-				reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp}
+				reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp, Model: replyModel(e.Message.Model)}
 			}
 		} else if isPrompt {
 			if text := e.humanPrompt(); text != "" {
@@ -311,7 +313,36 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 	if prompt == nil {
 		prompt = cleared
 	}
+	if reply != nil && reply.Model == "" {
+		reply.Model = lastModel(lines)
+	}
 	return reply, prompt
+}
+
+// lastModel is the model of the latest reply a model wrote, for a latest
+// reply Claude Code wrote itself, such as an API error.
+func lastModel(lines [][]byte) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], []byte(`"model"`)) {
+			continue
+		}
+		var e entry
+		if json.Unmarshal(lines[i], &e) == nil && e.Type == "assistant" && !e.IsSidechain {
+			if m := replyModel(e.Message.Model); m != "" {
+				return m
+			}
+		}
+	}
+	return ""
+}
+
+// replyModel leaves out the placeholder Claude Code records for a reply no
+// model wrote, such as an error it reports itself.
+func replyModel(m string) string {
+	if m == "<synthetic>" {
+		return ""
+	}
+	return m
 }
 
 // askTool is the tool behind Claude Code's multiple-choice dialog.

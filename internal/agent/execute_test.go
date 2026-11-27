@@ -179,6 +179,10 @@ func TestExecuteCommands(t *testing.T) {
 		{"answer a question no longer asked", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_0", Text: "x"}, "", "quiz is no longer asking that question"},
 		{"answer a session asking nothing", command.Payload{Type: command.Answer, Session: "k", Question: "toolu_1", Text: "x"}, "", "knip is no longer asking"},
 		{"answer without text", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1"}, "", "needs the question and its text"},
+		{"switch an idle session's model", command.Payload{Type: command.Model, Session: "k", Text: "sonnet"}, "send k: /model sonnet", ""},
+		{"switch a stopped session's model", command.Payload{Type: command.Model, Session: "s", Text: "fable"}, "send s: /model fable", ""},
+		{"switch a working session's model", command.Payload{Type: command.Model, Session: "h", Text: "opus"}, "", "/model would land in its turn"},
+		{"switch to a model Claude Code has no alias for", command.Payload{Type: command.Model, Session: "k", Text: "opus; rm -rf"}, "", "no Claude model named"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

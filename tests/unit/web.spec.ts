@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -524,5 +524,21 @@ describe('ideas', () => {
     expect(openIdeas(ideas, 'knip').map((i) => i.id)).toEqual(['b', 'a']);
     expect(openIdeas(ideas, null).map((i) => i.id)).toEqual(['b', 'a', 'c']);
     expect(ideaCount(ideas, 'zynk')).toBe(1);
+  });
+});
+
+describe('model names', () => {
+  it('names a model id the way people say it, and its family', () => {
+    expect(modelName('claude-opus-5-5')).toBe('Opus 5.5');
+    expect(modelName('claude-fable-5-2')).toBe('Fable 5.2');
+    expect(modelName('claude-sonnet-5')).toBe('Sonnet 5');
+    expect(modelName('gemini-4-neon')).toBe('gemini-4-neon');
+    expect(modelFamily('claude-haiku-5-5')).toBe('haiku');
+    expect(modelFamily(undefined)).toBe('');
+  });
+
+  it('offers each Claude Code alias with its budget from 1 to 5', () => {
+    const claude = MODEL_POOLS.find((p: any) => p.id === 'claude');
+    expect(claude.models.map((m: any) => [m.alias, m.pips])).toEqual([['fable', 5], ['opus', 3], ['sonnet', 2], ['haiku', 1]]);
   });
 });

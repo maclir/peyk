@@ -128,6 +128,8 @@ type Message struct {
 	ID   string    `firestore:"id" json:"id,omitempty"`
 	Text string    `firestore:"text" json:"text"`
 	At   time.Time `firestore:"at" json:"at"`
+	// Model is the model that wrote a reply, such as "claude-opus-5-5".
+	Model string `firestore:"model,omitempty" json:"model,omitempty"`
 }
 
 // Entry kinds in a conversation's history.

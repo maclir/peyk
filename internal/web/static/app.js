@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -177,7 +177,7 @@ async function start(cfg) {
     // A composer's ideation ask by its key, and the last one made, which the next starts from.
     ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
     // The idea whose dismissal note is being written.
-    dismissing: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+    dismissing: null, modelFor: null, modelAsked: new Map(), laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: true, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -490,9 +490,11 @@ async function start(cfg) {
 
     renderInbox();
     renderCompose();
-    pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : []));
+    const modelFor = state.modelFor && shownWorker(state.modelFor);
+    if (state.modelFor && !modelFor) state.modelFor = null;
+    pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : modelFor ? [modelSheet(modelFor)] : []));
     for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
-    document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking);
+    document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking || Boolean(modelFor));
     if (focused) document.getElementById(focused)?.focus();
     keepHistoryAnchor();
     if (s && !document.hidden) dismissNotes(s.id);
@@ -1770,7 +1772,7 @@ async function start(cfg) {
           h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
           h("div", { class: "dtitle" },
             h("h2", {}, s.title, chip(st)),
-            h("div", { class: "tags" }, tagList(s, true))),
+            h("div", { class: "tags" }, modelChip(s), tagList(s, true))),
           quickButton(s, action),
           workerMenu(s, busy)),
         outcomeLine(`worker:${s.id}`),
@@ -1942,6 +1944,58 @@ async function start(cfg) {
     }
     flush();
     return out;
+  }
+
+  // The model chip names what wrote the latest reply and opens the sheet of
+  // models to switch to.
+  function modelChip(s) {
+    const m = shownModel(s);
+    const name = m.name || "Model";
+    return h("button", { type: "button", class: "modelchip cc", "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",
+      onclick: () => { state.modelFor = s.id; render(); } },
+    state.busy.has(`model:${s.id}`) ? spinner() : h("span", { class: "mdot", "aria-hidden": "true" }), name);
+  }
+
+  // A switch asked for shows as the model asked for until a reply comes from
+  // it; the reply's own model is the truth after that, or if the switch fails.
+  function shownModel(s) {
+    const asked = state.modelAsked.get(s.id);
+    const alias = modelFamily(s.message?.model);
+    if (asked && asked.alias !== alias) return asked;
+    if (asked) state.modelAsked.delete(s.id);
+    return { alias, name: modelName(s.message?.model) };
+  }
+
+  // The sheet lists each pool's models with what a task costs of its quota,
+  // and the quota's windows beside the pool's name. A tap switches.
+  function modelSheet(s) {
+    const close = () => { state.modelFor = null; render(); };
+    const now = Date.now();
+    const current = shownModel(s).alias;
+    const claude = usageLeft(state.usage, now);
+    const pick = (m) => {
+      state.modelFor = null;
+      if (m.alias === current) return render();
+      state.modelAsked.set(s.id, m);
+      sendCommand("model", { session: s.id, text: m.alias }, `Switch to ${m.name}`, `model:${s.id}`, (text, busy, tone) => {
+        if (tone === "bad") state.modelAsked.delete(s.id);
+        setOutcome(`worker:${s.id}`, text, busy, tone);
+      }, null, { done: `Switched to ${m.name}` });
+    };
+    const pools = MODEL_POOLS.map((pool) => h("div", { class: "mpool", role: "group", "aria-label": pool.name },
+      h("div", { class: "mhead" }, h("span", { class: "grow" }, pool.name),
+        pool.id === "claude" && claude ? h("span", { class: "mquota", "aria-hidden": "true" },
+          claude.map((w) => meter(h("span", { class: `meter ${pool.kind}` }, h("i")), w.left))) : null),
+      pool.models.map((m) => h("button", { type: "button", class: `mrow ${pool.kind}`, "aria-pressed": String(m.alias === current),
+        "aria-label": `${m.name}, uses ${m.pips} of 5 of the quota per task`, onclick: () => pick(m) },
+      h("span", { class: "mdot", "aria-hidden": "true" }),
+      h("span", { class: "mname" }, m.name),
+      h("span", { class: "pips", "aria-hidden": "true" }, [1, 2, 3, 4, 5].map((i) => h("i", { class: i <= m.pips ? "on" : null }))),
+      h("span", { class: "mcheck", "aria-hidden": "true" }, icon("check"))))));
+    return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
+      h("section", { class: "sheet msheet", role: "dialog", "aria-modal": "true", "aria-label": `Model for ${s.title}`, onkeydown: (e) => e.key === "Escape" && close() },
+        sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Model")), close),
+        h("div", { class: "sheetbody" }, pools)));
   }
 
   // Clear, start, restart and stop share a menu so the worker's name and

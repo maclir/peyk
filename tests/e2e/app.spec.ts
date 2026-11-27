@@ -472,6 +472,31 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
   });
 
+  test('a worker names its model and switches to another from the sheet, signed', async () => {
+    await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      message: { text: 'Done.', at: new Date(), model: 'claude-opus-5-5' } });
+    await page.goto('/#s-m');
+    await passkeyOn(page);
+    await page.getByRole('button', { name: 'Model: Opus 5.5. Change model' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Model for mdl' });
+    await expect(sheet.getByRole('button', { name: /^Opus,/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: 'Fable, uses 5 of 5 of the quota per task' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(sheet.getByRole('group', { name: 'Claude Code' }).locator('.mquota .meter')).toHaveCount(2);
+
+    await sheet.getByRole('button', { name: /^Sonnet,/ }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Model: Sonnet. Change model' })).toBeVisible();
+    const sw = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'model')!;
+    expect(JSON.parse(sw.fields.payload.stringValue)).toMatchObject({ type: 'model', session: 'm', text: 'sonnet' });
+    expect(sw.fields.grant).toBeDefined();
+    await put(page, `commands/${sw.name.split('/').pop()}`, { ...plain(sw.fields), status: 'done' });
+    await expect(page.locator('.dhead .outcome')).toHaveText('Switched to Sonnet');
+    await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
+      message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
+    await expect(page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' })).toBeVisible();
+    await page.request.delete(`${FIRESTORE}/sessions/m`, { headers: admin });
+  });
+
   test('tapping the laptop checks for updates, and Update is signed', async () => {
     await page.goto('/');
     await expect(page.getByRole('button', { name: /^Update the laptop/ })).toBeHidden();

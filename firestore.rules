@@ -184,7 +184,7 @@ service cloud.firestore {
         && request.resource.data.status == 'cancelled';
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['type', 'payload', 'assertion', 'grant', 'status', 'created_at'])
-        && request.resource.data.type in ['dispatch', 'reply', 'answer', 'clear', 'stop', 'start', 'restart', 'resume', 'push', 'check', 'update', 'hide', 'show']
+        && request.resource.data.type in ['dispatch', 'reply', 'answer', 'clear', 'stop', 'start', 'restart', 'resume', 'push', 'check', 'update', 'hide', 'show', 'model']
         && boundedString(request.resource.data.payload, 30000)
         && request.resource.data.status == 'pending'
         && request.resource.data.created_at == request.time

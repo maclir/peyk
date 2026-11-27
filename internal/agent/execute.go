@@ -229,6 +229,12 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		return act.Push(ctx, s.Path)
 	case command.Hide, command.Show:
 		return a.setHidden(ctx, p.Projects, p.Type == command.Hide)
+	case command.Model:
+		s, err := a.session(p.Session)
+		if err != nil {
+			return err
+		}
+		return switchModel(ctx, act, s, p.Text)
 	case command.CheckUpdate, command.Update:
 		if a.Checkout == nil {
 			return errors.New("this agent cannot update itself")
@@ -316,4 +322,22 @@ func (a *Agent) clear(ctx context.Context, act Actions, s session.Snapshot) erro
 		return err
 	}
 	return a.cleared(ctx, s.ID, t)
+}
+
+// claudeModels are the aliases Claude Code resolves to the newest model of
+// each family, so the phone never needs a version to name one.
+var claudeModels = map[string]bool{"fable": true, "opus": true, "sonnet": true, "haiku": true}
+
+// switchModel changes the model of a session's conversation in place. A
+// session that is working or asking would read /model as part of its turn,
+// so it is refused, as /clear is.
+func switchModel(ctx context.Context, act Actions, s session.Snapshot, model string) error {
+	if !claudeModels[model] {
+		return fmt.Errorf("no Claude model named %q", model)
+	}
+	switch s.State {
+	case session.Working, session.NeedsInput:
+		return fmt.Errorf("%s is %s; /model would land in its turn", s.Title, s.State.Label())
+	}
+	return act.Send(ctx, s.ID, "/model "+model)
 }

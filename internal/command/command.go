@@ -46,6 +46,9 @@ const (
 	// Hide and Show take projects out of the phone's picker and put them back.
 	Hide = "hide"
 	Show = "show"
+	// Model switches a session's model; Text names it as the session's
+	// tool does, such as "opus".
+	Model = "model"
 )
 
 const (

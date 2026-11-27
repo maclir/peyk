@@ -424,3 +424,32 @@ export function openIdeas(ideas, project) {
 export function ideaCount(ideas, project) {
   return openIdeas(ideas, project).length;
 }
+
+// The models a worker can switch to, by the quota they draw on. Claude Code
+// resolves each alias to the newest model of its family, so no version is
+// named here. Pips are the budget a task uses, 1 to 5, against the priciest
+// model in the pool, from output prices per 1M tokens: Fable $40, Opus $20,
+// Sonnet $10, Haiku $0.50.
+export const MODEL_POOLS = [
+  {
+    id: "claude", name: "Claude Code", kind: "cc",
+    models: [
+      { alias: "fable", name: "Fable", pips: 5 },
+      { alias: "opus", name: "Opus", pips: 3 },
+      { alias: "sonnet", name: "Sonnet", pips: 2 },
+      { alias: "haiku", name: "Haiku", pips: 1 },
+    ],
+  },
+];
+
+// modelFamily is the alias a model id belongs to: "claude-opus-5-5" is opus.
+export function modelFamily(id) {
+  return /^claude-([a-z]+)-/.exec(id ?? "")?.[1] ?? "";
+}
+
+// modelName is a model id as people say it: "claude-opus-5-5" is "Opus 5.5".
+export function modelName(id) {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(id ?? "");
+  if (!m) return id ?? "";
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}

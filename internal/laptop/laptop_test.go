@@ -674,3 +674,20 @@ func TestSendPassesAMessageStartingWithADashAsTheMessage(t *testing.T) {
 		t.Fatalf("args = %s", got)
 	}
 }
+
+func TestLastExchangeNamesTheModelThatWroteTheReply(t *testing.T) {
+	claude := t.TempDir()
+	writeTranscript(t, claude, "/w", "s", time.Now(),
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:00Z","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"On Opus."}]}}`,
+		`{"type":"assistant","timestamp":"2026-11-14T09:01:00Z","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error"}]}}`,
+	)
+	if m := reply(claude, "/w", "s"); m == nil || m.Text != "API Error" || m.Model != "claude-opus-5-5" {
+		t.Fatalf("a reply no model wrote names the model of the one before: %+v", m)
+	}
+	writeTranscript(t, claude, "/w", "s", time.Now(),
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:00Z","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"On Sonnet."}]}}`,
+	)
+	if m := reply(claude, "/w", "s"); m == nil || m.Model != "claude-sonnet-5-5" {
+		t.Fatalf("reply = %+v, want it named for claude-sonnet-5-5", m)
+	}
+}
