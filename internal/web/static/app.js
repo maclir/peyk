@@ -1757,8 +1757,13 @@ async function start(cfg) {
     const p = projectOf(s);
     const next = p ? queuedFor(p.name).find((t) => t.ready) : null;
     const action = quickAction(s, Boolean(next));
-    const sent = h("div", { class: s.prompt ? "reply sent" : "reply sent none" });
+    // Until the session's transcript records a sent reply, it shows as
+    // pending, so the chat never presents it as part of the conversation.
+    const unrecorded = s.prompt?.unrecorded;
+    const sent = h("div", { class: !s.prompt ? "reply sent none" : unrecorded ? "reply sent queued" : "reply sent" });
     sent.innerHTML = s.prompt ? renderMarkdown(s.prompt.text) : "<p>Nothing sent yet.</p>";
+    const you = () => h("span", { class: "who mine", ...(unrecorded ? { role: "status" } : {}) },
+      unrecorded ? "Typed on the laptop · not in the conversation yet" : ["You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""]);
     const pending = awaitingReply(s);
     const msg = h("div", { class: pending ? "reply pending" : "reply" });
     if (pending) msg.append(h("p", { role: "status" }, s.state === "working" ? spinner() : null, pendingLabel(s)));
@@ -1766,13 +1771,13 @@ async function start(cfg) {
     const whole = state.history?.id === s.id ? state.history : null;
     const convo = whole
       ? h("div", { class: "convo" }, historyView(s, whole, now),
-        state.delivered.has(s.id) ? [h("span", { class: "who mine" }, "You", ` · ${ago(s.prompt.at, now)}`), sent] : null,
+        unrecorded ? [you(), sent] : null,
         pending ? msg : null)
       : h("div", { class: "convo" },
         s.prompt || s.message
           ? h("button", { type: "button", class: "link earlier", onclick: () => openHistory(s) }, icon("up"), "Whole conversation")
           : null,
-        h("span", { class: "who mine" }, "You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""),
+        you(),
         sent,
         h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
         msg,

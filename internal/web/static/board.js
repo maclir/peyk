@@ -345,8 +345,8 @@ export function pendingLabel(s) {
 }
 
 // withDelivered shows a reply the laptop has typed into a session as its
-// prompt, with the agent working on it, until the session's own prompt
-// changes. The laptop publishes that prompt only after the next full refresh.
+// prompt, marked unrecorded, with the agent working on it, until the
+// session's own prompt changes. The laptop publishes that prompt only after the next full refresh.
 export function withDelivered(s, d) {
   if (!d || (s.prompt?.id ?? "") !== d.after) return s;
   // A reply written after the send answered it, so the session's own prompt
@@ -354,7 +354,7 @@ export function withDelivered(s, d) {
   if (toDate(s.message?.at) > d.at) return s;
   const n = d.images;
   const text = d.text || `${n} image${n === 1 ? "" : "s"}`;
-  return { ...s, prompt: { text, at: d.at }, state: "working", cleared: false };
+  return { ...s, prompt: { text, at: d.at, unrecorded: true }, state: "working", cleared: false };
 }
 
 // waitingReplies turns reply commands the laptop has not finished, pending

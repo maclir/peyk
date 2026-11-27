@@ -329,7 +329,7 @@ describe('delivered reply', () => {
     const s = { id: 'k', state: 'idle', prompt: { id: 'p1', text: 'old', at: new Date(2026, 0, 1) }, message: { text: 'done', at: new Date(2026, 0, 1, 1) } };
     expect(withDelivered(s, undefined)).toBe(s);
     const shown = withDelivered(s, { text: 'next', images: 0, at, after: 'p1' });
-    expect(shown).toMatchObject({ state: 'working', prompt: { text: 'next', at } });
+    expect(shown).toMatchObject({ state: 'working', prompt: { text: 'next', at, unrecorded: true } });
     expect(awaitingReply(shown)).toBe(true);
     expect(withDelivered(s, { text: '', images: 2, at, after: 'p1' }).prompt.text).toBe('2 images');
     expect(withDelivered({ id: 'k', cleared: true }, { text: 'go', images: 0, at, after: '' }).cleared).toBe(false);
