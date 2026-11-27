@@ -454,7 +454,7 @@ func TestClearWaitsForTheNewConversationInTheTranscripts(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		id, err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", dir, time.Millisecond)
+		id, err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", session.Transcript{Dir: dir}, time.Millisecond)
 		done <- result{id, err}
 	}()
 	select {
@@ -477,7 +477,7 @@ func TestClearGivesUpWhenNoNewConversationStarts(t *testing.T) {
 	run := func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil }
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", TranscriptDir(claude, work), time.Millisecond)
+	_, err := (Aoe{Profile: "p", Run: run}).Clear(ctx, "k", session.Transcript{Dir: TranscriptDir(claude, work)}, time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "no new conversation") {
 		t.Fatalf("err = %v", err)
 	}
@@ -639,7 +639,7 @@ func TestResumePointsTheSessionAtTheConversationAndRelaunchesIt(t *testing.T) {
 			calls = append(calls, strings.Join(args[2:], " "))
 			return nil, nil
 		}
-		if err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", dir, "older", tt.stopped); err != nil {
+		if err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: dir}, "older", tt.stopped); err != nil {
 			t.Fatal(err)
 		}
 		if got := strings.Join(calls, "|"); got != tt.want {
@@ -655,7 +655,7 @@ func TestResumeRefusesAConversationFromAnotherProject(t *testing.T) {
 		t.Fatal("aoe was asked to resume a conversation this session cannot reach")
 		return nil, nil
 	}
-	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", TranscriptDir(claude, "/w"), "other", false)
+	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: TranscriptDir(claude, "/w")}, "other", false)
 	if err == nil || !strings.Contains(err.Error(), "no conversation other") {
 		t.Fatalf("err = %v", err)
 	}

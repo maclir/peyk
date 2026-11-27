@@ -494,6 +494,10 @@ test.describe('signed in', () => {
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
     await expect(page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' })).toBeVisible();
+    await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', tool: 'antigravity', updated_at: new Date(),
+      message: { text: 'Done in Gemini.', at: new Date(), model: 'Gemini 3.8 Flash (High)' } });
+    await expect(page.getByLabel('Model: Gemini 3.8 Flash (High)')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Model:/ })).toHaveCount(0);
     await page.request.delete(`${FIRESTORE}/sessions/m`, { headers: admin });
   });
 

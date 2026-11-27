@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/maclir/peyk/internal/session"
 )
 
 // AoeSession is one aoe session as `aoe list` and `aoe session show` report it.
@@ -32,9 +34,9 @@ func (a Aoe) cmd(ctx context.Context, args ...string) ([]byte, error) {
 	return a.Run(ctx, "", "aoe", append([]string{"-p", a.Profile}, args...)...)
 }
 
-// Sessions returns the live Claude Code sessions with their current status.
-// Sessions running other tools, such as the shell that runs peyk itself, are
-// left out: they have no transcript and no task to report.
+// Sessions returns the live Claude Code and Antigravity sessions with their
+// current status. Sessions running other tools, such as the shell that runs
+// peyk itself, are left out: peyk cannot read their conversations.
 func (a Aoe) Sessions(ctx context.Context) ([]AoeSession, error) {
 	out, err := a.cmd(ctx, "list", "--json")
 	if err != nil {
@@ -46,7 +48,7 @@ func (a Aoe) Sessions(ctx context.Context) ([]AoeSession, error) {
 	}
 	var live []AoeSession
 	for _, s := range all {
-		if s.State != "live" || !s.runsClaude() {
+		if s.State != "live" || !s.runsClaude() && !s.runsAntigravity() {
 			continue
 		}
 		shown, err := a.Show(ctx, s.ID)
@@ -67,6 +69,16 @@ func (s AoeSession) runsClaude() bool {
 	}
 	fields := strings.Fields(s.Command)
 	return len(fields) == 0 || filepath.Base(fields[0]) == "claude"
+}
+
+// runsAntigravity reports whether the session runs Antigravity CLI, by
+// aoe's tool name and, when the session has its own command, that command.
+func (s AoeSession) runsAntigravity() bool {
+	if s.Tool != session.Antigravity {
+		return false
+	}
+	fields := strings.Fields(s.Command)
+	return len(fields) == 0 || filepath.Base(fields[0]) == "agy"
 }
 
 // Show returns one session including its status and agent session id.
@@ -94,15 +106,15 @@ func (a Aoe) Send(ctx context.Context, id, text string) error {
 // reach the old conversation or be typed into the clear itself. aoe's agent
 // session id is not waited on: aoe records the new id anywhere from seconds
 // to minutes later.
-func (a Aoe) Clear(ctx context.Context, id, dir string, poll time.Duration) (string, error) {
+func (a Aoe) Clear(ctx context.Context, id string, t session.Transcript, poll time.Duration) (string, error) {
 	// Transcript timestamps have millisecond precision.
 	since := time.Now().Truncate(time.Millisecond)
 	if err := a.Send(ctx, id, "/clear"); err != nil {
 		return "", err
 	}
 	for {
-		if t := ClearedSince(dir, since); t != "" {
-			return t, nil
+		if c := clearedTo(t, since); c != "" {
+			return c, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -110,6 +122,19 @@ func (a Aoe) Clear(ctx context.Context, id, dir string, poll time.Duration) (str
 		case <-time.After(poll):
 		}
 	}
+}
+
+// clearedTo is the conversation a /clear opened, or "" until there is one.
+// Antigravity records no /clear in the new conversation, only that it is now
+// the working directory's latest.
+func clearedTo(t session.Transcript, since time.Time) string {
+	if t.Tool == session.Antigravity {
+		if c := LatestAntigravityConversation(t.AppDir, t.Workdir); c != t.ID {
+			return c
+		}
+		return ""
+	}
+	return ClearedSince(t.Dir, since)
 }
 
 // Stop stops a session's agent process.
@@ -130,10 +155,14 @@ func (a Aoe) Restart(ctx context.Context, id string) error {
 	return err
 }
 
-// Resume points a session at conversation, a transcript in dir, and
-// relaunches it there, or launches it if stopped.
-func (a Aoe) Resume(ctx context.Context, id, dir, conversation string, stopped bool) error {
-	if _, err := os.Stat(filepath.Join(dir, conversation+".jsonl")); err != nil {
+// Resume points a session at conversation, one of its working directory's,
+// and relaunches it there, or launches it if stopped.
+func (a Aoe) Resume(ctx context.Context, id string, t session.Transcript, conversation string, stopped bool) error {
+	path := filepath.Join(t.Dir, conversation+".jsonl")
+	if t.Tool == session.Antigravity {
+		path = filepath.Join(t.AppDir, "brain", conversation)
+	}
+	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("no conversation %s for this session: %w", conversation, err)
 	}
 	if _, err := a.cmd(ctx, "session", "set-session-id", id, conversation); err != nil {

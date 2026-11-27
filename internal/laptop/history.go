@@ -37,6 +37,9 @@ type contentPart struct {
 // own transcript, or without one the directory's newest. Truncated says the
 // oldest entries were dropped to fit MaxHistoryBytes.
 func History(t session.Transcript) (entries []session.Entry, truncated bool) {
+	if t.Tool == session.Antigravity {
+		return antigravityHistory(t)
+	}
 	path := filepath.Join(t.Dir, t.ID+".jsonl")
 	if t.ID == "" {
 		newest := newestFirst(t.Dir)

@@ -1949,6 +1949,12 @@ async function start(cfg) {
   // The model chip names what wrote the latest reply and opens the sheet of
   // models to switch to.
   function modelChip(s) {
+    // Antigravity names its model in its own words, and peyk cannot switch
+    // it yet, so the chip only says it.
+    if (s.tool === "antigravity") {
+      const name = s.message?.model || "Antigravity";
+      return h("span", { class: "modelchip ag", "aria-label": `Model: ${name}` }, h("span", { class: "mdot", "aria-hidden": "true" }), name);
+    }
     const m = shownModel(s);
     const name = m.name || "Model";
     return h("button", { type: "button", class: "modelchip cc", "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",

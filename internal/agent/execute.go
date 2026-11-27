@@ -332,6 +332,9 @@ var claudeModels = map[string]bool{"fable": true, "opus": true, "sonnet": true, 
 // session that is working or asking would read /model as part of its turn,
 // so it is refused, as /clear is.
 func switchModel(ctx context.Context, act Actions, s session.Snapshot, model string) error {
+	if s.Tool == session.Antigravity {
+		return fmt.Errorf("%s runs Antigravity, whose model peyk cannot switch yet", s.Title)
+	}
 	if !claudeModels[model] {
 		return fmt.Errorf("no Claude model named %q", model)
 	}

@@ -123,9 +123,10 @@ func saveUsage(in io.Reader) error {
 
 func collector() laptop.Collector {
 	return laptop.Collector{
-		Aoe:        laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
-		Run:        laptop.Exec,
-		ClaudeDirs: claudeDirs(),
+		Aoe:            laptop.Aoe{Profile: env("PEYK_AOE_PROFILE", "personal"), Run: laptop.Exec},
+		Run:            laptop.Exec,
+		ClaudeDirs:     claudeDirs(),
+		AntigravityDir: laptop.AntigravityDir(),
 		// aoe's hook writes under /tmp itself, not under $TMPDIR.
 		AoeHooks:   fmt.Sprintf("/tmp/aoe-hooks-%d", os.Getuid()),
 		Root:       projectsRoot(),

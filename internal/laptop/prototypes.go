@@ -30,7 +30,7 @@ type scanned struct {
 
 // Find returns the pages a session's own transcript published, newest first.
 func (p *Prototypes) Find(t session.Transcript) []session.Prototype {
-	if t.ID == "" {
+	if t.ID == "" || t.Tool == session.Antigravity {
 		return nil
 	}
 	path := filepath.Join(t.Dir, t.ID+".jsonl")

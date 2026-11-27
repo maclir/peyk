@@ -119,6 +119,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 		session.Snapshot{ID: "d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Git: &session.Git{Dirty: 2}},
 		session.Snapshot{ID: "f", Title: "fresh", Path: "/c/fresh", State: session.Idle, Cleared: true},
 		session.Snapshot{ID: "s", Title: "sleepy", Path: "/c/sleepy", State: session.Stopped, AoeStatus: "stopped"},
+		session.Snapshot{ID: "g", Title: "gemi", Path: "/c/gemi", State: session.Idle, Tool: session.Antigravity},
 		session.Snapshot{ID: "q", Title: "quiz", Path: "/c/quiz", State: session.NeedsInput,
 			Transcript: session.Transcript{ID: "conv"}, Question: &session.Question{ID: "toolu_1"}},
 	)
@@ -182,6 +183,7 @@ func TestExecuteCommands(t *testing.T) {
 		{"switch an idle session's model", command.Payload{Type: command.Model, Session: "k", Text: "sonnet"}, "send k: /model sonnet", ""},
 		{"switch a stopped session's model", command.Payload{Type: command.Model, Session: "s", Text: "fable"}, "send s: /model fable", ""},
 		{"switch a working session's model", command.Payload{Type: command.Model, Session: "h", Text: "opus"}, "", "/model would land in its turn"},
+		{"switch an Antigravity session's model", command.Payload{Type: command.Model, Session: "g", Text: "opus"}, "", "gemi runs Antigravity"},
 		{"switch to a model Claude Code has no alias for", command.Payload{Type: command.Model, Session: "k", Text: "opus; rm -rf"}, "", "no Claude model named"},
 	}
 	for _, tt := range tests {

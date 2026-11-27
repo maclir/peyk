@@ -150,6 +150,7 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .modelchip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 13px 8px; margin: -13px 0; border: 0; border-radius: 99px; background: none; color: var(--ink); font: 600 0.7rem var(--mono); }
 .modelchip .mdot, .mrow .mdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .modelchip.cc .mdot, .mrow.cc .mdot { background: var(--design); }
+.modelchip.ag .mdot { background: var(--accent); }
 .modelchip .spin { width: 10px; height: 10px; }
 .tag .ico svg { width: 12px; height: 12px; display: block; }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }

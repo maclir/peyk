@@ -25,6 +25,8 @@ type Collector struct {
 	// profile it starts, so it is the event for a session whose profile does
 	// not run `peyk ping`.
 	AoeHooks string
+	// AntigravityDir is where Antigravity CLI keeps its conversations.
+	AntigravityDir string
 	// Root holds project repositories that can get a new session.
 	Root string
 	Now  func() time.Time
@@ -46,17 +48,22 @@ func (c Collector) Logo(dir string) string {
 func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot {
 	git := RepoState(ctx, c.Run, s.Path)
 	t := FindTranscript(c.ClaudeDirs, s.Path, s.AgentSessionID)
+	if s.runsAntigravity() {
+		t = AntigravityTranscript(c.AntigravityDir, s.Path, s.AgentSessionID)
+	}
 	snap := session.Snapshot{
 		ID:         s.ID,
 		Title:      s.Title,
 		Path:       s.Path,
 		AoeStatus:  s.Status,
+		Tool:       t.Tool,
 		State:      session.Derive(s.Status, Backgrounded(t), git),
 		Git:        git,
 		Transcript: t,
 		UpdatedAt:  c.Now(),
 	}
-	if c.AoeHooks != "" && t.Dir != "" && !PingsPeyk(profileOf(t.Dir)) {
+	// aoe's own status hook is Claude Code's; Antigravity's hooks are global.
+	if c.AoeHooks != "" && t.Dir != "" && t.Tool == "" && !PingsPeyk(profileOf(t.Dir)) {
 		snap.AoeHooks = filepath.Join(c.AoeHooks, s.ID)
 	}
 	c.Transcribe(&snap)

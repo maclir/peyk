@@ -152,13 +152,16 @@ type Entry struct {
 
 // Snapshot is one session as published to the phone.
 type Snapshot struct {
-	ID        string   `firestore:"id" json:"id"`
-	Title     string   `firestore:"title" json:"title"`
-	Path      string   `firestore:"path" json:"path"`
-	AoeStatus string   `firestore:"aoe_status" json:"aoe_status"`
-	State     State    `firestore:"state" json:"state"`
-	Git       *Git     `firestore:"git" json:"git,omitempty"`
-	Message   *Message `firestore:"message" json:"message,omitempty"`
+	ID        string `firestore:"id" json:"id"`
+	Title     string `firestore:"title" json:"title"`
+	Path      string `firestore:"path" json:"path"`
+	AoeStatus string `firestore:"aoe_status" json:"aoe_status"`
+	// Tool is the coding tool the session runs: "" for Claude Code, or
+	// Antigravity.
+	Tool    string   `firestore:"tool,omitempty" json:"tool,omitempty"`
+	State   State    `firestore:"state" json:"state"`
+	Git     *Git     `firestore:"git" json:"git,omitempty"`
+	Message *Message `firestore:"message" json:"message,omitempty"`
 	// Prompt is the last thing a person sent the agent.
 	Prompt *Message `firestore:"prompt" json:"prompt,omitempty"`
 	// Cleared is true while the session's conversation is empty: just
@@ -260,12 +263,22 @@ func (s *Snapshot) SetExchange(reply, prompt *Message) {
 	}
 }
 
-// Transcript locates a Claude Code transcript: the directory for the
-// session's working directory and, once known, the transcript's own id.
+// Transcript locates a session's conversation: for Claude Code, the
+// directory of the working directory's transcripts and, once known, the
+// transcript's own id; for Antigravity, the conversation's log directory and
+// its id. Tool is "" for Claude Code.
 type Transcript struct {
-	Dir string
-	ID  string
+	Dir  string
+	ID   string
+	Tool string
+	// AppDir and Workdir are where Antigravity keeps its conversations and
+	// the directory it runs in, which together name its latest conversation.
+	AppDir, Workdir string
 }
+
+// Antigravity is aoe's name for Antigravity CLI, the tool of a Transcript
+// and a Snapshot that runs it.
+const Antigravity = "antigravity"
 
 // Derive turns aoe's status, whether the agent has tasks still running in the
 // background, and the repository state into one board state. What the agent

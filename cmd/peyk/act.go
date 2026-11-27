@@ -35,7 +35,7 @@ const clearWithin = 20 * time.Second
 func (a actions) Clear(ctx context.Context, session string, t session.Transcript) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, clearWithin)
 	defer cancel()
-	return a.aoe.Clear(ctx, session, t.Dir, 250*time.Millisecond)
+	return a.aoe.Clear(ctx, session, t, 250*time.Millisecond)
 }
 
 // answerWithin bounds the wait for Claude Code to record a dismissed dialog.
@@ -56,7 +56,7 @@ func (a actions) Restart(ctx context.Context, session string) error {
 }
 
 func (a actions) Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error {
-	return a.aoe.Resume(ctx, session, t.Dir, conversation, stopped)
+	return a.aoe.Resume(ctx, session, t, conversation, stopped)
 }
 
 func (a actions) Push(ctx context.Context, dir string) error {

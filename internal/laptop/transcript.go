@@ -72,6 +72,9 @@ const recentTranscripts = 3
 // neither yet. Only without a recorded transcript does it fall back to the
 // directory's newest ones, taking the one with the latest activity.
 func LastExchange(t session.Transcript) (reply, prompt *session.Message) {
+	if t.Tool == session.Antigravity {
+		return antigravityExchange(t)
+	}
 	if t.ID != "" {
 		return lastInFile(filepath.Join(t.Dir, t.ID+".jsonl"))
 	}
@@ -361,7 +364,7 @@ type toolUse struct {
 // AskUserQuestion call that has no result yet. Only the session's own
 // transcript is read, because a question is answered in that session alone.
 func PendingQuestion(t session.Transcript) *session.Question {
-	if t.ID == "" {
+	if t.ID == "" || t.Tool == session.Antigravity {
 		return nil
 	}
 	lines := tail(filepath.Join(t.Dir, t.ID+".jsonl"))
@@ -475,7 +478,7 @@ func stopped(line []byte) []string {
 // turn finishing does not mean its work has. Only the session's own
 // transcript is read, because only its own process runs its tasks.
 func Backgrounded(t session.Transcript) bool {
-	if t.ID == "" {
+	if t.ID == "" || t.Tool == session.Antigravity {
 		return false
 	}
 	running := map[string]bool{}
