@@ -86,6 +86,16 @@ const barEl = document.querySelector("header.bar");
 const homeEl = document.getElementById("home");
 const hpageEl = document.getElementById("hpage");
 const config = document.body.dataset.firebase;
+// A wide header has room for the revision beside the laptop; a narrow one
+// leaves it in the footer.
+const footEl = document.querySelector("footer.foot");
+function placeRevision() {
+  if (wide()) laptopEl.after(revEl);
+  else footEl.append(revEl);
+}
+placeRevision();
+// The header stays on screen, so whatever else sticks to the top sits below it.
+new ResizeObserver(() => document.documentElement.style.setProperty("--barh", `${barEl.offsetHeight}px`)).observe(barEl);
 // Checking for updates and updating start from the header, so their result
 // shows under it.
 const hpopEl = hstatEl.appendChild(Object.assign(document.createElement("p"), { className: "hpop", hidden: true }));
@@ -180,7 +190,7 @@ async function start(cfg) {
     dismissing: null, modelFor: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
-    filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: true, menu: null, picking: false, pickFor: null, pickQuery: "",
+    filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: false, factsOpen: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
     // The task sent from a worker's inbox; the inbox closes once it leaves the queue.
@@ -325,6 +335,7 @@ async function start(cfg) {
   window.addEventListener("popstate", syncLayers);
   wideQuery.addEventListener("change", () => {
     document.documentElement.classList.toggle("wide", wide());
+    placeRevision();
     if (wide() && inboxSheet?.open) closeLayer("inbox");
     render();
   });
@@ -1800,12 +1811,13 @@ async function start(cfg) {
       convo,
       waitingReplyList(s),
       s.question ? questionCard(s) : null,
-      isWide ? null : facts(s, now, false),
+      isWide ? null : facts(s, now),
       replyBox(s),
     );
   }
 
-  function facts(s, now, open) {
+  // A render rebuilds the details, so their open state outlives it here.
+  function facts(s, now) {
     const g = s.git;
     const rows = [["aoe", s.aoe_status], ["path", s.path]];
     if (!g) rows.push(["repository", "none"]);
@@ -1815,7 +1827,7 @@ async function start(cfg) {
       rows.push(["push", pushLabel(g)]);
       rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
     }
-    return h("details", { class: "facts", open: open ? "" : null }, h("summary", {}, "Details"),
+    return h("details", { class: "facts", open: state.factsOpen ? "" : null, ontoggle: (e) => { state.factsOpen = e.currentTarget.open; } }, h("summary", {}, "Details"),
       h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
   }
 
@@ -1825,8 +1837,8 @@ async function start(cfg) {
     const now = Date.now();
     const g = s.git;
     const p = projectOf(s);
-    const out = [g && g.unpushed > 0 ? pushCard(s, now) : null, facts(s, now, true)];
-    if (!p) return out.filter(Boolean);
+    const out = [g && g.unpushed > 0 ? pushCard(s, now) : null];
+    if (!p) return [...out, facts(s, now)].filter(Boolean);
     const list = queuedFor(p.name);
     const ideas = shownIdeas(p.name);
     const sent = sentTasks(state.tasks).filter((t) => t.project === p.name);
@@ -1839,9 +1851,9 @@ async function start(cfg) {
         h("div", { class: "tasks" }, ideas.map((i) => ideaCard(i, now, true)))] : null,
       sent.length ? [h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
         h("div", { class: "rows" }, sent.map((t) => sentRow(t, now)))] : null,
-      // The pane has the room the sheet lacks, so its Done list starts open.
       doneFold(state.sideDone, () => { state.sideDone = !state.sideDone; render(); }, p.name),
       state.sideDone ? doneList(p.name, now, true) : null,
+      facts(s, now),
     );
     return out.flat().filter(Boolean);
   }

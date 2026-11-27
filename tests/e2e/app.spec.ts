@@ -275,11 +275,15 @@ test.describe('signed in', () => {
     const side = page.getByRole('complementary', { name: 'Project' });
     await expect(rail.locator('a.card[aria-current="page"]')).toContainText('knip');
     await expect(side.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
-    await expect(side.locator('.facts')).toHaveAttribute('open', '');
+    await expect(side.locator('.facts')).not.toHaveAttribute('open');
+    await expect(side.locator(':scope > :last-child')).toHaveClass(/facts/);
+    await expect(page.locator('#laptop + #rev')).toBeVisible();
+    await expect(page.locator('footer.foot')).toBeHidden();
     await expect(page.locator('#app .facts, #app .pushcard')).toHaveCount(0);
     await expect(side.locator('.task:not(.idea) .ttext')).toHaveText(['Wide queued']);
     await expect(side.locator('.task.idea .ititle')).toHaveText(['Wide idea']);
-    await expect(side.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-expanded', 'true');
+    await expect(side.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-expanded', 'false');
+    await side.getByRole('button', { name: 'Done' }).click();
     await expect(side.locator('.task.row.done')).toContainText(['Detect unused exports']);
 
     // A wider screen widens the panes instead of leaving empty margins.
@@ -289,6 +293,12 @@ test.describe('signed in', () => {
     expect(widths[1]).toBeGreaterThan(900);
     expect(widths[2]).toBeGreaterThan(500);
     await page.setViewportSize({ width: 1440, height: 900 });
+
+    // The header stays at the top, and the panes stick below it.
+    await page.mouse.wheel(0, 2000);
+    await expect.poll(() => page.locator('header.bar').evaluate((el) => el.getBoundingClientRect().top)).toBe(0);
+    const [barBottom, sideTop] = await page.evaluate(() => [document.querySelector('header.bar')!.getBoundingClientRect().bottom, document.getElementById('side')!.getBoundingClientRect().top]);
+    expect(sideTop).toBeGreaterThanOrEqual(barBottom - 1);
 
     await rail.locator('a.card', { hasText: 'hamta' }).click();
     await expect(page).toHaveURL(/#s-h$/);

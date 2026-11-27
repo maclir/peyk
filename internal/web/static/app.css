@@ -20,7 +20,8 @@ a, button { }
 .grow { flex: 1 1 auto; min-width: 0; }
 
 /* The left side is the same on every page; the right holds the page's own tools. */
-.bar { display: flex; align-items: center; gap: 12px; padding: 14px 0 10px; }
+/* The header stays at the top; its padding covers the safe area above it and its shadow the body's side padding. */
+.bar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 12px; margin-top: calc(-1 * env(safe-area-inset-top, 0px)); padding: calc(14px + env(safe-area-inset-top, 0px)) 0 10px; background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); }
 .hglobal { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .bar h1 { margin: 0; line-height: 0; }
 /* The padding is the tap target; the negative margin keeps it from growing the header. */
@@ -249,7 +250,7 @@ button.tool.inboxbtn { width: auto; min-width: 40px; padding: 0 8px; gap: 4px; }
 .convo { display: flex; flex-direction: column; gap: 4px; }
 .convo .earlier { align-self: center; display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
 .convo .earlier .ico svg, .convobar .ico svg { width: 14px; height: 14px; }
-.convobar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 2px 2px; border-bottom: 1px solid var(--line); background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); font-size: 0.8rem; color: var(--muted); }
+.convobar { position: sticky; top: var(--barh, 0px); z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 2px 2px; border-bottom: 1px solid var(--line); background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); font-size: 0.8rem; color: var(--muted); }
 .convobar .link { min-height: 44px; font-size: 0.85rem; }
 .convo .tools { font-size: 0.78rem; color: var(--muted); margin: 2px 0; max-width: 92%; }
 .convo .tools summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
@@ -458,6 +459,7 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 [data-tone="bad"] { color: var(--bad); }
 
 .foot { display: flex; justify-content: center; margin-top: 2rem; }
+html.wide .foot { display: none; }
 .rev { position: relative; font: 12px var(--mono); color: var(--none); background: none; border: 0; padding: .25rem .5rem; border-radius: 6px; cursor: pointer; }
 .rev:disabled { cursor: progress; opacity: 1; }
 .rev .spin { position: absolute; right: 100%; top: 50%; margin: -0.45em 2px 0 0; box-sizing: border-box; border-width: 1.5px; }
@@ -484,7 +486,7 @@ html.wide body { max-width: none; }
 html.wide #panes { display: flex; align-items: flex-start; gap: 24px; }
 /* The panes sit above the composer, whose shadow paints the page colour well
    past its own sides. */
-html.wide #rail, html.wide #side { position: sticky; top: 0; z-index: 3; flex: none; max-height: 100vh; overflow-y: auto; box-sizing: border-box; background: var(--bg); overscroll-behavior: contain; }
+html.wide #rail, html.wide #side { position: sticky; top: var(--barh, 0px); z-index: 3; flex: none; max-height: calc(100vh - var(--barh, 0px)); overflow-y: auto; box-sizing: border-box; background: var(--bg); overscroll-behavior: contain; }
 html.wide #rail { width: clamp(300px, 18vw, 420px); padding: 0 4px 24px; }
 html.wide #rail .board { gap: 6px; }
 html.wide #side { width: clamp(360px, 28vw, 640px); padding: 4px 4px 24px; display: flex; flex-direction: column; gap: 12px; }
