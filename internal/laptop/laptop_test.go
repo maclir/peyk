@@ -271,6 +271,21 @@ func TestLastExchangeFindsAPromptSentWhileWorking(t *testing.T) {
 	}
 }
 
+func TestLastExchangeFindsAShellCommandAPersonSent(t *testing.T) {
+	claude := t.TempDir()
+	writeTranscript(t, claude, "/w", "s", time.Now(),
+		human("2026-11-14T09:00:00Z", `"continue"`),
+		assistant("2026-11-14T09:00:05Z", "Done."),
+		`{"type":"user","uuid":"b1","timestamp":"2026-11-14T09:01:00Z","message":{"role":"user","content":"<bash-input>git pushwhat is 3p?</bash-input>"}}`,
+		`{"type":"user","timestamp":"2026-11-14T09:01:01Z","message":{"role":"user","content":[{"type":"text","text":"<bash-input>echo quoted</bash-input>"}]}}`,
+		assistant("2026-11-14T09:01:05Z", "3p is a pool."),
+	)
+	_, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
+	if p == nil || p.ID != "b1" || p.Text != "! git pushwhat is 3p?" {
+		t.Fatalf("prompt = %+v", p)
+	}
+}
+
 func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
 	claude := t.TempDir()
 	work := "/w"

@@ -349,6 +349,9 @@ export function pendingLabel(s) {
 // changes. The laptop publishes that prompt only after the next full refresh.
 export function withDelivered(s, d) {
   if (!d || (s.prompt?.id ?? "") !== d.after) return s;
+  // A reply written after the send answered it, so the session's own prompt
+  // is current even when the laptop could not tell this one apart.
+  if (toDate(s.message?.at) > d.at) return s;
   const n = d.images;
   const text = d.text || `${n} image${n === 1 ? "" : "s"}`;
   return { ...s, prompt: { text, at: d.at }, state: "working", cleared: false };

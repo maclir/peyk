@@ -335,6 +335,8 @@ describe('delivered reply', () => {
     expect(withDelivered({ id: 'k', cleared: true }, { text: 'go', images: 0, at, after: '' }).cleared).toBe(false);
     const moved = { ...s, prompt: { id: 'p2', text: 'next', at } };
     expect(withDelivered(moved, { text: 'next', images: 0, at, after: 'p1' })).toBe(moved);
+    const answered = { ...s, message: { text: 'answer', at: new Date(2026, 0, 2, 1) } };
+    expect(withDelivered(answered, { text: 'next', images: 0, at, after: 'p1' })).toBe(answered);
   });
 });
 

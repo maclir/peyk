@@ -166,10 +166,32 @@ func (e entry) humanPrompt() string {
 	switch {
 	case e.Type == "user" && e.Origin.Kind == "human":
 		return e.text()
+	case e.Type == "user":
+		return e.shellPrompt()
 	case e.Type == "attachment" && e.Attachment.Type == "queued_command" && e.Attachment.Origin.Kind == "human":
 		return contentText(e.Attachment.Prompt)
 	}
 	return ""
+}
+
+// bashInput is how Claude Code records a "!" shell command a person sent.
+// The entry carries no human origin.
+var bashInput = []byte("<bash-input>")
+
+// shellPrompt returns a "!" command a person sent, written as they typed it,
+// or "" when the entry is not one. A prompt peyk types after a "!" left in
+// the terminal's input arrives this way too.
+func (e entry) shellPrompt() string {
+	var s string
+	if json.Unmarshal(e.Message.Content, &s) != nil {
+		return ""
+	}
+	cmd, ok := strings.CutPrefix(s, string(bashInput))
+	if !ok {
+		return ""
+	}
+	cmd, _ = strings.CutSuffix(cmd, "</bash-input>")
+	return "! " + strings.TrimSpace(cmd)
 }
 
 type part struct {
@@ -295,7 +317,7 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 			continue
 		}
 		isReply := reply == nil && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
-		isPrompt := prompt == nil && bytes.Contains(lines[i], []byte(`"kind":"human"`))
+		isPrompt := prompt == nil && (bytes.Contains(lines[i], []byte(`"kind":"human"`)) || bytes.Contains(lines[i], bashInput))
 		if !isReply && !isPrompt {
 			continue
 		}
