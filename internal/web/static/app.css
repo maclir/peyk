@@ -479,28 +479,28 @@ html.wide .bar .rev .spin { right: auto; left: 100%; margin: -0.45em 0 0 2px; }
 form.dismiss { display: flex; align-items: center; gap: 8px; }
 .dnote { flex: 1; min-width: 0; font: inherit; font-size: 0.9rem; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); color: var(--ink); }
 
-/* A laptop-wide window: workers on the left, the shown worker in the middle,
-   its repository and project inbox on the right. The panes keep their own
-   scroll so the page's scroll stays the conversation's. */
-html.wide body { max-width: none; }
-html.wide #panes { display: flex; align-items: flex-start; gap: 24px; }
-/* The panes sit above the composer, whose shadow paints the page colour well
-   past its own sides. */
-html.wide #rail, html.wide #side { position: sticky; top: var(--barh, 0px); z-index: 3; flex: none; max-height: calc(100vh - var(--barh, 0px)); overflow-y: auto; box-sizing: border-box; background: var(--bg); overscroll-behavior: contain; }
+/* A laptop-wide window: the header stays at the top and the three columns
+   scroll independently below it so scrolling one never moves or clips another. */
+html.wide, html.wide body { height: 100%; overflow: hidden; }
+html.wide body { max-width: none; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px); }
+html.wide .bar { position: relative; z-index: 4; flex: none; background: var(--bg); }
+html.wide #panes { flex: 1 1 auto; min-height: 0; display: flex; gap: 24px; }
+html.wide #rail, html.wide #app, html.wide #side { min-height: 0; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; }
+html.wide #rail, html.wide #side { flex: none; }
 html.wide #rail { width: clamp(300px, 18vw, 420px); padding: 0 4px 24px; }
 html.wide #rail .board { gap: 6px; }
 html.wide #side { width: clamp(360px, 28vw, 640px); padding: 4px 4px 24px; display: flex; flex-direction: column; gap: 12px; }
+html.wide #side > * { flex: none; }
 html.wide #side .group { margin: 10px 2px 0; }
 html.wide #side .panehead { display: flex; align-items: center; margin: 6px 2px -6px; }
 html.wide #side .facts { margin: 0; }
-html.wide #app { flex: 1 1 auto; min-width: 0; }
+html.wide #app { flex: 1 1 auto; min-width: 0; overflow-x: hidden; padding: 0 4px 12px; margin-bottom: 0; }
+html.wide #app .composer { margin-inline: 0; }
 html.wide .foot { display: none; }
-/* A wide window keeps the header, then the shown worker's head, then the
-   conversation bar on screen; each sticks below the one above, and the
-   shadows cover the body's side padding. */
-html.wide .bar { position: sticky; top: 0; z-index: 4; background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); }
-html.wide .dhead { position: sticky; top: var(--barh, 0px); z-index: 2; margin-top: -4px; padding: 4px 0 8px; background: var(--bg); }
-html.wide .convobar { top: calc(var(--barh, 0px) + var(--dheadh, 0px)); }
+/* The shown worker's head sticks to the top of its scrolling column and the
+   conversation bar sticks below it. */
+html.wide .dhead { position: sticky; top: 0; z-index: 3; margin-top: -4px; padding: 4px 0 8px; background: var(--bg); box-shadow: -4px 0 var(--bg), 4px 0 var(--bg); }
+html.wide .convobar { top: var(--dheadh, 0px); }
 html.wide .inboxpane { display: flex; flex-direction: column; gap: 8px; padding-bottom: 24px; }
 html.wide .inboxpane .sheethead { padding: 4px 0 0; }
 html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); align-items: start; }

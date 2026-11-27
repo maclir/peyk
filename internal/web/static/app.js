@@ -94,12 +94,17 @@ function placeRevision() {
   else footEl.append(revEl);
 }
 placeRevision();
-// On a wide window the header and the shown worker's head stay on screen, so
-// whatever else sticks to the top sits below them. A render replaces the head,
-// so each render observes the new one.
-const sizeVar = (name) => new ResizeObserver(([e]) => document.documentElement.style.setProperty(name, `${e.target.offsetHeight}px`));
-sizeVar("--barh").observe(barEl);
-const dheadSize = sizeVar("--dheadh");
+// On a wide window the shown worker's head stays at the top of its column, so
+// the conversation bar sticks below it. A render replaces the head, so each
+// render observes the new one.
+const dheadSize = new ResizeObserver(([e]) => document.documentElement.style.setProperty("--dheadh", `${e.target.offsetHeight}px`));
+
+// On a wide window #app is its own scroll container; on a narrow one the page scrolls.
+function scrollHost() {
+  return wide()
+    ? { el: app, top: () => app.scrollTop, to: (o) => app.scrollTo(o), by: (o) => app.scrollBy(o) }
+    : { el: document.documentElement, top: () => window.scrollY, to: (o) => window.scrollTo(o), by: (o) => window.scrollBy(o) };
+}
 // Checking for updates and updating start from the header, so their result
 // shows under it.
 const hpopEl = hstatEl.appendChild(Object.assign(document.createElement("p"), { className: "hpop", hidden: true }));
@@ -335,10 +340,16 @@ async function start(cfg) {
   });
   usageEl.addEventListener("click", () => { state.menu = state.menu === "usage" ? null : "usage"; render(); });
   usageEl.parentElement.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.menu === "usage") { state.menu = null; render(); usageEl.focus(); } });
-  window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); syncLayers(); render(); });
+  window.addEventListener("hashchange", () => {
+    document.documentElement.classList.remove("tuck");
+    if (wide()) { app.scrollTop = 0; sideEl.scrollTop = 0; }
+    syncLayers();
+    render();
+  });
   window.addEventListener("popstate", syncLayers);
   wideQuery.addEventListener("change", () => {
     document.documentElement.classList.toggle("wide", wide());
+    if (wide()) window.scrollTo(0, 0);
     placeRevision();
     if (wide() && inboxSheet?.open) closeLayer("inbox");
     render();
@@ -1870,8 +1881,8 @@ async function start(cfg) {
   // asks again, and leaving the worker or the app deletes it.
   function openHistory(s) {
     closeHistory();
-    const root = document.documentElement;
-    const whole = { id: s.id, latest: s.latest, data: null, nodes: null, unsub: null, fromBottom: root.scrollHeight - window.scrollY };
+    const sc = scrollHost();
+    const whole = { id: s.id, latest: s.latest, data: null, nodes: null, unsub: null, fromBottom: sc.el.scrollHeight - sc.top() };
     state.history = whole;
     whole.unsub = fs.onSnapshot(fs.doc(db, "history", s.id), (snap) => {
       if (state.history !== whole) return;
@@ -1889,7 +1900,8 @@ async function start(cfg) {
   function keepHistoryAnchor() {
     const whole = state.history;
     if (whole?.fromBottom == null) return;
-    window.scrollTo({ top: document.documentElement.scrollHeight - whole.fromBottom, behavior: "instant" });
+    const sc = scrollHost();
+    sc.to({ top: sc.el.scrollHeight - whole.fromBottom, behavior: "instant" });
     if (whole.data?.served_at) whole.fromBottom = null;
   }
 
@@ -1920,7 +1932,7 @@ async function start(cfg) {
     closeHistory();
     render();
     const again = document.querySelector(".detail .convo .earlier");
-    if (again) window.scrollBy({ top: again.getBoundingClientRect().top - top, behavior: "instant" });
+    if (again) scrollHost().by({ top: again.getBoundingClientRect().top - top, behavior: "instant" });
   }
 
   function followHistory(s) {
@@ -2530,7 +2542,8 @@ async function start(cfg) {
         dropDraft(key);
         render();
         // The sent reply lands at the end of the conversation, under the composer.
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+        const sc = scrollHost();
+        sc.to({ top: sc.el.scrollHeight, behavior: "smooth" });
       } else {
         dropUnused([{ images: ids }]);
       }

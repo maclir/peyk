@@ -1356,27 +1356,74 @@ test.describe('signed in', () => {
     // A phone's header scrolls away with the page.
     expect(await page.locator('header.bar').evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThan(0);
 
-    // A wide window keeps the header, the worker's head and the reply box on screen.
+    // A wide window scrolls the three columns independently under the header,
+    // keeping the worker's head, the reply box and the top of the side pane intact.
     const viewport = page.viewportSize()!;
+    const git = `${FIRESTORE}/sessions/k?updateMask.fieldPaths=git`;
+    expect((await page.request.patch(git, { headers: admin, data: { fields: {
+      git: encode({ branch: 'main', upstream: 'origin/main', unpushed: 1, dirty: 0,
+        pending: [{ hash: '3f2a1c4', subject: 'Report unused exports', at: new Date() }] }),
+    } } })).ok()).toBe(true);
+    const sideTasks = Array.from({ length: 12 }, (_, i) => `side-${i}`);
+    for (const [i, id] of sideTasks.entries()) {
+      await put(page, `tasks/${id}`, { project: 'knip', text: `Side task ${i}\n\nMore detail to fill the column.`, status: 'queued', created_at: new Date(Date.now() - i * 1000) });
+    }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(page.locator('#side .pushcard')).toBeVisible();
     await page.locator('#reply-k').blur();
-    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 400);
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(600);
-    const [barTop, barBottom, headTop, convoTop, headBottom, boxBottom] = await page.evaluate(() => [
-      document.querySelector('header.bar')!.getBoundingClientRect().top,
-      document.querySelector('header.bar')!.getBoundingClientRect().bottom,
-      document.querySelector('#app .dhead')!.getBoundingClientRect().top,
-      document.querySelector('#app .convobar')?.getBoundingClientRect().top ?? null,
-      document.querySelector('#app .dhead')!.getBoundingClientRect().bottom,
-      document.querySelector('#app form.composer.respond')!.getBoundingClientRect().bottom,
-    ]);
-    expect(barTop).toBe(0);
-    expect(Math.abs(headTop - barBottom)).toBeLessThan(1);
-    if (convoTop !== null) expect(convoTop).toBeGreaterThanOrEqual(headBottom - 1);
-    expect(boxBottom).toBeLessThanOrEqual(900);
+    const appBox = (await page.locator('#app').boundingBox())!;
+    await page.mouse.move(appBox.x + appBox.width / 2, appBox.y + appBox.height / 2);
+    for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
+    await expect.poll(() => page.evaluate(() => {
+      const a = document.getElementById('app')!;
+      return a.scrollTop > 600 && a.scrollTop + a.clientHeight >= a.scrollHeight - 1;
+    })).toBe(true);
+    const wideState = await page.evaluate(() => {
+      const bar = document.querySelector('header.bar')!.getBoundingClientRect();
+      const head = document.querySelector('#app .dhead')!.getBoundingClientRect();
+      const convo = document.querySelector('#app .convobar')?.getBoundingClientRect() ?? null;
+      const box = document.querySelector('#app form.composer.respond')!.getBoundingClientRect();
+      const push = document.querySelector('#side .pushcard')!.getBoundingClientRect();
+      const side = document.getElementById('side')!;
+      return {
+        winY: window.scrollY,
+        railTop: document.getElementById('rail')!.scrollTop,
+        sideTop: side.scrollTop,
+        sideOverflows: side.scrollHeight > side.clientHeight,
+        barTop: bar.top,
+        barBottom: bar.bottom,
+        headTop: head.top,
+        headBottom: head.bottom,
+        convoTop: convo?.top ?? null,
+        boxBottom: box.bottom,
+        pushTop: push.top,
+      };
+    });
+    expect(wideState.winY).toBe(0);
+    expect(wideState.railTop).toBe(0);
+    expect(wideState.sideTop).toBe(0);
+    expect(wideState.sideOverflows).toBe(true);
+    expect(wideState.barTop).toBe(0);
+    expect(Math.abs(wideState.headTop - wideState.barBottom)).toBeLessThan(1);
+    if (wideState.convoTop !== null) expect(wideState.convoTop).toBeGreaterThanOrEqual(wideState.headBottom - 1);
+    expect(wideState.boxBottom).toBeLessThanOrEqual(900);
+    expect(wideState.pushTop).toBeGreaterThanOrEqual(wideState.barBottom);
+
+    // Scrolling the side pane moves only the side pane.
+    const appScrollBefore = await page.evaluate(() => document.getElementById('app')!.scrollTop);
+    const sideBox = (await page.locator('#side').boundingBox())!;
+    await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + sideBox.height / 2);
+    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 300);
+    await expect.poll(() => page.evaluate(() => document.getElementById('side')!.scrollTop)).toBeGreaterThan(200);
+    expect(await page.evaluate(() => document.getElementById('app')!.scrollTop)).toBe(appScrollBefore);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    for (const id of sideTasks) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
     await page.setViewportSize(viewport);
-    expect((await page.request.patch(message, { headers: admin, data: { fields: { message: before.message } } })).ok()).toBe(true);
+    const restore = `${FIRESTORE}/sessions/k?updateMask.fieldPaths=message&updateMask.fieldPaths=git`;
+    expect((await page.request.patch(restore, { headers: admin, data: { fields: {
+      message: before.message, ...(before.git ? { git: before.git } : {}),
+    } } })).ok()).toBe(true);
   });
 
   test("a worker's New task starts on its project, says when another is picked, and back closes each sheet", async () => {
