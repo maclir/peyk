@@ -46,11 +46,11 @@ func TestParseStatusLineWithoutRateLimitsIsNil(t *testing.T) {
 
 func TestParseQuotaGroupsBucketsIntoPools(t *testing.T) {
 	in := `{"model":{"display_name":"Gemini 4 Neon"},"quota":{
-		"claude-weekly":{"remaining_fraction":0.08,"reset_time":"2026-12-01T07:00:00Z","reset_in_seconds":1},
+		"3p-weekly":{"remaining_fraction":0.08,"reset_time":"2026-12-01T07:00:00Z","reset_in_seconds":1},
 		"gemini-weekly":{"remaining_fraction":0.9378,"reset_time":"2026-07-06T07:50:32Z","reset_in_seconds":560580},
 		"gemini-5h":{"remaining_fraction":0.5,"reset_time":"2026-07-01T12:00:00Z"},
 		"gemini-credits":{"remaining_amount":120},
-		"claude-5h":{"remaining_fraction":1,"disabled":true}}}`
+		"3p-5h":{"remaining_fraction":1,"disabled":true}}}`
 	pools, err := ParseQuota([]byte(in))
 	if err != nil {
 		t.Fatal(err)

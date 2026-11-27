@@ -60,7 +60,8 @@ a, button { }
 .upop .ucell { position: relative; }
 .upop .ucell.wide { grid-column: span 2; }
 .upop .ucell .meter { width: auto; }
-.upop .unote { position: absolute; top: 8px; left: 0; font-size: 0.7rem; font-weight: 600; line-height: 1; }
+.upop .unote { position: absolute; top: 8px; left: 0; font-size: 0.7rem; line-height: 1; color: var(--muted); }
+.upop .unote.low, .upop .unote.out { font-weight: 600; }
 .upop .unote.low { color: var(--warn); }
 .upop .unote.out { color: var(--bad); }
 /* A bar fills with what is used, in its quota's color. */

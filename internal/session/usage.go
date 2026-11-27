@@ -120,7 +120,12 @@ func ParseQuota(b []byte) ([]Pool, error) {
 	return out, nil
 }
 
+// poolName names a bucket group as peyk shows it. Antigravity calls the pool
+// it shares between Claude and GPT "3p", for third-party models.
 func poolName(group string) string {
+	if group == "3p" {
+		return "Claude"
+	}
 	if group == "" {
 		return group
 	}

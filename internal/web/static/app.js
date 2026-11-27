@@ -408,16 +408,14 @@ async function start(cfg) {
       usagePopEl.replaceChildren();
       return;
     }
-    const day = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    // A cell shows what is left only once it runs low, and when it comes back
-    // once nothing is.
-    const cell = (left, back, kind, wide) => {
+    // Under each bar is how long until it resets, in its state's color; a
+    // window with no reset ahead is whole and says nothing.
+    const cell = (left, resetsAt, kind, wide) => {
       const s = quotaState(left);
-      const note = s === "out" ? back : s === "low" ? `${left}%` : "";
       return h("span", { class: `ucell${wide ? " wide" : ""}` }, meter(h("span", { class: `meter ${kind}` }, h("i")), left),
-        note ? h("span", { class: `unote ${s}` }, note) : null);
+        resetsAt ? h("span", { class: `unote ${s}`.trim() }, ago(now, resetsAt.getTime())) : null);
     };
-    const windowCells = (ws, kind) => ws.map((w) => cell(w.left, w.resetsAt ? ago(now, w.resetsAt.getTime()) : "", kind));
+    const windowCells = (ws, kind) => ws.map((w) => cell(w.left, w.resetsAt, kind));
     const row = (href, name, label, cells, sub) => h("a", {
       class: `urow${sub ? " sub" : ""}`, href, target: "_blank", rel: "noopener", "aria-label": label,
       onclick: () => { state.menu = null; render(); },
@@ -434,7 +432,7 @@ async function start(cfg) {
       if (claude || ag) parts.push(h("hr"));
       parts.push(row("https://github.com/settings/billing", "GitHub Actions",
         `GitHub Actions: ${minutes(gh.left)} of ${minutes(gh.included)} minutes left`,
-        [cell(gh.pct, gh.resetsAt ? day(gh.resetsAt) : "", "gh", true)]));
+        [cell(gh.pct, gh.resetsAt, "gh", true)]));
     }
     usagePopEl.replaceChildren(...parts);
     // The bars sit beside the logo, so a popover hung from them can pass the

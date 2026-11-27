@@ -167,13 +167,14 @@ test.describe('signed in', () => {
     const pop = page.getByRole('dialog', { name: 'Usage' });
     const claude = pop.getByRole('link', { name: 'Claude Code: 5h 77% left, 7d 5% left' });
     await expect(claude).toHaveAttribute('href', 'https://claude.ai/settings/usage');
-    await expect(claude.locator('.unote')).toHaveText(['5%']);
+    await expect(claude.locator('.unote')).toHaveText([/^1h$/, /^2d$/]);
+    await expect(claude.locator('.unote.low')).toHaveText('2d');
     const gemini = pop.getByRole('link', { name: 'Antigravity Gemini: 5h 0% left, 7d 3% left' });
-    await expect(gemini.locator('.unote.out')).toHaveText(/^\d+m$/);
-    await expect(gemini.locator('.unote.low')).toHaveText('3%');
+    await expect(gemini.locator('.unote.out')).toHaveText(/^2\dm$/);
+    await expect(gemini.locator('.unote.low')).toHaveText(/^2d$/);
     const actions = pop.getByRole('link', { name: 'GitHub Actions: 1,240 of 2,000 minutes left' });
     await expect(actions).toHaveAttribute('href', 'https://github.com/settings/billing');
-    await expect(actions.locator('.unote')).toHaveCount(0);
+    await expect(actions.locator('.unote')).toHaveText(/^9d$/);
     await page.keyboard.press('Escape');
     await expect(pop).toBeHidden();
 
@@ -486,6 +487,7 @@ test.describe('signed in', () => {
     await sheet.getByRole('button', { name: /^Sonnet,/ }).click();
     await expect(sheet).toBeHidden();
     await expect(page.getByRole('button', { name: 'Model: Sonnet. Change model' })).toBeVisible();
+    await expect.poll(async () => (await list(page, 'commands')).some((c) => c.fields.type.stringValue === 'model')).toBe(true);
     const sw = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'model')!;
     expect(JSON.parse(sw.fields.payload.stringValue)).toMatchObject({ type: 'model', session: 'm', text: 'sonnet' });
     expect(sw.fields.grant).toBeDefined();
