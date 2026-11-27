@@ -1009,6 +1009,20 @@ test.describe('signed in', () => {
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
 
+  test('the project filter keeps its height when the inbox scrolls', async () => {
+    const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n');
+    await put(page, 'tasks/tall', { project: 'knip', text: long, status: 'queued', created_at: new Date() });
+    await put(page, 'tasks/other', { project: 'hamta', text: 'Other', status: 'queued', created_at: new Date() });
+    await page.goto('/#inbox');
+    const strip = page.getByRole('group', { name: 'Filter by project' });
+    const face = strip.getByRole('button', { name: 'knip' });
+    await expect(face).toBeVisible();
+    const [s, f] = [await strip.boundingBox(), await face.boundingBox()];
+    expect(s!.height).toBeGreaterThanOrEqual(f!.height);
+
+    for (const id of ['tall', 'other']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
+  });
+
   test("a worker's inbox sheet lists, adds and sends its project's tasks", async () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });

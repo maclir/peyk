@@ -280,7 +280,8 @@ button.go.holding { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); 
 .fchip { height: 32px; padding: 0 12px; border-radius: 999px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px; }
 .fchip .n { font-weight: 500; opacity: 0.75; }
 .fchip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: none; }
+/* A horizontal scroller has no content-based minimum height, so in the scrolling column it would shrink away. */
+.strip { flex: none; display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: none; }
 .sface { flex: none; width: 42px; height: 42px; padding: 0; border-radius: 12px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; }
 .sface[aria-pressed="true"] { border-color: var(--accent); }
 .strip:has([aria-pressed="true"]) .sface:not([aria-pressed="true"]) { opacity: 0.45; }
