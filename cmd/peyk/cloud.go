@@ -38,6 +38,24 @@ func usageDir() string {
 	return filepath.Join(home, ".peyk", "usage")
 }
 
+// conversationsPath is where each tool's last conversation per directory is
+// kept, for workers moved between tools.
+func conversationsPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "conversations.json")
+}
+
+// agyPath is the Antigravity CLI the agent lists models with. The personal
+// environment installs it outside PATH, and aoe's personal profile runs the
+// same binary.
+func agyPath() string {
+	if p := os.Getenv("PEYK_AGY"); p != "" {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "antigravity-personal", "bin", "agy")
+}
+
 // healthPath is where the agent says it is publishing, for the menu bar app.
 func healthPath() string {
 	home, _ := os.UserHomeDir()
@@ -229,10 +247,14 @@ func runAgent(ctx context.Context) error {
 		UsageRead:    health.usage,
 		ActionsRead:  health.actions,
 		Hidden:       laptop.HiddenFile{Path: hiddenPath()},
-		History:      laptop.History, HistoryRequests: history,
+		Models: func(ctx context.Context) ([]session.Model, error) {
+			return laptop.AntigravityModels(ctx, laptop.Exec, agyPath())
+		},
+		History: laptop.History, HistoryRequests: history,
 		Seen: seen,
 		Commands: &agent.Commands{
-			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
+			Act: actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig(),
+				conversations: laptop.Conversations{Path: conversationsPath()}},
 			Keys:        keyring().Load,
 			Origin:      o.String(),
 			RPID:        o.Hostname(),

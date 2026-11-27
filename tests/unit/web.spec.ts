@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -540,5 +540,32 @@ describe('model names', () => {
   it('offers each Claude Code alias with its budget from 1 to 5', () => {
     const claude = MODEL_POOLS.find((p: any) => p.id === 'claude');
     expect(claude.models.map((m: any) => [m.alias, m.pips])).toEqual([['fable', 5], ['opus', 3], ['sonnet', 2], ['haiku', 1]]);
+  });
+});
+
+describe('antigravityPools', () => {
+  const models = [
+    { id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' }, { id: 'gemini-4-neon-low', name: 'Gemini 4 Neon (Low)' },
+    { id: 'gemini-4-carbon-medium', name: 'Gemini 4 Carbon (Medium)' }, { id: 'gemini-4-carbon-high', name: 'Gemini 4 Carbon (High)' },
+    { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)' },
+    { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
+    { id: 'claude-opus-5-5-high', name: 'Claude Opus 5.5 (High)' }, { id: 'claude-sonnet-5-5-high', name: 'Claude Sonnet 5.5 (High)' },
+    { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+  ];
+
+  it('offers one row per family at high effort, in the pool it draws on, with pips against the pool', () => {
+    const pools = antigravityPools(models);
+    expect(pools.map((p: any) => p.name)).toEqual(['Gemini', 'Claude']);
+    expect(pools[0].models.map((m: any) => [m.id, m.name, m.pips])).toEqual([
+      ['gemini-4-neon-high', 'Gemini 4 Neon', 4], ['gemini-4-carbon-high', 'Gemini 4 Carbon', 5],
+      ['gemini-4-hydrogen-low', 'Gemini 4 Hydrogen', 2], ['gemini-pro-orchestrator', 'Orchestrator (Carbon)', 0],
+    ]);
+    expect(pools[1].models.map((m: any) => [m.id, m.pips])).toEqual([['claude-opus-5-5-high', 5], ['claude-sonnet-5-5-high', 3], ['gpt-oss-120b-medium', 0]]);
+  });
+
+  it('is nothing without a listing, and names a model without its effort', () => {
+    expect(antigravityPools(undefined)).toEqual([]);
+    expect(modelBase('Gemini 3.8 Flash (High)')).toBe('Gemini 3.8 Flash');
+    expect(modelBase('Orchestrator (Neon)')).toBe('Orchestrator (Neon)');
   });
 });

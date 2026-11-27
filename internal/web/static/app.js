@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -177,7 +177,7 @@ async function start(cfg) {
     // A composer's ideation ask by its key, and the last one made, which the next starts from.
     ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
     // The idea whose dismissal note is being written.
-    dismissing: null, modelFor: null, modelAsked: new Map(), laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+    dismissing: null, modelFor: null, modelAsked: new Map(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: true, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -247,6 +247,10 @@ async function start(cfg) {
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "usage"), (snap) => {
         state.usage = snap.exists() ? snap.data() : null;
+        render();
+      }, failed),
+      fs.onSnapshot(fs.doc(db, "laptop", "models"), (snap) => {
+        state.models = snap.exists() ? snap.data() : null;
         render();
       }, failed),
       fs.onSnapshot(fs.doc(db, "laptop", "actions"), (snap) => {
@@ -471,6 +475,7 @@ async function start(cfg) {
     const drafts = new Map(fields().map((t) => [t.id, t.value]));
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
+    followMove(shownSession());
     const id = shownSession();
     const s = id && shownWorker(id);
     followHistory(s);
@@ -545,6 +550,17 @@ async function start(cfg) {
     if (e.data?.type !== "showing") return;
     e.ports[0]?.postMessage(!document.hidden && shownSession() === e.data.session);
   });
+
+  // A worker moved to another tool gets a new session under the same title;
+  // the page follows it there.
+  function followMove(id) {
+    if (!id || state.sessions.has(id) || !state.moving.has(id)) return;
+    const title = state.moving.get(id);
+    const next = [...state.sessions.values()].find((x) => x.title === title);
+    if (!next) return;
+    state.moving.delete(id);
+    history.replaceState(history.state, "", `#s-${encodeURIComponent(next.id)}`);
+  }
 
   function shownSession() {
     return location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
@@ -1945,61 +1961,85 @@ async function start(cfg) {
   }
 
   // The model chip names what wrote the latest reply and opens the sheet of
-  // models to switch to.
+  // models to switch to. Its dot is the tool: Claude Code or Antigravity.
   function modelChip(s) {
-    // Antigravity names its model in its own words, and peyk cannot switch
-    // it yet, so the chip only says it.
-    if (s.tool === "antigravity") {
-      const name = s.message?.model || "Antigravity";
-      return h("span", { class: "modelchip ag", "aria-label": `Model: ${name}` }, h("span", { class: "mdot", "aria-hidden": "true" }), name);
-    }
-    const m = shownModel(s);
-    const name = m.name || "Model";
-    return h("button", { type: "button", class: "modelchip cc", "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",
+    const name = shownModel(s).name || (s.tool === "antigravity" ? "Antigravity" : "Model");
+    return h("button", { type: "button", class: `modelchip ${s.tool === "antigravity" ? "ag" : "cc"}`, "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",
       onclick: () => { state.modelFor = s.id; render(); } },
     state.busy.has(`model:${s.id}`) ? spinner() : h("span", { class: "mdot", "aria-hidden": "true" }), name);
+  }
+
+  // Every model a worker can run, as the sheet offers them: Claude Code's
+  // aliases, then Antigravity's models by the pool their quota is in.
+  function modelChoices() {
+    const cc = MODEL_POOLS.map((p) => ({ ...p, tool: "", app: "Claude Code",
+      models: p.models.map((m) => ({ key: m.alias, name: m.name, pips: m.pips, tool: "", claude: true })) }));
+    const ag = antigravityPools(state.models?.antigravity).map((p) => ({ ...p, kind: "ag", tool: "antigravity", app: "Antigravity",
+      models: p.models.map((m) => ({ key: m.id, name: m.name, pips: m.pips, tool: "antigravity", claude: /^claude-/.test(m.id) })) }));
+    return [...cc, ...ag];
   }
 
   // A switch asked for shows as the model asked for until a reply comes from
   // it; the reply's own model is the truth after that, or if the switch fails.
   function shownModel(s) {
     const asked = state.modelAsked.get(s.id);
-    const alias = modelFamily(s.message?.model);
-    if (asked && asked.alias !== alias) return asked;
+    let actual;
+    if (s.tool === "antigravity") {
+      const name = modelBase(s.message?.model);
+      const m = modelChoices().flatMap((p) => p.models).find((c) => c.tool === "antigravity" && c.name === name);
+      actual = { key: m?.key ?? "", name };
+    } else {
+      actual = { key: modelFamily(s.message?.model), name: modelName(s.message?.model) };
+    }
+    if (asked && asked.key !== actual.key) return asked;
     if (asked) state.modelAsked.delete(s.id);
-    return { alias, name: modelName(s.message?.model) };
+    return actual;
   }
 
   // The sheet lists each pool's models with what a task costs of its quota,
-  // and the quota's windows beside the pool's name. A tap switches.
+  // and the quota's windows beside the pool's name. A tap switches; a model
+  // of the other tool moves the worker there.
   function modelSheet(s) {
     const close = () => { state.modelFor = null; render(); };
     const now = Date.now();
-    const current = shownModel(s).alias;
+    const current = shownModel(s).key;
     const claude = usageLeft(state.usage, now);
+    const ag = antigravityLeft(state.usage, now) ?? [];
     const pick = (m) => {
       state.modelFor = null;
-      if (m.alias === current) return render();
+      if (m.key === current) return render();
+      const move = m.tool !== (s.tool ?? "");
       state.modelAsked.set(s.id, m);
-      sendCommand("model", { session: s.id, text: m.alias }, `Switch to ${m.name}`, `model:${s.id}`, (text, busy, tone) => {
-        if (tone === "bad") state.modelAsked.delete(s.id);
+      if (move) state.moving.set(s.id, s.title);
+      sendCommand("model", { session: s.id, text: m.key }, `${move ? "Move" : "Switch"} to ${m.name}`, `model:${s.id}`, (text, busy, tone) => {
+        if (tone === "bad") { state.modelAsked.delete(s.id); state.moving.delete(s.id); }
         setOutcome(`worker:${s.id}`, text, busy, tone);
-      }, null, { done: `Switched to ${m.name}` });
+      }, null, { done: `${move ? "Moved" : "Switched"} to ${m.name}` });
     };
-    const pools = MODEL_POOLS.map((pool) => h("div", { class: "mpool", role: "group", "aria-label": pool.name },
-      h("div", { class: "mhead" }, h("span", { class: "grow" }, pool.name),
-        pool.id === "claude" && claude ? h("span", { class: "mquota", "aria-hidden": "true" },
-          claude.map((w) => meter(h("span", { class: `meter ${pool.kind}` }, h("i")), w.left))) : null),
-      pool.models.map((m) => h("button", { type: "button", class: `mrow ${pool.kind}`, "aria-pressed": String(m.alias === current),
-        "aria-label": `${m.name}, uses ${m.pips} of 5 of the quota per task`, onclick: () => pick(m) },
-      h("span", { class: "mdot", "aria-hidden": "true" }),
-      h("span", { class: "mname" }, m.name),
-      h("span", { class: "pips", "aria-hidden": "true" }, [1, 2, 3, 4, 5].map((i) => h("i", { class: i <= m.pips ? "on" : null }))),
-      h("span", { class: "mcheck", "aria-hidden": "true" }, icon("check"))))));
+    const quota = (pool) => {
+      const windows = pool.tool === "" ? claude : ag.find((p) => p.name === pool.name)?.windows;
+      return windows ? h("span", { class: "mquota", "aria-hidden": "true" },
+        windows.map((w) => meter(h("span", { class: `meter ${pool.kind}` }, h("i")), w.left))) : null;
+    };
+    const row = (pool, m) => h("button", { type: "button", class: `mrow ${pool.kind}${m.claude ? " claude" : ""}`, "aria-pressed": String(m.key === current),
+      "aria-label": `${m.name}${pool.tool ? " in Antigravity" : ""}${m.pips ? `, uses ${m.pips} of 5 of the quota per task` : ""}`, onclick: () => pick(m) },
+    h("span", { class: "mdot", "aria-hidden": "true" }),
+    h("span", { class: "mname" }, m.name),
+    h("span", { class: "pips", "aria-hidden": "true" }, m.pips ? [1, 2, 3, 4, 5].map((i) => h("i", { class: i <= m.pips ? "on" : null })) : null),
+    h("span", { class: "mcheck", "aria-hidden": "true" }, icon("check")));
+    const choices = modelChoices();
+    const body = [];
+    for (const pool of choices) {
+      const first = pool.tool && pool === choices.find((p) => p.tool === pool.tool);
+      if (first) body.push(h("h3", { class: "mapp" }, pool.app));
+      body.push(h("div", { class: `mpool${pool.tool ? " sub" : ""}`, role: "group", "aria-label": pool.tool ? `${pool.app} ${pool.name}` : pool.app },
+        h("div", { class: "mhead" }, h("span", { class: "grow" }, pool.tool ? pool.name : pool.app), quota(pool)),
+        pool.models.map((m) => row(pool, m))));
+    }
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet msheet", role: "dialog", "aria-modal": "true", "aria-label": `Model for ${s.title}`, onkeydown: (e) => e.key === "Escape" && close() },
         sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Model")), close),
-        h("div", { class: "sheetbody" }, pools)));
+        h("div", { class: "sheetbody" }, body)));
   }
 
   // Clear, start, restart and stop share a menu so the worker's name and

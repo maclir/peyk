@@ -134,3 +134,25 @@ func TestAoeListsAntigravitySessions(t *testing.T) {
 		t.Fatalf("sessions = %+v, want only the one running agy", got)
 	}
 }
+
+func TestAntigravityModelsReadsEachIdAndName(t *testing.T) {
+	run := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name != "/bin/agy" || strings.Join(args, " ") != "models" {
+			t.Fatalf("ran %s %v", name, args)
+		}
+		return []byte("Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n"), nil
+	}
+	models, err := AntigravityModels(context.Background(), run, "/bin/agy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0] != (session.Model{ID: "gemini-4-neon-high", Name: "Gemini 4 Neon (High)"}) {
+		t.Fatalf("models = %+v", models)
+	}
+	signedOut := func(context.Context, string, string, ...string) ([]byte, error) {
+		return []byte("Error: Please sign in to view available models."), nil
+	}
+	if _, err := AntigravityModels(context.Background(), signedOut, "/bin/agy"); err == nil {
+		t.Fatal("a signed-out CLI listed models")
+	}
+}

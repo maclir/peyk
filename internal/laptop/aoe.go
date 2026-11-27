@@ -186,3 +186,33 @@ func (a Aoe) Create(ctx context.Context, dir, title, group string) (string, erro
 	}
 	return s.ID, nil
 }
+
+// Add creates a stopped session in dir that runs tool, aoe's name for it,
+// with args after the tool's command, and returns its id; Send starts it.
+func (a Aoe) Add(ctx context.Context, dir, title, group, tool, args string) (string, error) {
+	cmd := []string{"add", dir, "-t", title, "-g", group, "--tool", tool}
+	if args != "" {
+		cmd = append(cmd, "--extra-args", args)
+	}
+	if _, err := a.cmd(ctx, cmd...); err != nil {
+		return "", err
+	}
+	s, err := a.Show(ctx, title)
+	if err != nil {
+		return "", err
+	}
+	return s.ID, nil
+}
+
+// Remove moves a session to aoe's trash; its conversation stays on disk.
+func (a Aoe) Remove(ctx context.Context, id string) error {
+	_, err := a.cmd(ctx, "remove", id)
+	return err
+}
+
+// SetConversation points a stopped session at conversation, which it opens
+// when it starts.
+func (a Aoe) SetConversation(ctx context.Context, id, conversation string) error {
+	_, err := a.cmd(ctx, "session", "set-session-id", id, conversation)
+	return err
+}

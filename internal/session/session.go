@@ -401,3 +401,17 @@ type Version struct {
 	// CheckedAt is when the checkout last fetched; zero if it never has.
 	CheckedAt time.Time `firestore:"checked_at,omitempty" json:"checked_at,omitempty"`
 }
+
+// Model is one model a tool offers: its id as the tool takes it, and its
+// name as the tool shows it.
+type Model struct {
+	ID   string `firestore:"id" json:"id"`
+	Name string `firestore:"name" json:"name"`
+}
+
+// Models are what the laptop's tools can run, published as laptop/models.
+// Claude Code's are its aliases, which the phone knows; Antigravity's depend
+// on the account's plan, so they are listed.
+type Models struct {
+	Antigravity []Model `firestore:"antigravity" json:"antigravity"`
+}

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,13 @@ func (f *fakeActions) Resume(_ context.Context, s string, _ session.Transcript, 
 	}
 	f.calls = append(f.calls, "resume "+s+" in "+conversation+" by "+how)
 	return nil
+}
+func (f *fakeActions) Swap(_ context.Context, s session.Snapshot, tool, model string) (string, error) {
+	if tool == "" {
+		tool = "claude"
+	}
+	f.calls = append(f.calls, "swap "+s.ID+" to "+tool+" on "+model)
+	return "swapped-" + s.ID, nil
 }
 func (f *fakeActions) Push(_ context.Context, dir string) error {
 	f.calls = append(f.calls, "push "+dir)
@@ -127,6 +135,7 @@ func commandAgent(t *testing.T, ph phone) (*Agent, *store.Memory, *fakeActions) 
 	acts := &fakeActions{}
 	a := newAgent(c, mem)
 	a.Commands = &Commands{Act: acts, Keys: func() ([]command.Key, error) { return []command.Key{ph.key}, nil }, Origin: testOrigin, RPID: testRP}
+	a.models = map[string]bool{"gemini-4-neon-high": true, "gemini-4-carbon-high": true}
 	if err := a.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +192,10 @@ func TestExecuteCommands(t *testing.T) {
 		{"switch an idle session's model", command.Payload{Type: command.Model, Session: "k", Text: "sonnet"}, "send k: /model sonnet", ""},
 		{"switch a stopped session's model", command.Payload{Type: command.Model, Session: "s", Text: "fable"}, "send s: /model fable", ""},
 		{"switch a working session's model", command.Payload{Type: command.Model, Session: "h", Text: "opus"}, "", "/model would land in its turn"},
-		{"switch an Antigravity session's model", command.Payload{Type: command.Model, Session: "g", Text: "opus"}, "", "gemi runs Antigravity"},
-		{"switch to a model Claude Code has no alias for", command.Payload{Type: command.Model, Session: "k", Text: "opus; rm -rf"}, "", "no Claude model named"},
+		{"switch an Antigravity session's model", command.Payload{Type: command.Model, Session: "g", Text: "gemini-4-carbon-high"}, "send g: /model gemini-4-carbon-high", ""},
+		{"move a busy session to another tool", command.Payload{Type: command.Model, Session: "h", Text: "gemini-4-neon-high"}, "", "hamta is not free: working"},
+		{"move a session with uncommitted changes to another tool", command.Payload{Type: command.Model, Session: "d", Text: "gemini-4-neon-high"}, "", "dorna is not free"},
+		{"switch to a model no tool runs", command.Payload{Type: command.Model, Session: "k", Text: "opus; rm -rf"}, "", "no model named"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -617,5 +628,47 @@ func TestClearFromThePhoneDropsHeldReplies(t *testing.T) {
 	}
 	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Failed {
 		t.Fatalf("status = %v", res)
+	}
+}
+
+func TestMovingAWorkerToAnotherToolPointsTheNewOneAtTheOldConversation(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, acts := commandAgent(t, ph)
+	knip := a.sessions["k"]
+	knip.Transcript.Dir = "/claude/projects/-c-knip"
+	a.sessions["k"] = knip
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Model, Session: "k", Text: "gemini-4-neon-high"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Done {
+		t.Fatalf("result = %v", res)
+	}
+	if len(acts.calls) != 2 || acts.calls[0] != "swap k to antigravity on gemini-4-neon-high" {
+		t.Fatalf("calls = %q", acts.calls)
+	}
+	if want := "send swapped-k: This project's worker just moved here from Claude Code."; !strings.HasPrefix(acts.calls[1], want) ||
+		!strings.Contains(acts.calls[1], "/claude/projects/-c-knip/now.jsonl") {
+		t.Fatalf("catch-up = %q", acts.calls[1])
+	}
+}
+
+func TestPublishModelsListsAntigravitysModelsOrNoneWhenSignedOut(t *testing.T) {
+	mem := store.NewMemory()
+	a := newAgent(&fakeCollector{}, mem)
+	a.Models = func(context.Context) ([]session.Model, error) {
+		return []session.Model{{ID: "gemini-4-neon-high", Name: "Gemini 4 Neon (High)"}}, nil
+	}
+	if err := a.PublishModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := mem.Get("laptop", "models"); got.(session.Models).Antigravity[0].ID != "gemini-4-neon-high" || !a.models["gemini-4-neon-high"] {
+		t.Fatalf("published %+v", got)
+	}
+	a.Models = func(context.Context) ([]session.Model, error) { return nil, errors.New("signed out") }
+	if err := a.PublishModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := mem.Get("laptop", "models"); len(got.(session.Models).Antigravity) != 0 || len(a.models) != 0 {
+		t.Fatalf("published %+v after a failed listing", got)
 	}
 }

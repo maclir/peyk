@@ -168,6 +168,11 @@ type Agent struct {
 	// not publishing it succeeds.
 	ActionsRead func(*session.Actions)
 
+	// Models, when set, lists the models Antigravity can run. It is read at
+	// start: the list changes only with the account's plan or the CLI.
+	Models func(context.Context) ([]session.Model, error)
+	models map[string]bool
+
 	// clears follows sessions cleared from the phone until aoe reports
 	// their new conversation, keyed by session id.
 	clears map[string]clearedTo
@@ -653,6 +658,28 @@ func (a *Agent) PublishUsage(ctx context.Context) error {
 	return nil
 }
 
+// PublishModels writes laptop/models. A failed listing, as when Antigravity
+// is signed out, leaves Antigravity's models off the phone rather than
+// stopping the agent.
+func (a *Agent) PublishModels(ctx context.Context) error {
+	if a.Models == nil {
+		return nil
+	}
+	models, err := a.Models(ctx)
+	if err != nil {
+		a.Log.Printf("antigravity models: %v", err)
+		models = nil
+	}
+	a.models = map[string]bool{}
+	for _, m := range models {
+		a.models[m.ID] = true
+	}
+	if models == nil {
+		models = []session.Model{}
+	}
+	return a.Store.Put(ctx, "laptop", "models", session.Models{Antigravity: models})
+}
+
 // PublishActions writes laptop/actions when the Actions usage changed. A
 // failed lookup leaves the last published usage, which is still the best
 // known, and waits for the next finished run.
@@ -845,6 +872,9 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 		return err
 	}
 	if err := a.PublishActions(ctx); err != nil {
+		return err
+	}
+	if err := a.PublishModels(ctx); err != nil {
 		return err
 	}
 	presence := time.NewTicker(a.Presence)

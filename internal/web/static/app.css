@@ -498,18 +498,26 @@ html.wide .inboxpane .sheethead { padding: 4px 0 0; }
 html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); align-items: start; }
 .card[aria-current="page"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
 
-/* The model sheet: a pool's name beside its quota bars, then its models,
-   each with the budget a task uses as 1 to 5 pips. */
+/* The model sheet: each tool's pools, a pool's name beside its quota bars,
+   then its models, each with the budget a task uses as 1 to 5 pips. A dot is
+   the model's family; the pips and the pick are the pool's quota color. */
 .msheet .sheetbody { display: flex; flex-direction: column; gap: 16px; }
+.mapp { margin: 4px 4px -8px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
 .mpool { display: flex; flex-direction: column; gap: 2px; }
 .mhead { display: flex; align-items: center; gap: 10px; padding: 0 4px 6px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.mpool.sub .mhead { padding-left: 12px; font-weight: 400; }
 .mquota { display: flex; flex-direction: column; gap: 3px; }
 .mrow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: none; font-weight: 400; text-align: left; }
-.mrow[aria-pressed="true"] { font-weight: 600; background: var(--design-soft); }
-.mrow .mname { flex: 0 0 120px; }
+.mrow.cc[aria-pressed="true"] { font-weight: 600; background: var(--design-soft); }
+.mrow.ag[aria-pressed="true"] { font-weight: 600; background: var(--accent-soft); }
+.mrow .mname { flex: 0 0 150px; }
 .mrow .pips { flex: 1 1 auto; display: flex; gap: 3px; }
 .mrow .pips i { width: 12px; height: 6px; border-radius: 3px; background: var(--line); }
 .mrow.cc .pips i.on { background: var(--design); }
+.mrow.ag .pips i.on { background: var(--accent); }
+.mrow.ag .mdot { background: var(--accent); }
+.mrow.claude .mdot { background: var(--design); }
 .mrow .mcheck { display: flex; color: var(--design); visibility: hidden; }
+.mrow.ag .mcheck { color: var(--accent); }
 .mrow .mcheck svg { width: 18px; height: 18px; }
 .mrow[aria-pressed="true"] .mcheck { visibility: visible; }

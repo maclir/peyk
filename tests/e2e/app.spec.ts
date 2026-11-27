@@ -473,7 +473,7 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/sessions/z`, { headers: admin });
   });
 
-  test('a worker names its model and switches to another from the sheet, signed', async () => {
+  test('a worker names its model, switches it, and moves to another tool from the sheet, signed', async () => {
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       message: { text: 'Done.', at: new Date(), model: 'claude-opus-5-5' } });
     await page.goto('/#s-m');
@@ -496,11 +496,29 @@ test.describe('signed in', () => {
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
     await expect(page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' })).toBeVisible();
-    await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', tool: 'antigravity', updated_at: new Date(),
-      message: { text: 'Done in Gemini.', at: new Date(), model: 'Gemini 3.8 Flash (High)' } });
-    await expect(page.getByLabel('Model: Gemini 3.8 Flash (High)')).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Model:/ })).toHaveCount(0);
+
+    await put(page, 'laptop/models', { antigravity: [
+      { id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' }, { id: 'gemini-4-neon-low', name: 'Gemini 4 Neon (Low)' },
+      { id: 'gemini-4-carbon-high', name: 'Gemini 4 Carbon (High)' }, { id: 'claude-opus-5-5-high', name: 'Claude Opus 5.5 (High)' },
+    ] });
+    await page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' }).click();
+    await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).getByRole('button')).toHaveText(['Gemini 4 Neon', 'Gemini 4 Carbon']);
+    await expect(sheet.getByRole('group', { name: 'Antigravity Claude' }).getByRole('button', { name: /^Opus|Claude Opus 5.5 in Antigravity/ })).toBeVisible();
+    await sheet.getByRole('button', { name: 'Gemini 4 Neon in Antigravity, uses 4 of 5 of the quota per task' }).click();
+    await expect.poll(async () => (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'model').length).toBe(2);
+    const move = (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'model')
+      .find((c) => JSON.parse(c.fields.payload.stringValue).text === 'gemini-4-neon-high')!;
+    await put(page, `commands/${move.name.split('/').pop()}`, { ...plain(move.fields), status: 'done' });
     await page.request.delete(`${FIRESTORE}/sessions/m`, { headers: admin });
+    await put(page, 'sessions/m2', { id: 'm2', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', tool: 'antigravity', updated_at: new Date(),
+      message: { text: 'Caught up.', at: new Date(), model: 'Gemini 4 Neon (High)' } });
+    await expect(page).toHaveURL(/#s-m2$/);
+    await expect(page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' })).toBeVisible();
+    await page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' }).click();
+    await expect(page.getByRole('dialog', { name: 'Model for mdl' }).getByRole('button', { name: /^Gemini 4 Neon in Antigravity/ })).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
+    await page.request.delete(`${FIRESTORE}/sessions/m2`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/laptop/models`, { headers: admin });
   });
 
   test('tapping the laptop checks for updates, and Update is signed', async () => {

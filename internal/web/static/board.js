@@ -453,3 +453,50 @@ export function modelName(id) {
   if (!m) return id ?? "";
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
 }
+
+// Output prices per 1M tokens of Antigravity's models, by family, which set
+// their pips against the priciest in the same pool. A family missing here
+// shows no pips rather than a guess.
+const ANTIGRAVITY_PRICES = {
+  "gemini-4-carbon": 20, "gemini-4-argon": 20, "gemini-4-neon": 15, "gemini-4-hydrogen": 7.5, "gemini-3.8-flash": 3.75,
+  "claude-opus-5-5": 20, "claude-sonnet-5-5": 10,
+};
+const EFFORT = /-(low|medium|high|xhigh)$/;
+const EFFORT_NAME = / \((Low|Medium|High|XHigh)\)$/;
+
+// modelBase is a model's name without the effort Antigravity appends.
+export function modelBase(name) {
+  return (name ?? "").replace(EFFORT_NAME, "");
+}
+
+// antigravityPools turns the models laptop/models lists into the sheet's
+// rows: one per family, at high effort where the family offers it, in the
+// pool whose quota it draws on. Claude and GPT share Antigravity's
+// third-party pool, which peyk calls Claude.
+export function antigravityPools(models) {
+  const families = new Map();
+  for (const m of models ?? []) {
+    const family = m.id.replace(EFFORT, "");
+    const effort = EFFORT.exec(m.id)?.[1];
+    const had = families.get(family);
+    const rank = (e) => ["high", "medium", "xhigh", "low"].indexOf(e);
+    if (!had || (effort && (had.effort == null || rank(effort) < rank(had.effort)))) {
+      families.set(family, { id: m.id, family, effort, name: modelBase(m.name) });
+    }
+  }
+  const pools = [
+    { id: "gemini", name: "Gemini", models: [] },
+    { id: "3p", name: "Claude", models: [] },
+  ];
+  for (const f of families.values()) {
+    pools[/^(claude|gpt)-/.test(f.id) ? 1 : 0].models.push(f);
+  }
+  for (const p of pools) {
+    const max = Math.max(0, ...p.models.map((m) => ANTIGRAVITY_PRICES[m.family] ?? 0));
+    for (const m of p.models) {
+      const price = ANTIGRAVITY_PRICES[m.family];
+      m.pips = price && max ? Math.max(1, Math.ceil((5 * price) / max)) : 0;
+    }
+  }
+  return pools.filter((p) => p.models.length);
+}

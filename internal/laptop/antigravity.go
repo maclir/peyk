@@ -3,7 +3,9 @@ package laptop
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -219,4 +221,24 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// AntigravityModels lists the models `agy models` says the account can
+// run, one "id<TAB>name" line each.
+func AntigravityModels(ctx context.Context, run Runner, agy string) ([]session.Model, error) {
+	out, err := run(ctx, "", agy, "models")
+	if err != nil {
+		return nil, err
+	}
+	var models []session.Model
+	for _, line := range strings.Split(string(out), "\n") {
+		id, name, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if ok && id != "" && name != "" {
+			models = append(models, session.Model{ID: id, Name: strings.TrimSpace(name)})
+		}
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("agy models listed none: %s", strings.TrimSpace(string(out)))
+	}
+	return models, nil
 }

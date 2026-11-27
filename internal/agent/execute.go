@@ -29,6 +29,10 @@ type Actions interface {
 	// t's directory, starting it if stopped.
 	Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error
 	Push(ctx context.Context, dir string) error
+	// Swap replaces a session with one in the same directory that runs tool
+	// on model, opening the conversation tool last had there, and returns
+	// the new session's id.
+	Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error)
 	// Answer closes a session's open dialog for question and sends text as
 	// the answer.
 	Answer(ctx context.Context, session string, t session.Transcript, question, text string) error
@@ -234,7 +238,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if err != nil {
 			return err
 		}
-		return switchModel(ctx, act, s, p.Text)
+		return a.switchModel(ctx, act, s, p.Text)
 	case command.CheckUpdate, command.Update:
 		if a.Checkout == nil {
 			return errors.New("this agent cannot update itself")
@@ -328,19 +332,63 @@ func (a *Agent) clear(ctx context.Context, act Actions, s session.Snapshot) erro
 // each family, so the phone never needs a version to name one.
 var claudeModels = map[string]bool{"fable": true, "opus": true, "sonnet": true, "haiku": true}
 
-// switchModel changes the model of a session's conversation in place. A
-// session that is working or asking would read /model as part of its turn,
-// so it is refused, as /clear is.
-func switchModel(ctx context.Context, act Actions, s session.Snapshot, model string) error {
-	if s.Tool == session.Antigravity {
-		return fmt.Errorf("%s runs Antigravity, whose model peyk cannot switch yet", s.Title)
+// toolFor is the tool that runs model: "" for Claude Code.
+func (a *Agent) toolFor(model string) (string, error) {
+	switch {
+	case claudeModels[model]:
+		return "", nil
+	case a.models[model]:
+		return session.Antigravity, nil
 	}
-	if !claudeModels[model] {
-		return fmt.Errorf("no Claude model named %q", model)
+	return "", fmt.Errorf("no model named %q", model)
+}
+
+// switchModel changes the model of a session's conversation in place when
+// its tool runs the model. A session that is working or asking would read
+// /model as part of its turn, so it is refused, as /clear is.
+//
+// A model another tool runs moves the worker to that tool: a new session in
+// the same directory, told to read what the old one did since it last worked
+// there. That needs the worker free, as a resume does, so nothing is lost
+// between the two.
+func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot, model string) error {
+	tool, err := a.toolFor(model)
+	if err != nil {
+		return err
 	}
-	switch s.State {
-	case session.Working, session.NeedsInput:
-		return fmt.Errorf("%s is %s; /model would land in its turn", s.Title, s.State.Label())
+	if tool == s.Tool {
+		switch s.State {
+		case session.Working, session.NeedsInput:
+			return fmt.Errorf("%s is %s; /model would land in its turn", s.Title, s.State.Label())
+		}
+		return act.Send(ctx, s.ID, "/model "+model)
 	}
-	return act.Send(ctx, s.ID, "/model "+model)
+	if proj := a.projects[s.Title]; !proj.Free {
+		return fmt.Errorf("%s is not free: %s", s.Title, proj.Busy)
+	}
+	id, err := act.Swap(ctx, s, tool, model)
+	if err != nil {
+		return err
+	}
+	return act.Send(ctx, id, catchUp(s))
+}
+
+// catchUp is the first prompt to a worker moved to another tool. It points
+// at the old conversation rather than copying it: the new tool reads what
+// it needs, and nothing is lost in a summary written for it.
+func catchUp(from session.Snapshot) string {
+	tool, log := "Claude Code", ""
+	if from.Tool == session.Antigravity {
+		tool = "Antigravity"
+		if from.Transcript.Dir != "" {
+			log = from.Transcript.Dir + "/transcript.jsonl"
+		}
+	} else if from.Transcript.ID != "" {
+		log = from.Transcript.Dir + "/" + from.Transcript.ID + ".jsonl"
+	}
+	if log == "" {
+		return "This project's worker just moved here from " + tool + ", which had no conversation yet. Read the repository's state and wait for the next request."
+	}
+	return "This project's worker just moved here from " + tool + ". Before anything else, read that conversation, newest first, as far back as you need to know where the work stands: " + log +
+		"\n\nIt is a JSON Lines transcript and can be large; read it in parts. Then reply with a few lines on where things stand and what was asked last, and wait for the next request. Do not change files until asked."
 }

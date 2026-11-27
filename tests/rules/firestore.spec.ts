@@ -22,6 +22,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'laptop/usage'), { five_hour: { used: 20 } });
     await setDoc(doc(db, 'laptop/actions'), { included: 2000, used: 760 });
     await setDoc(doc(db, 'laptop/version'), { commit: 'abc1234', behind: 2 });
+    await setDoc(doc(db, 'laptop/models'), { antigravity: [{ id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' }] });
     await setDoc(doc(db, 'laptop/secret'), { x: 1 });
     await setDoc(doc(db, 'other/thing'), { secret: true });
     await setDoc(doc(db, 'projects/knip'), { name: 'knip', free: true });
@@ -46,6 +47,7 @@ describe('owner', () => {
     await assertSucceeds(getDoc(doc(owner(), 'laptop/usage')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/actions')));
     await assertSucceeds(getDoc(doc(owner(), 'laptop/version')));
+    await assertSucceeds(getDoc(doc(owner(), 'laptop/models')));
   });
 
   it('cannot write anything, because only the laptop and server write', async () => {
@@ -55,6 +57,7 @@ describe('owner', () => {
     await assertFails(setDoc(doc(owner(), 'laptop/usage'), { five_hour: { used: 0 } }));
     await assertFails(setDoc(doc(owner(), 'laptop/actions'), { included: 2000, used: 0 }));
     await assertFails(setDoc(doc(owner(), 'laptop/version'), { commit: 'x', behind: 0 }));
+    await assertFails(setDoc(doc(owner(), 'laptop/models'), { antigravity: [] }));
   });
 
   it('cannot list the laptop collection or read other collections', async () => {
@@ -70,6 +73,7 @@ describe('anyone else', () => {
     await assertFails(getDoc(doc(stranger(), 'laptop/usage')));
     await assertFails(getDoc(doc(stranger(), 'laptop/actions')));
     await assertFails(getDoc(doc(stranger(), 'laptop/version')));
+    await assertFails(getDoc(doc(stranger(), 'laptop/models')));
   });
 
   it('a claim of false is not the owner', async () => {

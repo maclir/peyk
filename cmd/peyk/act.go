@@ -15,6 +15,9 @@ type actions struct {
 	group string
 	// claudeConfig is Claude Code's global config, where folder trust is kept.
 	claudeConfig string
+	// conversations remembers each tool's last conversation per directory,
+	// for a worker moved between tools.
+	conversations laptop.Conversations
 }
 
 func (a actions) Send(ctx context.Context, session, text string) error {
@@ -61,4 +64,44 @@ func (a actions) Resume(ctx context.Context, session string, t session.Transcrip
 
 func (a actions) Push(ctx context.Context, dir string) error {
 	return laptop.Push(ctx, laptop.Exec, dir)
+}
+
+// Swap moves a worker to another tool. The old session goes to aoe's trash,
+// its conversation remembered for a move back, and the new one takes its
+// title, so the worker keeps its name on the phone.
+func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error) {
+	if err := a.conversations.Set(s.Path, s.Tool, s.Transcript.ID); err != nil {
+		return "", fmt.Errorf("remember %s's conversation: %w", s.Title, err)
+	}
+	back, err := a.conversations.Get(s.Path, tool)
+	if err != nil {
+		return "", err
+	}
+	if tool == "" {
+		if err := laptop.Trust(a.claudeConfig, s.Path); err != nil {
+			return "", fmt.Errorf("trust %s for Claude Code: %w", s.Path, err)
+		}
+	}
+	if s.AoeStatus != "stopped" {
+		if err := a.aoe.Stop(ctx, s.ID); err != nil {
+			return "", err
+		}
+	}
+	if err := a.aoe.Remove(ctx, s.ID); err != nil {
+		return "", err
+	}
+	aoeTool := tool
+	if aoeTool == "" {
+		aoeTool = "claude"
+	}
+	id, err := a.aoe.Add(ctx, s.Path, s.Title, a.group, aoeTool, "--model "+model)
+	if err != nil {
+		return "", fmt.Errorf("start %s on %s (the old session is in aoe's trash): %w", s.Title, model, err)
+	}
+	if back != "" {
+		if err := a.aoe.SetConversation(ctx, id, back); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
 }
