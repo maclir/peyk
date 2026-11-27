@@ -461,6 +461,8 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 .rev { position: relative; font: 12px var(--mono); color: var(--none); background: none; border: 0; padding: .25rem .5rem; border-radius: 6px; cursor: pointer; }
 .rev:disabled { cursor: progress; opacity: 1; }
 .rev .spin { position: absolute; right: 100%; top: 50%; margin: -0.45em 2px 0 0; box-sizing: border-box; border-width: 1.5px; }
+/* Beside the laptop, the left side has no room for it. */
+html.wide .bar .rev .spin { right: auto; left: 100%; margin: -0.45em 0 0 2px; }
 .rev.stale { color: var(--warn); background: var(--warn-soft); cursor: pointer; }
 
 /* Ideation: the composer's lenses, a task's tag, and the ideas a run filed. */

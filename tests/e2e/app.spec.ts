@@ -278,6 +278,14 @@ test.describe('signed in', () => {
     await expect(side.locator('.facts')).not.toHaveAttribute('open');
     await expect(side.locator(':scope > :last-child')).toHaveClass(/facts/);
     await expect(page.locator('#laptop + #rev')).toBeVisible();
+    const revBox = await page.locator('#rev').evaluate((rev) => {
+      const spin = rev.appendChild(Object.assign(document.createElement('span'), { className: 'spin' }));
+      const [r, s] = [rev.getBoundingClientRect(), spin.getBoundingClientRect()];
+      spin.remove();
+      return { revRight: r.right, revMid: r.top + r.height / 2, spinLeft: s.left, spinMid: s.top + s.height / 2 };
+    });
+    expect(revBox.spinLeft).toBeGreaterThanOrEqual(revBox.revRight);
+    expect(Math.abs(revBox.spinMid - revBox.revMid)).toBeLessThan(1);
     await expect(page.locator('footer.foot')).toBeHidden();
     await expect(page.locator('#app .facts, #app .pushcard')).toHaveCount(0);
     await expect(side.locator('.task:not(.idea) .ttext')).toHaveText(['Wide queued']);
