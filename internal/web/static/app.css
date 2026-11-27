@@ -20,8 +20,7 @@ a, button { }
 .grow { flex: 1 1 auto; min-width: 0; }
 
 /* The left side is the same on every page; the right holds the page's own tools. */
-/* The header stays at the top; its padding covers the safe area above it and its shadow the body's side padding. */
-.bar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 12px; margin-top: calc(-1 * env(safe-area-inset-top, 0px)); padding: calc(14px + env(safe-area-inset-top, 0px)) 0 10px; background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); }
+.bar { display: flex; align-items: center; gap: 12px; padding: 14px 0 10px; }
 .hglobal { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .bar h1 { margin: 0; line-height: 0; }
 /* The padding is the tap target; the negative margin keeps it from growing the header. */
@@ -250,7 +249,7 @@ button.tool.inboxbtn { width: auto; min-width: 40px; padding: 0 8px; gap: 4px; }
 .convo { display: flex; flex-direction: column; gap: 4px; }
 .convo .earlier { align-self: center; display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
 .convo .earlier .ico svg, .convobar .ico svg { width: 14px; height: 14px; }
-.convobar { position: sticky; top: var(--barh, 0px); z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 2px 2px; border-bottom: 1px solid var(--line); background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); font-size: 0.8rem; color: var(--muted); }
+.convobar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 2px 2px; border-bottom: 1px solid var(--line); background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); font-size: 0.8rem; color: var(--muted); }
 .convobar .link { min-height: 44px; font-size: 0.85rem; }
 .convo .tools { font-size: 0.78rem; color: var(--muted); margin: 2px 0; max-width: 92%; }
 .convo .tools summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
@@ -289,7 +288,7 @@ button.tool.inboxbtn { width: auto; min-width: 40px; padding: 0 8px; gap: 4px; }
 .composer { position: sticky; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 2; transition: transform 0.2s ease; display: flex; flex-direction: column; gap: 6px; margin: 8px -4px 0; padding: 10px 10px 8px 14px; background: var(--card); border: 1px solid var(--line-strong); border-radius: 20px; box-shadow: 0 -6px 16px var(--bg), 0 2px 10px rgba(0, 0, 0, 0.06), 0 calc(50vh + 24px) 0 50vh var(--bg); }
 /* A tucked composer moves below the end of the page; clipping keeps it from lengthening the page. Only the vertical axis clips, since the composer is wider than #app. The padding moves the clip edge to the end of the page, and the negative margin keeps the page length the same. */
 #app { overflow-x: visible; overflow-y: clip; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); margin-bottom: calc(-1rem - env(safe-area-inset-bottom, 0px)); }
-html.tuck #app .composer:not(.edit):not(:focus-within) { transform: translateY(calc(100% + 60px)); }
+html.tuck:not(.wide) #app .composer:not(.edit):not(:focus-within) { transform: translateY(calc(100% + 60px)); }
 .composer textarea { border: 0; outline: none; resize: none; padding: 4px 0; font: inherit; font-size: 0.95rem; line-height: 1.4; color: var(--ink); background: transparent; min-height: 1.4em; field-sizing: content; max-height: 40vh; }
 .composer textarea:focus-visible { outline: none; }
 .composer.edit { position: static; margin: 0; box-shadow: none; }
@@ -459,7 +458,6 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 [data-tone="bad"] { color: var(--bad); }
 
 .foot { display: flex; justify-content: center; margin-top: 2rem; }
-html.wide .foot { display: none; }
 .rev { position: relative; font: 12px var(--mono); color: var(--none); background: none; border: 0; padding: .25rem .5rem; border-radius: 6px; cursor: pointer; }
 .rev:disabled { cursor: progress; opacity: 1; }
 .rev .spin { position: absolute; right: 100%; top: 50%; margin: -0.45em 2px 0 0; box-sizing: border-box; border-width: 1.5px; }
@@ -494,6 +492,13 @@ html.wide #side .group { margin: 10px 2px 0; }
 html.wide #side .panehead { display: flex; align-items: center; margin: 6px 2px -6px; }
 html.wide #side .facts { margin: 0; }
 html.wide #app { flex: 1 1 auto; min-width: 0; }
+html.wide .foot { display: none; }
+/* A wide window keeps the header, then the shown worker's head, then the
+   conversation bar on screen; each sticks below the one above, and the
+   shadows cover the body's side padding. */
+html.wide .bar { position: sticky; top: 0; z-index: 4; background: var(--bg); box-shadow: -1rem 0 var(--bg), 1rem 0 var(--bg); }
+html.wide .dhead { position: sticky; top: var(--barh, 0px); z-index: 2; margin-top: -4px; padding: 4px 0 8px; background: var(--bg); }
+html.wide .convobar { top: calc(var(--barh, 0px) + var(--dheadh, 0px)); }
 html.wide .inboxpane { display: flex; flex-direction: column; gap: 8px; padding-bottom: 24px; }
 html.wide .inboxpane .sheethead { padding: 4px 0 0; }
 html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); align-items: start; }

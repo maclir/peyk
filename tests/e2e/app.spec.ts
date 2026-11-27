@@ -294,12 +294,6 @@ test.describe('signed in', () => {
     expect(widths[2]).toBeGreaterThan(500);
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    // The header stays at the top, and the panes stick below it.
-    await page.mouse.wheel(0, 2000);
-    await expect.poll(() => page.locator('header.bar').evaluate((el) => el.getBoundingClientRect().top)).toBe(0);
-    const [barBottom, sideTop] = await page.evaluate(() => [document.querySelector('header.bar')!.getBoundingClientRect().bottom, document.getElementById('side')!.getBoundingClientRect().top]);
-    expect(sideTop).toBeGreaterThanOrEqual(barBottom - 1);
-
     await rail.locator('a.card', { hasText: 'hamta' }).click();
     await expect(page).toHaveURL(/#s-h$/);
     await expect(rail.locator('a.card[aria-current="page"]')).toContainText('hamta');
@@ -1351,6 +1345,29 @@ test.describe('signed in', () => {
     await expect.poll(() => page.evaluate(() => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1)).toBe(true);
     await expect(page.locator('html')).not.toHaveClass(/tuck/);
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height);
+    // A phone's header scrolls away with the page.
+    expect(await page.locator('header.bar').evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThan(0);
+
+    // A wide window keeps the header, the worker's head and the reply box on screen.
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('#reply-k').blur();
+    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 400);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(600);
+    const [barTop, barBottom, headTop, convoTop, headBottom, boxBottom] = await page.evaluate(() => [
+      document.querySelector('header.bar')!.getBoundingClientRect().top,
+      document.querySelector('header.bar')!.getBoundingClientRect().bottom,
+      document.querySelector('#app .dhead')!.getBoundingClientRect().top,
+      document.querySelector('#app .convobar')?.getBoundingClientRect().top ?? null,
+      document.querySelector('#app .dhead')!.getBoundingClientRect().bottom,
+      document.querySelector('#app form.composer.respond')!.getBoundingClientRect().bottom,
+    ]);
+    expect(barTop).toBe(0);
+    expect(Math.abs(headTop - barBottom)).toBeLessThan(1);
+    if (convoTop !== null) expect(convoTop).toBeGreaterThanOrEqual(headBottom - 1);
+    expect(boxBottom).toBeLessThanOrEqual(900);
+    await page.setViewportSize(viewport);
     expect((await page.request.patch(message, { headers: admin, data: { fields: { message: before.message } } })).ok()).toBe(true);
   });
 

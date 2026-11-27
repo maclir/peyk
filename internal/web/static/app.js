@@ -94,8 +94,12 @@ function placeRevision() {
   else footEl.append(revEl);
 }
 placeRevision();
-// The header stays on screen, so whatever else sticks to the top sits below it.
-new ResizeObserver(() => document.documentElement.style.setProperty("--barh", `${barEl.offsetHeight}px`)).observe(barEl);
+// On a wide window the header and the shown worker's head stay on screen, so
+// whatever else sticks to the top sits below them. A render replaces the head,
+// so each render observes the new one.
+const sizeVar = (name) => new ResizeObserver(([e]) => document.documentElement.style.setProperty(name, `${e.target.offsetHeight}px`));
+sizeVar("--barh").observe(barEl);
+const dheadSize = sizeVar("--dheadh");
 // Checking for updates and updating start from the header, so their result
 // shows under it.
 const hpopEl = hstatEl.appendChild(Object.assign(document.createElement("p"), { className: "hpop", hidden: true }));
@@ -494,6 +498,9 @@ async function start(cfg) {
     else if (location.hash === "#log") app.replaceChildren(logView());
     else if (s) app.replaceChildren(detail(s, isWide));
     else app.replaceChildren(isWide ? inboxPane() : board());
+    dheadSize.disconnect();
+    const dhead = app.querySelector(".dhead");
+    if (dhead) dheadSize.observe(dhead);
     railEl.hidden = !isWide || page;
     railEl.replaceChildren(...(railEl.hidden ? [] : [board(s?.id)]));
     sideEl.hidden = !isWide || !s;
