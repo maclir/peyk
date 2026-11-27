@@ -180,7 +180,7 @@ async function start(cfg) {
     dismissing: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
-    filter: "ready", only: null, lastPicked: null, showDone: false, menu: null, picking: false, pickFor: null, pickQuery: "",
+    filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: true, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
     // The task sent from a worker's inbox; the inbox closes once it leaves the queue.
@@ -1798,6 +1798,9 @@ async function start(cfg) {
         h("div", { class: "tasks" }, ideas.map((i) => ideaCard(i, now, true)))] : null,
       sent.length ? [h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
         h("div", { class: "rows" }, sent.map((t) => sentRow(t, now)))] : null,
+      // The pane has the room the sheet lacks, so its Done list starts open.
+      doneFold(state.sideDone, () => { state.sideDone = !state.sideDone; render(); }, p.name),
+      state.sideDone ? doneList(p.name, now, true) : null,
     );
     return out.flat().filter(Boolean);
   }

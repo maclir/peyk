@@ -267,6 +267,16 @@ test.describe('signed in', () => {
     await expect(page.locator('#app .facts, #app .pushcard')).toHaveCount(0);
     await expect(side.locator('.task:not(.idea) .ttext')).toHaveText(['Wide queued']);
     await expect(side.locator('.task.idea .ititle')).toHaveText(['Wide idea']);
+    await expect(side.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-expanded', 'true');
+    await expect(side.locator('.task.row.done')).toContainText(['Detect unused exports']);
+
+    // A wider screen widens the panes instead of leaving empty margins.
+    await page.setViewportSize({ width: 2000, height: 1100 });
+    const widths = await page.evaluate(() => ['rail', 'app', 'side'].map((id) => document.getElementById(id)!.getBoundingClientRect().width));
+    expect(widths[0]).toBeGreaterThan(300);
+    expect(widths[1]).toBeGreaterThan(900);
+    expect(widths[2]).toBeGreaterThan(500);
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     await rail.locator('a.card', { hasText: 'hamta' }).click();
     await expect(page).toHaveURL(/#s-h$/);

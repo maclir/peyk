@@ -464,14 +464,13 @@ html.wide #panes { display: flex; align-items: flex-start; gap: 24px; }
 /* The panes sit above the composer, whose shadow paints the page colour well
    past its own sides. */
 html.wide #rail, html.wide #side { position: sticky; top: 0; z-index: 3; flex: none; max-height: 100vh; overflow-y: auto; box-sizing: border-box; background: var(--bg); overscroll-behavior: contain; }
-html.wide #rail { width: 300px; padding: 0 4px 24px; }
+html.wide #rail { width: clamp(300px, 18vw, 420px); padding: 0 4px 24px; }
 html.wide #rail .board { gap: 6px; }
-html.wide #side { width: 360px; padding: 4px 4px 24px; display: flex; flex-direction: column; gap: 12px; }
+html.wide #side { width: clamp(360px, 28vw, 640px); padding: 4px 4px 24px; display: flex; flex-direction: column; gap: 12px; }
 html.wide #side .group { margin: 10px 2px 0; }
 html.wide #side .panehead { display: flex; align-items: center; margin: 6px 2px -6px; }
 html.wide #side .facts { margin: 0; }
-html.wide #app { flex: 1 1 auto; min-width: 0; max-width: 52rem; margin: 0 auto; }
-html.wide #app:has(> .inboxpane) { max-width: none; }
+html.wide #app { flex: 1 1 auto; min-width: 0; }
 html.wide .inboxpane { display: flex; flex-direction: column; gap: 8px; padding-bottom: 24px; }
 html.wide .inboxpane .sheethead { padding: 4px 0 0; }
 html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); align-items: start; }
