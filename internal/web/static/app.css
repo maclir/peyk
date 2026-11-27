@@ -54,8 +54,7 @@ a, button { }
 .upop .uhead { padding-bottom: 4px; font-size: 0.7rem; color: var(--muted); }
 .upop .urow { min-height: 44px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 0.88rem; }
 .upop .urow:hover, .upop .urow:focus-visible { background: var(--paper); outline: none; }
-.upop .urow.sub .uname { padding-left: 12px; }
-.upop .ugroup { margin: 6px 14px 0; font-size: 0.88rem; }
+.upop .uname { display: flex; align-items: center; gap: 8px; }
 .upop hr { border: 0; border-top: 1px solid var(--line); margin: 6px 14px; }
 .upop .ucell { position: relative; }
 .upop .ucell.wide { grid-column: span 2; }
@@ -502,10 +501,12 @@ html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-
    then its models, each with the budget a task uses as 1 to 5 pips. A dot is
    the model's family; the pips and the pick are the pool's quota color. */
 .msheet .sheetbody { display: flex; flex-direction: column; gap: 16px; }
-.mapp { margin: 4px 4px -8px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.mtitle { display: flex; align-items: center; gap: 8px; }
+.mmore { display: flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 40px; padding: 0 12px; border: 0; background: none; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
+.mmore .ico svg { width: 14px; height: 14px; }
+.mmore[aria-expanded="true"] .ico { transform: rotate(180deg); }
 .mpool { display: flex; flex-direction: column; gap: 2px; }
 .mhead { display: flex; align-items: center; gap: 10px; padding: 0 4px 6px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
-.mpool.sub .mhead { padding-left: 12px; font-weight: 400; }
 .mquota { display: flex; flex-direction: column; gap: 3px; }
 .mrow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: none; font-weight: 400; text-align: left; }
 .mrow.cc[aria-pressed="true"] { font-weight: 600; background: var(--design-soft); }
@@ -521,3 +522,8 @@ html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-
 .mrow.ag .mcheck { color: var(--accent); }
 .mrow .mcheck svg { width: 18px; height: 18px; }
 .mrow[aria-pressed="true"] .mcheck { visibility: visible; }
+
+/* A tool's mark beside its name. */
+.logo { flex: none; display: block; width: 20px; height: 20px; }
+.logo.ag { border-radius: 5px; }
+.logo.gh svg { display: block; width: 20px; height: 20px; }

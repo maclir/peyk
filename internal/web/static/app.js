@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -177,7 +177,7 @@ async function start(cfg) {
     // A composer's ideation ask by its key, and the last one made, which the next starts from.
     ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
     // The idea whose dismissal note is being written.
-    dismissing: null, modelFor: null, modelAsked: new Map(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+    dismissing: null, modelFor: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: true, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -420,21 +420,18 @@ async function start(cfg) {
         resetsAt ? h("span", { class: `unote ${s}`.trim() }, ago(now, resetsAt.getTime())) : null);
     };
     const windowCells = (ws, kind) => ws.map((w) => cell(w.left, w.resetsAt, kind));
-    const row = (href, name, label, cells, sub) => h("a", {
-      class: `urow${sub ? " sub" : ""}`, href, target: "_blank", rel: "noopener", "aria-label": label,
+    const row = (href, kind, name, label, cells) => h("a", {
+      class: "urow", href, target: "_blank", rel: "noopener", "aria-label": label,
       onclick: () => { state.menu = null; render(); },
-    }, h("span", { class: "uname" }, name), ...cells);
+    }, h("span", { class: "uname" }, logo(kind), name), ...cells);
     const parts = [h("span", { class: "uhead", "aria-hidden": "true" }, h("span"), h("span", {}, "5 hours"), h("span", {}, "Week"))];
-    if (claude) parts.push(row("https://claude.ai/settings/usage", "Claude Code", `Claude Code: ${windows(claude)}`, windowCells(claude, "cc")));
-    if (ag) {
-      parts.push(h("span", { class: "ugroup" }, "Antigravity"));
-      for (const p of ag) {
-        parts.push(row("https://antigravity.google/docs/cli/commands/usage", p.name, `Antigravity ${p.name}: ${windows(p.windows)}`, windowCells(p.windows, "ag"), true));
-      }
+    if (claude) parts.push(row("https://claude.ai/settings/usage", "cc", "Claude Code", `Claude Code: ${windows(claude)}`, windowCells(claude, "cc")));
+    for (const p of ag ?? []) {
+      parts.push(row("https://antigravity.google/docs/cli/commands/usage", "ag", p.name, `Antigravity ${p.name}: ${windows(p.windows)}`, windowCells(p.windows, "ag")));
     }
     if (gh) {
       if (claude || ag) parts.push(h("hr"));
-      parts.push(row("https://github.com/settings/billing", "GitHub Actions",
+      parts.push(row("https://github.com/settings/billing", "gh", "Actions",
         `GitHub Actions: ${minutes(gh.left)} of ${minutes(gh.included)} minutes left`,
         [cell(gh.pct, gh.resetsAt, "gh", true)]));
     }
@@ -1972,10 +1969,11 @@ async function start(cfg) {
   // Every model a worker can run, as the sheet offers them: Claude Code's
   // aliases, then Antigravity's models by the pool their quota is in.
   function modelChoices() {
-    const cc = MODEL_POOLS.map((p) => ({ ...p, tool: "", app: "Claude Code",
-      models: p.models.map((m) => ({ key: m.alias, name: m.name, pips: m.pips, tool: "", claude: true })) }));
-    const ag = antigravityPools(state.models?.antigravity).map((p) => ({ ...p, kind: "ag", tool: "antigravity", app: "Antigravity",
-      models: p.models.map((m) => ({ key: m.id, name: m.name, pips: m.pips, tool: "antigravity", claude: /^claude-/.test(m.id) })) }));
+    const versions = modelVersions(state.sessions.values());
+    const cc = MODEL_POOLS.map((p) => ({ ...p, tool: "", app: "Claude Code", title: "Claude Code",
+      models: p.models.map((m) => ({ key: m.alias, name: versions[m.alias] ?? m.name, pips: m.pips, tool: "", claude: true })) }));
+    const ag = antigravityPools(state.models?.antigravity).map((p) => ({ ...p, kind: "ag", tool: "antigravity", app: "Antigravity", title: p.name,
+      models: p.models.map((m) => ({ key: m.id, name: m.name, short: m.short, pips: m.pips, more: m.more, tool: "antigravity", claude: /^claude-/.test(m.id) })) }));
     return [...cc, ...ag];
   }
 
@@ -2024,18 +2022,23 @@ async function start(cfg) {
     const row = (pool, m) => h("button", { type: "button", class: `mrow ${pool.kind}${m.claude ? " claude" : ""}`, "aria-pressed": String(m.key === current),
       "aria-label": `${m.name}${pool.tool ? " in Antigravity" : ""}${m.pips ? `, uses ${m.pips} of 5 of the quota per task` : ""}`, onclick: () => pick(m) },
     h("span", { class: "mdot", "aria-hidden": "true" }),
-    h("span", { class: "mname" }, m.name),
+    h("span", { class: "mname" }, m.short ?? m.name),
     h("span", { class: "pips", "aria-hidden": "true" }, m.pips ? [1, 2, 3, 4, 5].map((i) => h("i", { class: i <= m.pips ? "on" : null })) : null),
     h("span", { class: "mcheck", "aria-hidden": "true" }, icon("check")));
-    const choices = modelChoices();
-    const body = [];
-    for (const pool of choices) {
-      const first = pool.tool && pool === choices.find((p) => p.tool === pool.tool);
-      if (first) body.push(h("h3", { class: "mapp" }, pool.app));
-      body.push(h("div", { class: `mpool${pool.tool ? " sub" : ""}`, role: "group", "aria-label": pool.tool ? `${pool.app} ${pool.name}` : pool.app },
-        h("div", { class: "mhead" }, h("span", { class: "grow" }, pool.tool ? pool.name : pool.app), quota(pool)),
-        pool.models.map((m) => row(pool, m))));
-    }
+    // A pool's models past its main ones fold under More, unless the worker
+    // runs one of them.
+    const body = modelChoices().map((pool) => {
+      const shown = pool.models.filter((m) => !m.more || m.key === current);
+      const more = pool.models.filter((m) => !shown.includes(m));
+      const open = state.modelMore.has(pool.id);
+      return h("div", { class: "mpool", role: "group", "aria-label": pool.tool ? `${pool.app} ${pool.name}` : pool.app },
+        h("div", { class: "mhead" }, h("span", { class: "grow mtitle" }, logo(pool.kind), pool.title), quota(pool)),
+        shown.map((m) => row(pool, m)),
+        more.length ? h("button", { type: "button", class: "mmore", "aria-expanded": String(open),
+          onclick: () => { if (open) state.modelMore.delete(pool.id); else state.modelMore.add(pool.id); render(); } },
+        `More · ${more.length}`, icon("chevron")) : null,
+        open ? more.map((m) => row(pool, m)) : null);
+    });
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet msheet", role: "dialog", "aria-modal": "true", "aria-label": `Model for ${s.title}`, onkeydown: (e) => e.key === "Escape" && close() },
         sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Model")), close),
@@ -2662,6 +2665,19 @@ const ICONS = {
   "proto-design": '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><circle cx="9.25" cy="14.25" r="2"/><path d="M13.25 16.25l2.25-4 2.25 4z"/></g>',
   "proto-any": '<g stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M12 11.25c.36 1.74.9 2.28 3 3c-2.1.72-2.64 1.26-3 3c-.36-1.74-.9-2.28-3-3c2.1-.72 2.64-1.26 3-3z"/></g>',
 };
+
+// logo is a tool's mark beside its name, so it is decoration: the name says
+// it. GitHub's mark takes the text color, which keeps it in dark mode.
+const GITHUB_MARK = '<svg viewBox="0 0 98 96"><path fill="currentColor" fill-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"/></svg>';
+
+function logo(kind) {
+  if (kind === "gh") {
+    const span = h("span", { class: "logo gh", "aria-hidden": "true" });
+    span.innerHTML = GITHUB_MARK;
+    return span;
+  }
+  return h("img", { class: `logo ${kind}`, src: kind === "cc" ? "/static/logos/claude.svg" : "/static/logos/antigravity.png", alt: "", width: "20", height: "20" });
+}
 
 function icon(name) {
   const span = document.createElement("span");

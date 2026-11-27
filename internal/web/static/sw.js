@@ -25,6 +25,8 @@ const ASSETS = [
   "/static/images.js",
   "/static/passkey.js",
   "/static/share.js",
+  "/static/logos/claude.svg",
+  "/static/logos/antigravity.png",
   "/static/vendor/firebase-app.js",
   "/static/vendor/firebase-auth.js",
   "/static/vendor/firebase-firestore.js",

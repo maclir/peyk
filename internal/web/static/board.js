@@ -442,6 +442,19 @@ export const MODEL_POOLS = [
   },
 ];
 
+// modelVersions names each Claude Code alias by the newest model of its
+// family a worker has replied with, as Claude Code resolves the alias: opus
+// is "Opus 5.5" once a worker has run it.
+export function modelVersions(sessions) {
+  const out = {};
+  for (const s of sessions) {
+    const id = s.tool === "antigravity" ? "" : s.message?.model;
+    const family = modelFamily(id);
+    if (family && (!out[family] || modelName(id).localeCompare(out[family], undefined, { numeric: true }) > 0)) out[family] = modelName(id);
+  }
+  return out;
+}
+
 // modelFamily is the alias a model id belongs to: "claude-opus-5-5" is opus.
 export function modelFamily(id) {
   return /^claude-([a-z]+)-/.exec(id ?? "")?.[1] ?? "";
@@ -461,6 +474,9 @@ const ANTIGRAVITY_PRICES = {
   "gemini-4-carbon": 20, "gemini-4-argon": 20, "gemini-4-neon": 15, "gemini-4-hydrogen": 7.5, "gemini-3.8-flash": 3.75,
   "claude-opus-5-5": 20, "claude-sonnet-5-5": 10,
 };
+// The families the sheet offers at once; the rest of what Antigravity lists,
+// such as its orchestrators and the models it is retiring, wait under More.
+const ANTIGRAVITY_MAIN = new Set(["gemini-4-neon", "gemini-4-carbon", "gemini-4-hydrogen", "claude-opus-5-5", "claude-sonnet-5-5"]);
 const EFFORT = /-(low|medium|high|xhigh)$/;
 const EFFORT_NAME = / \((Low|Medium|High|XHigh)\)$/;
 
@@ -496,6 +512,9 @@ export function antigravityPools(models) {
     for (const m of p.models) {
       const price = ANTIGRAVITY_PRICES[m.family];
       m.pips = price && max ? Math.max(1, Math.ceil((5 * price) / max)) : 0;
+      m.more = !ANTIGRAVITY_MAIN.has(m.family);
+      // Under its pool's name, a model needs no repeat of it.
+      m.short = m.name.startsWith(`${p.name} `) ? m.name.slice(p.name.length + 1) : m.name;
     }
   }
   return pools.filter((p) => p.models.length);

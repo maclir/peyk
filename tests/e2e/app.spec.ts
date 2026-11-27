@@ -480,7 +480,7 @@ test.describe('signed in', () => {
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Model: Opus 5.5. Change model' }).click();
     const sheet = page.getByRole('dialog', { name: 'Model for mdl' });
-    await expect(sheet.getByRole('button', { name: /^Opus,/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /^Opus 5.5,/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(sheet.getByRole('button', { name: 'Fable, uses 5 of 5 of the quota per task' })).toHaveAttribute('aria-pressed', 'false');
     await expect(sheet.getByRole('group', { name: 'Claude Code' }).locator('.mquota .meter')).toHaveCount(2);
 
@@ -500,9 +500,13 @@ test.describe('signed in', () => {
     await put(page, 'laptop/models', { antigravity: [
       { id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' }, { id: 'gemini-4-neon-low', name: 'Gemini 4 Neon (Low)' },
       { id: 'gemini-4-carbon-high', name: 'Gemini 4 Carbon (High)' }, { id: 'claude-opus-5-5-high', name: 'Claude Opus 5.5 (High)' },
+      { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
     ] });
     await page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' }).click();
-    await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).getByRole('button')).toHaveText(['Gemini 4 Neon', 'Gemini 4 Carbon']);
+    await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).locator('.mrow')).toHaveText(['4 Neon', '4 Carbon']);
+    await sheet.getByRole('group', { name: 'Antigravity Gemini' }).getByRole('button', { name: 'More · 1' }).click();
+    await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).locator('.mrow')).toHaveText(['4 Neon', '4 Carbon', 'Orchestrator (Carbon)']);
+    await expect(sheet.getByRole('group', { name: 'Claude Code' }).locator('img.logo.cc')).toHaveAttribute('src', '/static/logos/claude.svg');
     await expect(sheet.getByRole('group', { name: 'Antigravity Claude' }).getByRole('button', { name: /^Opus|Claude Opus 5.5 in Antigravity/ })).toBeVisible();
     await sheet.getByRole('button', { name: 'Gemini 4 Neon in Antigravity, uses 4 of 5 of the quota per task' }).click();
     await expect.poll(async () => (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'model').length).toBe(2);
