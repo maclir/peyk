@@ -218,7 +218,18 @@ test.describe('signed in', () => {
     await page.goto('/#s-k');
     await expect(page.locator('.facts')).toContainText('main → origin/main');
     await expect(page.locator('.dhead .tag.branch')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Push 2' }).click();
+    const push = page.getByRole('button', { name: 'Push 2 commits' });
+    await expect(push).toHaveText('2');
+    // The icon and count are centred in the button, not pushed to one side.
+    const [button, content] = await push.evaluate((b) => {
+      const r = b.getBoundingClientRect();
+      const parts = [...b.children].map((c) => c.getBoundingClientRect());
+      const left = Math.min(...parts.map((x) => x.left));
+      const right = Math.max(...parts.map((x) => x.right));
+      return [r.left + r.width / 2, (left + right) / 2];
+    });
+    expect(Math.abs(button - content)).toBeLessThanOrEqual(1);
+    await push.click();
     await expect(page.locator('.pushcard .outcome')).toHaveText('Waiting for the laptop…');
     const [cmd] = await list(page, 'commands');
     expect(cmd.fields.type.stringValue).toBe('push');
@@ -240,6 +251,46 @@ test.describe('signed in', () => {
     await failure.getByRole('button', { name: 'Dismiss' }).click();
     await expect(failure).toHaveCount(0);
     for (const c of await list(page, 'commands')) await page.request.delete(`${FIRESTORE}/${c.name.split('/documents/')[1]}`, { headers: admin });
+  });
+
+  test('a wide window lists the workers beside the shown worker and its project', async () => {
+    const viewport = page.viewportSize()!;
+    await put(page, 'tasks/wide', { project: 'knip', text: 'Wide queued', status: 'queued', created_at: new Date() });
+    await put(page, 'ideas/wide', { project: 'knip', task: 'run', lens: 'reuse', title: 'Wide idea', why: '', prompt: 'Do the wide idea', status: 'open', created_at: new Date() });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#s-k');
+    const rail = page.getByRole('complementary', { name: 'Workers' });
+    const side = page.getByRole('complementary', { name: 'Project' });
+    await expect(rail.locator('a.card[aria-current="page"]')).toContainText('knip');
+    await expect(side.getByRole('heading', { name: 'Unpushed commits · 2' })).toBeVisible();
+    await expect(side.locator('.facts')).toHaveAttribute('open', '');
+    await expect(page.locator('#app .facts, #app .pushcard')).toHaveCount(0);
+    await expect(side.locator('.task:not(.idea) .ttext')).toHaveText(['Wide queued']);
+    await expect(side.locator('.task.idea .ititle')).toHaveText(['Wide idea']);
+
+    await rail.locator('a.card', { hasText: 'hamta' }).click();
+    await expect(page).toHaveURL(/#s-h$/);
+    await expect(rail.locator('a.card[aria-current="page"]')).toContainText('hamta');
+
+    // The inbox is the workers page itself, not a sheet over it.
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const inbox = page.getByRole('region', { name: 'Inbox' });
+    await expect(inbox).toBeVisible();
+    await expect(side).toBeHidden();
+    await inbox.getByRole('button', { name: /^All/ }).click();
+    await expect(inbox.locator('.task:not(.idea) .ttext')).toContainText(['Wide queued']);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.goto('/#inbox');
+    await expect(inbox).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // Narrowing the window brings back the phone's single column.
+    await page.setViewportSize(viewport);
+    await expect(rail).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible();
+    await page.request.delete(`${FIRESTORE}/tasks/wide`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/ideas/wide`, { headers: admin });
+    for (const d of await list(page, 'seen')) await page.request.delete(`${FIRESTORE}/${d.name.split('/documents/')[1]}`, { headers: admin });
   });
 
   // Headless Chromium refuses notification permission, so the registration's
@@ -754,7 +805,10 @@ test.describe('signed in', () => {
 
     await page.goto('/#s-k');
     await passkeyOn(page);
-    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const tray = page.locator('.hpage').getByRole('button', { name: /^Inbox/ });
+    await expect(tray).toHaveAccessibleName(/, 3 ideas$/);
+    await expect(tray.locator('.icount')).toHaveText('3');
+    await tray.click();
     const sheet = page.getByRole('dialog', { name: 'knip inbox' });
     await expect(sheet.getByRole('heading', { name: 'Ideas 3' })).toBeVisible();
     await expect(sheet.locator('.task.idea .ititle')).toHaveText(['Pair link expiry', 'Two date formatters', 'Three confirm patterns']);

@@ -69,6 +69,13 @@ async function loadDeployed() {
 revEl.addEventListener("click", () => (revEl.classList.contains("stale") ? loadDeployed() : checkRevision()));
 
 const app = document.getElementById("app");
+const railEl = document.getElementById("rail");
+const sideEl = document.getElementById("side");
+// A laptop-wide window keeps the workers on the left and the shown worker's
+// project on the right, so the inbox and repository need no sheet there.
+const wideQuery = matchMedia("(min-width: 1180px)");
+const wide = () => wideQuery.matches;
+document.documentElement.classList.toggle("wide", wide());
 const hstatEl = document.getElementById("hstat");
 const laptopEl = document.getElementById("laptop");
 const seenEl = document.getElementById("seen");
@@ -309,6 +316,11 @@ async function start(cfg) {
   usageEl.parentElement.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.menu === "usage") { state.menu = null; render(); usageEl.focus(); } });
   window.addEventListener("hashchange", () => { document.documentElement.classList.remove("tuck"); syncLayers(); render(); });
   window.addEventListener("popstate", syncLayers);
+  wideQuery.addEventListener("change", () => {
+    document.documentElement.classList.toggle("wide", wide());
+    if (wide() && inboxSheet?.open) closeLayer("inbox");
+    render();
+  });
   tuckComposerOnScroll();
   setInterval(() => !document.hidden && state.user && renderLaptop(), 60_000);
 
@@ -419,13 +431,16 @@ async function start(cfg) {
 
   function render() {
     if (!state.user) return;
-    if (ROUTES.includes(location.hash)) return location.hash === "#inbox" ? openInbox(null) : openCompose(null, null);
+    if (location.hash === "#inbox" && wide()) {
+      history.replaceState(history.state, "", location.pathname + location.search);
+      Object.assign(state, { only: null, filter: "ready" });
+    } else if (ROUTES.includes(location.hash)) return location.hash === "#inbox" ? openInbox(null) : openCompose(null, null);
     ensureSheets();
     renderLaptop();
     // Snapshots re-render the whole view; keep what is being typed. The New
     // task sheet is never redrawn, so it needs no keeping.
     const typed = 'textarea, input[type="search"]';
-    const fields = () => [app, inboxSheet.body, pickerHost].flatMap((el) => [...el.querySelectorAll(typed)]);
+    const fields = () => [app, railEl, sideEl, inboxSheet.body, pickerHost].flatMap((el) => [...el.querySelectorAll(typed)]);
     const drafts = new Map(fields().map((t) => [t.id, t.value]));
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
@@ -433,10 +448,16 @@ async function start(cfg) {
     const s = id && shownWorker(id);
     followHistory(s);
     renderHeader(s);
+    const isWide = wide();
+    const page = location.hash.startsWith("#pair-") || location.hash === "#log";
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
     else if (location.hash === "#log") app.replaceChildren(logView());
-    else if (s) app.replaceChildren(detail(s));
-    else app.replaceChildren(board());
+    else if (s) app.replaceChildren(detail(s, isWide));
+    else app.replaceChildren(isWide ? inboxPane() : board());
+    railEl.hidden = !isWide || page;
+    railEl.replaceChildren(...(railEl.hidden ? [] : [board(s?.id)]));
+    sideEl.hidden = !isWide || !s;
+    sideEl.replaceChildren(...(sideEl.hidden ? [] : projectPane(s)));
 
     renderInbox();
     renderCompose();
@@ -456,8 +477,9 @@ async function start(cfg) {
     homeEl.setAttribute("aria-label", onBoard ? "peyk" : "Back to workers");
     const p = s && projectOf(s);
     const tools = onBoard ? [addButton(null, null), inboxButton(null)]
-      : s ? [addButton(p?.name ?? null, p?.name ?? null), p ? inboxButton(p) : null]
-        : [];
+      : s && wide() ? [addButton(p?.name ?? null, p?.name ?? null), inboxButton(null)]
+        : s ? [addButton(p?.name ?? null, p?.name ?? null), p ? inboxButton(p) : null]
+          : [];
     hpageEl.replaceChildren(...tools.filter(Boolean));
   }
 
@@ -1595,7 +1617,7 @@ async function start(cfg) {
       h("p", { class: "hint" }, `Permission: ${"Notification" in window ? Notification.permission : "unsupported"} · subscribed here: ${state.push}`), list);
   }
 
-  function board() {
+  function board(selected = null) {
     const now = Date.now();
     const inboxCount = (s) => {
       const p = projectOf(s);
@@ -1624,7 +1646,7 @@ async function start(cfg) {
         : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
         : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null;
       out.push(
-        h("a", { class: s.notified ? "card notified" : "card", href: `#s-${encodeURIComponent(s.id)}` },
+        h("a", { class: s.notified ? "card notified" : "card", href: `#s-${encodeURIComponent(s.id)}`, "aria-current": s.id === selected ? "page" : null },
           h("span", { class: s.aoe_status === "stopped" ? "facewrap stopped" : "facewrap" }, face(projectOf(s), s.title, "md"), h("span", { class: `sdot ${st.tone}` })),
           h("span", { class: "cbody" },
             // The group heading names the state; only Needs you holds more than one.
@@ -1649,7 +1671,9 @@ async function start(cfg) {
     return h("div", { class: "board" }, out);
   }
 
-  function detail(s) {
+  // On a wide window the repository and the project's inbox sit beside the
+  // conversation, in projectPane.
+  function detail(s, isWide = false) {
     const now = Date.now();
     const st = STATES[s.state] || { label: s.state, tone: "idle" };
     const g = s.git;
@@ -1658,14 +1682,6 @@ async function start(cfg) {
     const p = projectOf(s);
     const next = p ? queuedFor(p.name).find((t) => t.ready) : null;
     const action = quickAction(s, Boolean(next));
-    const rows = [["aoe", s.aoe_status], ["path", s.path]];
-    if (!g) rows.push(["repository", "none"]);
-    if (g) {
-      rows.push(["branch", g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached"]);
-      if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);
-      rows.push(["push", pushLabel(g)]);
-      rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
-    }
     const sent = h("div", { class: s.prompt ? "reply sent" : "reply sent none" });
     sent.innerHTML = s.prompt ? renderMarkdown(s.prompt.text) : "<p>Nothing sent yet.</p>";
     const pending = awaitingReply(s);
@@ -1699,15 +1715,52 @@ async function start(cfg) {
       ),
       next ? nowAndNext(task, next, now)
         : task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
-      g && g.unpushed > 0 ? pushCard(s, now) : null,
+      !isWide && g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       convo,
       waitingReplyList(s),
       s.question ? questionCard(s) : null,
-      h("details", { class: "facts" }, h("summary", {}, "Details"),
-        h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]))),
+      isWide ? null : facts(s, now, false),
       replyBox(s),
     );
+  }
+
+  function facts(s, now, open) {
+    const g = s.git;
+    const rows = [["aoe", s.aoe_status], ["path", s.path]];
+    if (!g) rows.push(["repository", "none"]);
+    if (g) {
+      rows.push(["branch", g.upstream ? `${g.branch} → ${g.upstream}` : g.branch || "detached"]);
+      if (g.last) rows.push(["commit", `${g.last.hash} ${g.last.subject} (${ago(g.last.at, now)})`]);
+      rows.push(["push", pushLabel(g)]);
+      rows.push(["tree", g.dirty ? `${g.dirty} changed files` : "clean"]);
+    }
+    return h("details", { class: "facts", open: open ? "" : null }, h("summary", {}, "Details"),
+      h("dl", {}, rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
+  }
+
+  // The shown worker's repository and its project's tasks, ideas and sent
+  // tasks, beside the conversation on a wide window.
+  function projectPane(s) {
+    const now = Date.now();
+    const g = s.git;
+    const p = projectOf(s);
+    const out = [g && g.unpushed > 0 ? pushCard(s, now) : null, facts(s, now, true)];
+    if (!p) return out.filter(Boolean);
+    const list = queuedFor(p.name);
+    const ideas = openIdeas(state.ideas, p.name);
+    const sent = sentTasks(state.tasks).filter((t) => t.project === p.name);
+    out.push(
+      h("div", { class: "group panehead" }, h("span", { class: "grow" }, "Inbox"), addButton(p.name, p.name)),
+      h("div", { class: "tasks" }, !state.loaded.has("tasks") ? loading("Loading tasks…") : list.length
+        ? list.map((t, i) => (state.editing === t.id ? editor(t) : taskCard(t, now, { inProject: true, order: { list, i } })))
+        : h("p", { class: "empty" }, "Nothing queued.")),
+      ideas.length ? [h("h2", { class: "group" }, "Ideas", h("span", { class: "n" }, ` ${ideas.length}`)),
+        h("div", { class: "tasks" }, ideas.map((i) => ideaCard(i, now, true)))] : null,
+      sent.length ? [h("h2", { class: "group" }, "Sent", h("span", { class: "n" }, ` ${sent.length}`)),
+        h("div", { class: "rows" }, sent.map((t) => sentRow(t, now)))] : null,
+    );
+    return out.flat().filter(Boolean);
   }
 
   // A worker's whole conversation is read from the laptop only while it is on
@@ -1959,13 +2012,15 @@ async function start(cfg) {
   }
 
   // The workers' tray counts the tasks ready to send; a worker's counts its
-  // project's queue.
+  // project's queue and open ideas, as the worker's card does.
   function inboxButton(p) {
     const n = p ? queuedFor(p.name).length : readyCount();
-    const label = !n ? "Inbox" : p ? `Inbox, ${n} queued` : `Inbox, ${n} ready`;
+    const ideas = p ? ideaCount(state.ideas, p.name) : 0;
+    const label = ["Inbox", n ? (p ? `${n} queued` : `${n} ready`) : null, ideas ? `${ideas} idea${ideas === 1 ? "" : "s"}` : null].filter(Boolean).join(", ");
     return h("button", { type: "button", class: "icon tool inboxbtn", title: "Inbox", "aria-label": label, "aria-haspopup": "dialog",
       onclick: () => openInbox(p?.name ?? null) },
-    icon("tray"), n ? h("span", { class: "count" }, String(n)) : null);
+    icon("tray"), n ? h("span", { class: "count" }, String(n)) : null,
+    ideas ? h("span", { class: "ideas" }, icon("bulb"), h("span", { class: "icount" }, String(ideas))) : null);
   }
 
   // The sheets live outside #app, stacked in the order they are made.
@@ -2028,6 +2083,12 @@ async function start(cfg) {
   // project's. A task sent from a worker's own inbox closes it, since the
   // worker's page shows the task from then on.
   function openInbox(project) {
+    if (wide()) {
+      Object.assign(state, { only: project, filter: project ? "all" : "ready", menu: null });
+      if (location.hash && location.hash !== "#") location.hash = "";
+      else render();
+      return;
+    }
     ensureSheets();
     Object.assign(state, { only: project, filter: project ? "all" : "ready", menu: null, sheetSent: null });
     inboxSheet.from = project && shownSession() ? project : null;
@@ -2063,19 +2124,30 @@ async function start(cfg) {
       state.sheetSent = null;
       return closeLayer("inbox");
     }
+    sh.panel.setAttribute("aria-label", state.only ? `${state.only} inbox` : "Inbox");
+    sh.head.replaceChildren(...[
+      h("h2", { class: "grow" }, "Inbox"),
+      addButton(state.only, sh.from),
+      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: () => closeLayer("inbox") }, icon("x")),
+    ].filter(Boolean));
+    sh.body.replaceChildren(...inboxNodes(all, sh.from && sh.from === state.only ? sheetSend : send));
+  }
+
+  // A wide window's workers page is the inbox, since the workers are listed
+  // beside it.
+  function inboxPane() {
+    const all = queue(state.tasks, state.projects);
+    return h("section", { class: "inboxpane", "aria-label": "Inbox" },
+      h("div", { class: "sheethead" }, h("h2", { class: "grow" }, "Inbox"), addButton(state.only, null)),
+      inboxNodes(all, send));
+  }
+
+  function inboxNodes(all, sendWith) {
     const only = state.only;
     const inProject = Boolean(only);
     const counts = queueCounts(only ? all.filter((t) => t.project === only) : all);
     const list = filterQueue(all, state.filter, only);
-    const sendWith = sh.from && sh.from === only ? sheetSend : send;
     const now = Date.now();
-
-    sh.panel.setAttribute("aria-label", only ? `${only} inbox` : "Inbox");
-    sh.head.replaceChildren(...[
-      h("h2", { class: "grow" }, "Inbox"),
-      addButton(only, sh.from),
-      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: () => closeLayer("inbox") }, icon("x")),
-    ].filter(Boolean));
 
     const chips = [["all", "All"], ["ready", "Ready"], ["waiting", "Waiting"]].map(([key, label]) =>
       h("button", { type: "button", class: "fchip", "aria-pressed": String(state.filter === key), onclick: () => { state.filter = key; render(); } },
@@ -2093,7 +2165,7 @@ async function start(cfg) {
     const sent = sentTasks(state.tasks).filter((t) => !only || t.project === only);
     const rest = state.filter !== "waiting";
     const ideas = openIdeas(state.ideas, only);
-    sh.body.replaceChildren(...[
+    return [
       h("div", { class: "filters" }, chips),
       strip,
       h("div", { class: "tasks" }, items),
@@ -2109,7 +2181,7 @@ async function start(cfg) {
         doneFold(state.showDone, () => { state.showDone = !state.showDone; render(); }, only ?? ""),
         ...(state.showDone ? doneList(only ?? "", now, inProject) : []),
       ] : []),
-    ].filter(Boolean));
+    ].filter(Boolean);
   }
 
   function pushCard(s, now) {
@@ -2119,7 +2191,9 @@ async function start(cfg) {
       h("div", { class: "phead" },
         h("h3", {}, `Unpushed commits · ${g.unpushed}`),
         h("span", { class: "grow" }),
-        busyButton(`push:${s.id}`, { type: "button", class: "primary ok", onclick: () => sendCommand("push", { session: s.id }, "Push", `push:${s.id}`, undefined, null, { done: "Pushed" }) }, `Push ${g.unpushed}`)),
+        busyButton(`push:${s.id}`, { type: "button", class: "primary ok push", title: "Push", "aria-label": `Push ${g.unpushed} commit${g.unpushed === 1 ? "" : "s"}`,
+          onclick: () => sendCommand("push", { session: s.id }, "Push", `push:${s.id}`, undefined, null, { done: "Pushed" }) },
+        icon("push"), h("span", {}, String(g.unpushed)))),
       g.pending?.length ? h("ul", { class: "pending" },
         g.pending.map((c) => h("li", {}, h("code", {}, c.hash), ` ${c.subject}`, h("span", { class: "when" }, ago(c.at, now)))),
         more > 0 ? h("li", { class: "when" }, `and ${more} older`) : null,

@@ -13,7 +13,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Below the laptop layout's breakpoint, so the suite drives the single column; a test of the laptop layout widens the window itself.
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1024, height: 720 } } }],
   webServer: {
     command: 'make test-server',
     url: `${testURL}/health`,
