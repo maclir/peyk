@@ -66,10 +66,12 @@ func (a actions) Push(ctx context.Context, dir string) error {
 	return laptop.Push(ctx, laptop.Exec, dir)
 }
 
-// Swap moves a worker to another tool. The old session goes to aoe's trash,
-// its conversation remembered for a move back, and the new one takes its
-// title, so the worker keeps its name on the phone. If the new one cannot
-// start, the old one comes back so the worker is never lost.
+// Swap moves a worker to another tool. The old session stays in aoe, kept
+// aside under laptop.KeptTitle, its conversation remembered for a move back,
+// and peyk shows only the new one; the new one takes its
+// title, which projects and dispatch find a worker by, and aoe refuses two
+// sessions with one title in one directory. If the new one cannot start, the
+// old one gets its title back.
 func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error) {
 	if err := a.conversations.Set(s.Path, s.Tool, s.Transcript.ID); err != nil {
 		return "", fmt.Errorf("remember %s's conversation: %w", s.Title, err)
@@ -83,12 +85,7 @@ func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model strin
 			return "", fmt.Errorf("trust %s for Claude Code: %w", s.Path, err)
 		}
 	}
-	if s.AoeStatus != "stopped" {
-		if err := a.aoe.Stop(ctx, s.ID); err != nil {
-			return "", err
-		}
-	}
-	if err := a.aoe.Trash(ctx, s.ID, s.Title); err != nil {
+	if err := a.aoe.Rename(ctx, s.ID, laptop.KeptTitle(s.ID, s.Title)); err != nil {
 		return "", err
 	}
 	aoeTool := tool
@@ -97,10 +94,10 @@ func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model strin
 	}
 	id, err := a.aoe.Add(ctx, s.Path, s.Title, a.group, aoeTool, "--model "+model)
 	if err != nil {
-		if rerr := a.aoe.Restore(ctx, s.ID, s.Title); rerr != nil {
-			return "", fmt.Errorf("start %s on %s: %w; restore the old session from aoe's trash: %v", s.Title, model, err, rerr)
+		if rerr := a.aoe.Rename(ctx, s.ID, s.Title); rerr != nil {
+			return "", fmt.Errorf("start %s on %s: %w; the old session is still named %s: %v", s.Title, model, err, laptop.KeptTitle(s.ID, s.Title), rerr)
 		}
-		return "", fmt.Errorf("start %s on %s (the old session is back, stopped): %w", s.Title, model, err)
+		return "", fmt.Errorf("start %s on %s: %w", s.Title, model, err)
 	}
 	if back != "" {
 		if err := a.aoe.SetConversation(ctx, id, back); err != nil {

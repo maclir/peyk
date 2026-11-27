@@ -48,7 +48,7 @@ func (a Aoe) Sessions(ctx context.Context) ([]AoeSession, error) {
 	}
 	var live []AoeSession
 	for _, s := range all {
-		if s.State != "live" || !s.runsClaude() && !s.runsAntigravity() {
+		if s.State != "live" || isKept(s.Title) || !s.runsClaude() && !s.runsAntigravity() {
 			continue
 		}
 		shown, err := a.Show(ctx, s.ID)
@@ -204,31 +204,25 @@ func (a Aoe) Add(ctx context.Context, dir, title, group, tool, args string) (str
 	return s.ID, nil
 }
 
-// Trash moves a session to aoe's trash; its conversation stays on disk.
-// aoe refuses a new session whose title and path match one in the trash, so
-// the session is first renamed after its ID to free title for a successor.
-func (a Aoe) Trash(ctx context.Context, id, title string) error {
-	if _, err := a.cmd(ctx, "session", "rename", id, "-t", trashedTitle(id, title)); err != nil {
-		return err
-	}
-	_, err := a.cmd(ctx, "remove", id)
-	return err
-}
+// keptMark separates a worker's title from the ID in KeptTitle.
+const keptMark = "~"
 
-// Restore undoes Trash: the session leaves the trash under its old title.
-func (a Aoe) Restore(ctx context.Context, id, title string) error {
-	if _, err := a.cmd(ctx, "session", "restore", id); err != nil {
-		return err
-	}
-	_, err := a.cmd(ctx, "session", "rename", id, "-t", title)
-	return err
-}
-
-func trashedTitle(id, title string) string {
+// KeptTitle names a worker's old session after it moved to another tool.
+// aoe keeps it, but peyk shows one worker per project, so Sessions leaves it
+// out.
+func KeptTitle(id, title string) string {
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	return title + "~" + id
+	return title + keptMark + id
+}
+
+func isKept(title string) bool { return strings.Contains(title, keptMark) }
+
+// Rename gives a session a new title.
+func (a Aoe) Rename(ctx context.Context, id, title string) error {
+	_, err := a.cmd(ctx, "session", "rename", id, "-t", title)
+	return err
 }
 
 // SetConversation points a stopped session at conversation, which it opens

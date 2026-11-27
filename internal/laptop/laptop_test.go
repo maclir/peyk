@@ -387,7 +387,8 @@ func TestSessionsKeepsLiveClaudeSessions(t *testing.T) {
 	  {"id":"b","title":"old","tool":"claude","state":"trashed","path":"/o"},
 	  {"id":"c","title":"relayServer","tool":"peyk","state":"live","path":"/r"},
 	  {"id":"d","title":"peykServer","tool":"claude","command":"zsh -lc 'make serve'","state":"live","path":"/k"},
-	  {"id":"e","title":"pinned","tool":"claude","command":"/opt/bin/claude --model x","state":"live","path":"/p"}
+	  {"id":"e","title":"pinned","tool":"claude","command":"/opt/bin/claude --model x","state":"live","path":"/p"},
+	  {"id":"f","title":"`+KeptTitle("f0f0f0f0f0f0", "knip")+`","tool":"claude","state":"live","path":"/k"}
 	]`, map[string]string{
 		"a": `{"id":"a","title":"knip","tool":"claude","state":"live","path":"/k","status":"waiting","agent_session_id":"s1"}`,
 		"e": `{"id":"e","title":"pinned","tool":"claude","state":"live","path":"/p"}`,
@@ -707,21 +708,16 @@ func TestLastExchangeNamesTheModelThatWroteTheReply(t *testing.T) {
 	}
 }
 
-func TestTrashFreesTitleAndRestoreReturnsIt(t *testing.T) {
+func TestRename(t *testing.T) {
 	var calls []string
 	a := Aoe{Profile: "personal", Run: func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
 		calls = append(calls, strings.Join(args[2:], " "))
 		return nil, nil
 	}}
-	if err := a.Trash(context.Background(), "7ab0c36356b64513", "peyk"); err != nil {
+	if err := a.Rename(context.Background(), "7ab0c36356b64513", "peyk~7ab0c363"); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Restore(context.Background(), "7ab0c36356b64513", "peyk"); err != nil {
-		t.Fatal(err)
-	}
-	want := "session rename 7ab0c36356b64513 -t peyk~7ab0c363|remove 7ab0c36356b64513|" +
-		"session restore 7ab0c36356b64513|session rename 7ab0c36356b64513 -t peyk"
-	if got := strings.Join(calls, "|"); got != want {
+	if got := strings.Join(calls, "|"); got != "session rename 7ab0c36356b64513 -t peyk~7ab0c363" {
 		t.Fatalf("calls = %s", got)
 	}
 }
