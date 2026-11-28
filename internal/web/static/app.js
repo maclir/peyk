@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -214,7 +214,7 @@ async function start(cfg) {
     // A composer's ideation ask by its key, and the last one made, which the next starts from.
     ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
     // The idea whose dismissal note is being written.
-    dismissing: null, modelFor: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+    dismissing: null, modelFor: null, modelFresh: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: false, factsOpen: false, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -355,6 +355,9 @@ async function start(cfg) {
   });
   document.addEventListener("click", (e) => {
     if (state.menu && !e.target.closest(".wmenu")) { state.menu = null; render(); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.modelFor) { state.modelFor = null; state.modelFresh = null; render(); }
   });
   usageEl.addEventListener("click", () => { state.menu = state.menu === "usage" ? null : "usage"; render(); });
   usageEl.parentElement.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.menu === "usage") { state.menu = null; render(); usageEl.focus(); } });
@@ -538,7 +541,7 @@ async function start(cfg) {
     renderInbox();
     renderCompose();
     const modelFor = state.modelFor && shownWorker(state.modelFor);
-    if (state.modelFor && !modelFor) state.modelFor = null;
+    if (state.modelFor && !modelFor) { state.modelFor = null; state.modelFresh = null; }
     pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : modelFor ? [modelSheet(modelFor)] : []));
     for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
     document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking || Boolean(modelFor));
@@ -2056,7 +2059,7 @@ async function start(cfg) {
     const name = shownModel(s).name || (s.tool === "antigravity" ? "Antigravity" : "Model");
     const busy = state.busy.has(`model:${s.id}`);
     return h("button", { type: "button", class: `modelchip ${s.tool === "antigravity" ? "ag" : "cc"}${busy ? " busy" : ""}`, "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog", "aria-busy": busy ? "true" : null,
-      onclick: () => { state.modelFor = s.id; render(); } },
+      onclick: () => { state.modelFor = s.id; state.modelFresh = modelSwitchState(s).defaultFresh; render(); } },
     h("span", { class: "mdot", "aria-hidden": "true" }), h("span", { class: "mlabel" }, name));
   }
 
@@ -2083,30 +2086,53 @@ async function start(cfg) {
 
   // The sheet lists each pool's models with what a task costs of its quota,
   // and the quota's windows beside the pool's name. A tap switches; a model
-  // of the other tool moves the worker there.
+  // of the other tool moves the worker there. Free states default to starting
+  // fresh; dirty and errored states default to bringing context.
   function modelSheet(s) {
-    const close = () => { state.modelFor = null; render(); };
+    const close = () => { state.modelFor = null; state.modelFresh = null; render(); };
     const now = Date.now();
     const current = shownModel(s).key;
+    const sw = modelSwitchState(s);
+    const fresh = sw.cleared || (state.modelFresh ?? sw.defaultFresh);
+    const st = STATES[s.state] || STATES.idle;
     const claude = usageLeft(state.usage, now);
     const ag = antigravityLeft(state.usage, now) ?? [];
     const pick = (m) => {
+      if (sw.locked) return;
       state.modelFor = null;
+      state.modelFresh = null;
       if (m.key === current) return render();
       const move = m.tool !== (s.tool ?? "");
       state.modelAsked.set(s.id, m);
       if (move) state.moving.set(s.id, s.title);
-      sendCommand("model", { session: s.id, text: m.key }, `${move ? "Move" : "Switch"} to ${m.name}`, `model:${s.id}`, (text, busy, tone) => {
+      const fields = { session: s.id, text: m.key, ...(fresh ? { clear: true } : {}) };
+      sendCommand("model", fields, `${move ? "Move" : "Switch"} to ${m.name}`, `model:${s.id}`, (text, busy, tone) => {
         if (tone === "bad") { state.modelAsked.delete(s.id); state.moving.delete(s.id); }
         setOutcome(`worker:${s.id}`, text, busy, tone);
       }, null, { done: `${move ? "Moved" : "Switched"} to ${m.name}` });
     };
+    const modeNote = () => {
+      if (s.state === "working") return h("p", { class: "modenote run" }, "Worker is working. Wait for the turn to finish or stop it before switching models.");
+      if (s.state === "needs_input") return h("p", { class: "modenote bad" }, "Worker is waiting for an answer. Reply to or dismiss the dialog before switching models.");
+      if (sw.cleared) return h("p", { class: "modenote clean" }, icon("broom"), h("span", {}, "Conversation is already empty — switching starts clean."));
+      if (fresh && s.state === "dirty") return h("p", { class: "modenote warn" }, "Starts an empty conversation on the new model. Uncommitted files stay on disk, and changing tools stops the previous AoE session.");
+      if (fresh) return h("p", { class: "modenote" }, "Starts an empty conversation on the new model. Changing tools stops the previous AoE session.");
+      return h("p", { class: "modenote" }, "Keeps this conversation on the same tool, or hands its transcript to a fresh session on the other tool and stops the previous AoE session.");
+    };
+    const modeBar = h("div", { class: "modewrap" },
+      !sw.locked && !sw.cleared ? h("div", { class: "seg", role: "group", "aria-label": "Conversation mode" },
+        h("button", { type: "button", "aria-pressed": String(fresh), onclick: () => { state.modelFresh = true; render(); } }, icon("broom"), "Start fresh"),
+        h("button", { type: "button", "aria-pressed": String(!fresh), onclick: () => { state.modelFresh = false; render(); } }, icon("context"), "Bring context"),
+      ) : null,
+      modeNote(),
+    );
     const quota = (pool) => {
       const windows = pool.tool === "" ? claude : ag.find((p) => p.name === pool.name)?.windows;
       return windows ? h("span", { class: "mquota", "aria-hidden": "true" },
         windows.map((w) => meter(h("span", { class: `meter ${pool.kind}` }, h("i")), w.left))) : null;
     };
     const row = (pool, m) => h("button", { type: "button", class: `mrow ${pool.kind}${m.claude ? " claude" : ""}`, "aria-pressed": String(m.key === current),
+      disabled: sw.locked ? "" : null,
       "aria-label": `${m.name}${pool.tool ? " in Antigravity" : ""}${m.pips ? `, uses ${m.pips} of 5 of the quota per task` : ""}`, onclick: () => pick(m) },
     h("span", { class: "mdot", "aria-hidden": "true" }),
     h("span", { class: "mname" }, m.short ?? m.name),
@@ -2118,7 +2144,7 @@ async function start(cfg) {
       const shown = pool.models.filter((m) => !m.more || m.key === current);
       const more = pool.models.filter((m) => !shown.includes(m));
       const open = state.modelMore.has(pool.id);
-      return h("div", { class: "mpool", role: "group", "aria-label": pool.tool ? `${pool.app} ${pool.name}` : pool.app },
+      return h("div", { class: `mpool${sw.locked ? " locked" : ""}`, role: "group", "aria-label": pool.tool ? `${pool.app} ${pool.name}` : pool.app },
         h("div", { class: "mhead" }, h("span", { class: "grow mtitle" }, logo(pool.kind), pool.title), quota(pool)),
         shown.map((m) => row(pool, m)),
         more.length ? h("button", { type: "button", class: "mmore", "aria-expanded": String(open),
@@ -2128,7 +2154,8 @@ async function start(cfg) {
     });
     return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
       h("section", { class: "sheet msheet", role: "dialog", "aria-modal": "true", "aria-label": `Model for ${s.title}`, onkeydown: (e) => e.key === "Escape" && close() },
-        sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Model")), close),
+        sheetTop(h("div", { class: "sheethead" }, h("h2", {}, "Model", chip(st))), close),
+        modeBar,
         h("div", { class: "sheetbody" }, body)));
   }
 
@@ -2733,6 +2760,7 @@ const ICONS = {
   bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
   bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   broom: '<g transform="translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g>',
+  context: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5z"/>',
   clearstop: '<g transform="translate(-0.3 -0.4) scale(.85) translate(2.2 -1.2) rotate(35 12 12)"><path d="M12 1.5V10"/><rect x="8.5" y="10" width="7" height="3" rx="1"/><path d="M8.5 13L6.5 21h11l-2-8"/><path d="M10.5 16.5l-.4 4.5M13.5 16.5l.4 4.5"/></g><rect x="15" y="15" width="6.5" height="6.5" rx="1.5"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',

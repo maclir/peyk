@@ -569,3 +569,16 @@ export function sessionModel(s, agModels, versions = {}) {
   const name = raw === family ? (versions[family] ?? modelName(raw)) : modelName(raw);
   return { key: family, name };
 }
+
+// modelSwitchState describes how the model sheet behaves for a worker: active
+// turns and open dialogs block switching; already-cleared conversations need
+// no mode choice; free states default to starting fresh, and dirty or errored
+// states default to bringing context.
+export function modelSwitchState(s) {
+  const state = s?.state ?? "";
+  return {
+    locked: state === "working" || state === "needs_input",
+    cleared: Boolean(s?.cleared),
+    defaultFresh: state === "unpushed" || state === "idle" || state === "stopped",
+  };
+}

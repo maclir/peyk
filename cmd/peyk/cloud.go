@@ -55,13 +55,6 @@ func usageDir() string {
 	return filepath.Join(home, ".peyk", "usage")
 }
 
-// conversationsPath is where each tool's last conversation per directory is
-// kept, for workers moved between tools.
-func conversationsPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".peyk", "conversations.json")
-}
-
 // agyPath is the Antigravity CLI the agent lists models with. The personal
 // environment installs it outside PATH, and aoe's personal profile runs the
 // same binary.
@@ -280,8 +273,7 @@ func runAgent(ctx context.Context) error {
 		PublishRequests: pubReqs, LatestPrototype: c.Prototypes.LatestHostedID, RecordPrototype: c.Prototypes.Record,
 		Seen: seen,
 		Commands: &agent.Commands{
-			Act: actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig(),
-				conversations: laptop.Conversations{Path: conversationsPath()}},
+			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
 			Keys:        keyring().Load,
 			Origin:      o.String(),
 			RPID:        o.Hostname(),

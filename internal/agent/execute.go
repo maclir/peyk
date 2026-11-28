@@ -30,7 +30,7 @@ type Actions interface {
 	Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error
 	Push(ctx context.Context, dir string) error
 	// Swap replaces a session with one in the same directory that runs tool
-	// on model, opening the conversation tool last had there, and returns
+	// on model with a fresh conversation, stops the old session, and returns
 	// the new session's id.
 	Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error)
 	// Answer closes a session's open dialog for question and sends text as
@@ -251,7 +251,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if err != nil {
 			return err
 		}
-		return a.switchModel(ctx, act, s, p.Text)
+		return a.switchModel(ctx, act, s, p.Text, p.Clear)
 	case command.CheckUpdate, command.Update:
 		if a.Checkout == nil {
 			return errors.New("this agent cannot update itself")
@@ -356,23 +356,34 @@ func (a *Agent) toolFor(model string) (string, error) {
 	return "", fmt.Errorf("no model named %q", model)
 }
 
-// switchModel changes the model of a session's conversation in place when
-// its tool runs the model. A session that is working or asking would read
-// /model as part of its turn, so it is refused, as /clear is.
+// switchModel changes a session's model. Active turns and open dialogs are
+// refused because /model, /clear, or stopping the old session would land in
+// the turn. Uncommitted changes are allowed: both tools share the working
+// directory on disk.
 //
-// A model another tool runs moves the worker to that tool: a new session in
-// the same directory, told to read what the old one did since it last worked
-// there. That needs the worker free, as a resume does, so nothing is lost
-// between the two.
-func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot, model string) error {
+// When clear is true (or the session is already cleared), the worker starts
+// on an empty conversation — /clear then /model on the same tool, or a fresh
+// started session on the other tool with no catch-up prompt. Otherwise the
+// current conversation is kept in place on the same tool, or handed to a fresh
+// session on the other tool via catchUp.
+func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot, model string, clear bool) error {
 	tool, err := a.toolFor(model)
 	if err != nil {
 		return err
 	}
-	if tool == s.Tool {
-		switch s.State {
-		case session.Working, session.NeedsInput:
+	switch s.State {
+	case session.Working, session.NeedsInput:
+		if tool == s.Tool {
 			return fmt.Errorf("%s is %s; /model would land in its turn", s.Title, s.State.Label())
+		}
+		return fmt.Errorf("%s is %s; wait for it to finish before switching tools", s.Title, s.State.Label())
+	}
+	if tool == s.Tool {
+		if clear {
+			if err := a.clear(ctx, act, s); err != nil {
+				return err
+			}
+			s = a.sessions[s.ID]
 		}
 		if err := act.Send(ctx, s.ID, "/model "+model); err != nil {
 			return err
@@ -382,15 +393,17 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 		a.sessions[s.ID] = s
 		return a.publishSessions(ctx)
 	}
-	if proj := a.projects[s.Title]; !proj.Free {
-		return fmt.Errorf("%s is not free: %s", s.Title, proj.Busy)
-	}
 	id, err := act.Swap(ctx, s, tool, model)
+	if id != "" {
+		a.sessionsChanged = true
+		a.recordModelSwitch(id, model, session.Snapshot{})
+	}
 	if err != nil {
 		return err
 	}
-	a.sessionsChanged = true
-	a.recordModelSwitch(id, model, session.Snapshot{})
+	if clear || s.Cleared {
+		return act.Start(ctx, id)
+	}
 	return act.Send(ctx, id, catchUp(s))
 }
 

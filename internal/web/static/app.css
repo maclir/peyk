@@ -555,7 +555,20 @@ html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-
 /* The model sheet: each tool's pools, a pool's name beside its quota bars,
    then its models, each with the budget a task uses as 1 to 5 pips. A dot is
    the model's family; the pips and the pick are the pool's quota color. */
-.msheet .sheetbody { display: flex; flex-direction: column; gap: 16px; }
+.msheet .sheetbody { display: flex; flex-direction: column; gap: 16px; padding-top: 12px; }
+.modewrap { display: flex; flex-direction: column; gap: 7px; padding: 0 16px 12px; border-bottom: 1px solid var(--line); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 12px; background: var(--paper); }
+.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10), 0 0 0 1px var(--line); }
+.seg .ico svg { width: 15px; height: 15px; display: block; }
+.modenote { margin: 0 2px; font-size: 0.77rem; line-height: 1.38; color: var(--muted); }
+.modenote.warn, .modenote.bad, .modenote.run, .modenote.clean { margin: 0; padding: 7px 10px; border-radius: 10px; font-weight: 500; }
+.modenote.warn { background: var(--warn-soft); color: var(--warn); }
+.modenote.bad { background: var(--bad-soft); color: var(--bad); }
+.modenote.run { background: var(--run-soft); color: var(--run); }
+.modenote.clean { display: flex; align-items: center; gap: 7px; background: var(--paper); color: var(--muted); }
+.modenote.clean .ico svg { width: 15px; height: 15px; flex: none; }
+.mpool.locked { opacity: 0.48; }
 .mtitle { display: flex; align-items: center; gap: 8px; }
 .mmore { display: flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 40px; padding: 0 12px; border: 0; background: none; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
 .mmore .ico svg { width: 14px; height: 14px; }

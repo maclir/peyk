@@ -590,6 +590,9 @@ test.describe('signed in', () => {
 
     await chip.click();
     const sheet = page.getByRole('dialog', { name: 'Model for mdl' });
+    // Already-cleared worker hides the mode toggle and switches clean.
+    await expect(sheet.getByRole('group', { name: 'Conversation mode' })).toHaveCount(0);
+    await expect(sheet.locator('.modenote.clean')).toContainText('already empty');
     await expect(sheet.getByRole('button', { name: /^Opus 5.5,/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(sheet.getByRole('button', { name: 'Fable, uses 5 of 5 of the quota per task' })).toHaveAttribute('aria-pressed', 'false');
     await expect(sheet.getByRole('group', { name: 'Claude Code' }).locator('.mquota .meter')).toHaveCount(2);
@@ -599,12 +602,12 @@ test.describe('signed in', () => {
     await expect(page.getByRole('button', { name: 'Model: Sonnet. Change model' })).toBeVisible();
     await expect.poll(async () => (await list(page, 'commands')).some((c) => c.fields.type.stringValue === 'model')).toBe(true);
     const sw = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'model')!;
-    expect(JSON.parse(sw.fields.payload.stringValue)).toMatchObject({ type: 'model', session: 'm', text: 'sonnet' });
+    expect(JSON.parse(sw.fields.payload.stringValue)).toMatchObject({ type: 'model', session: 'm', text: 'sonnet', clear: true });
     expect(sw.fields.grant).toBeDefined();
     await put(page, `commands/${sw.name.split('/').pop()}`, { ...plain(sw.fields), status: 'done' });
     await expect(page.locator('.dhead .outcome')).toHaveText('Switched to Sonnet');
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
-      model: 'claude-sonnet-5-5', message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
+      model: 'claude-sonnet-5-5', cleared: false, message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
     await expect(page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' })).toBeVisible();
 
     await put(page, 'laptop/models', { antigravity: [
@@ -612,7 +615,14 @@ test.describe('signed in', () => {
       { id: 'gemini-4-carbon-high', name: 'Gemini 4 Carbon (High)' }, { id: 'claude-opus-5-5-high', name: 'Claude Opus 5.5 (High)' },
       { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
     ] });
+    // Free worker with a conversation defaults to Start fresh; toggling to
+    // Bring context omits clear on the signed command.
     await page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' }).click();
+    const mode = sheet.getByRole('group', { name: 'Conversation mode' });
+    await expect(mode.getByRole('button', { name: 'Start fresh' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(mode.getByRole('button', { name: 'Bring context' })).toHaveAttribute('aria-pressed', 'false');
+    await mode.getByRole('button', { name: 'Bring context' }).click();
+    await expect(mode.getByRole('button', { name: 'Bring context' })).toHaveAttribute('aria-pressed', 'true');
     await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).locator('.mrow')).toHaveText(['4 Neon', '4 Carbon']);
     await sheet.getByRole('group', { name: 'Antigravity Gemini' }).getByRole('button', { name: 'More · 1' }).click();
     await expect(sheet.getByRole('group', { name: 'Antigravity Gemini' }).locator('.mrow')).toHaveText(['4 Neon', '4 Carbon', 'Orchestrator (Carbon)']);
@@ -622,15 +632,30 @@ test.describe('signed in', () => {
     await expect.poll(async () => (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'model').length).toBe(2);
     const move = (await list(page, 'commands')).filter((c) => c.fields.type.stringValue === 'model')
       .find((c) => JSON.parse(c.fields.payload.stringValue).text === 'gemini-4-neon-high')!;
+    expect(JSON.parse(move.fields.payload.stringValue).clear).toBeUndefined();
     await put(page, `commands/${move.name.split('/').pop()}`, { ...plain(move.fields), status: 'done' });
     await page.request.delete(`${FIRESTORE}/sessions/m`, { headers: admin });
-    // Before the moved Antigravity worker replies, its model id still names it.
+    // Before the moved Antigravity worker replies, its model id still names it;
+    // while working, switching is disabled in the sheet.
     await put(page, 'sessions/m2', { id: 'm2', title: 'mdl', path: '/c/mdl', aoe_status: 'running', state: 'working', tool: 'antigravity',
       model: 'gemini-4-neon-high', updated_at: new Date() });
     await expect(page).toHaveURL(/#s-m2$/);
     await expect(page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' })).toBeVisible();
     await page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' }).click();
-    await expect(page.getByRole('dialog', { name: 'Model for mdl' }).getByRole('button', { name: /^Gemini 4 Neon in Antigravity/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /^Gemini 4 Neon in Antigravity/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /^Gemini 4 Neon in Antigravity/ })).toBeDisabled();
+    await expect(sheet.locator('.modenote.run')).toContainText('Worker is working');
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+
+    // A dirty worker defaults to Bring context and allows cross-tool moves.
+    await put(page, 'sessions/m2', { id: 'm2', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'dirty', tool: 'antigravity',
+      model: 'gemini-4-neon-high', cleared: false, updated_at: new Date() });
+    await page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' }).click();
+    await expect(mode.getByRole('button', { name: 'Bring context' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /^Opus,/ })).toBeEnabled();
+    await mode.getByRole('button', { name: 'Start fresh' }).click();
+    await expect(sheet.locator('.modenote.warn')).toContainText('Uncommitted files stay on disk');
     await page.keyboard.press('Escape');
     await page.request.delete(`${FIRESTORE}/sessions/m2`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/laptop/models`, { headers: admin });

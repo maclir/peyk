@@ -15,9 +15,6 @@ type actions struct {
 	group string
 	// claudeConfig is Claude Code's global config, where folder trust is kept.
 	claudeConfig string
-	// conversations remembers each tool's last conversation per directory,
-	// for a worker moved between tools.
-	conversations laptop.Conversations
 }
 
 func (a actions) Send(ctx context.Context, session, text string) error {
@@ -66,20 +63,12 @@ func (a actions) Push(ctx context.Context, dir string) error {
 	return laptop.Push(ctx, laptop.Exec, dir)
 }
 
-// Swap moves a worker to another tool. The old session stays in aoe, kept
-// aside under laptop.KeptTitle, its conversation remembered for a move back,
-// and peyk shows only the new one; the new one takes its
-// title, which projects and dispatch find a worker by, and aoe refuses two
-// sessions with one title in one directory. If the new one cannot start, the
-// old one gets its title back.
+// Swap moves a worker to another tool on a fresh conversation. The old session
+// is kept aside under laptop.KeptTitle and stopped once the new one exists, so
+// peyk shows only the new worker while leaving the old transcript on disk for
+// a context handoff. If the new session cannot be added, the old one keeps its
+// title and state.
 func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error) {
-	if err := a.conversations.Set(s.Path, s.Tool, s.Transcript.ID); err != nil {
-		return "", fmt.Errorf("remember %s's conversation: %w", s.Title, err)
-	}
-	back, err := a.conversations.Get(s.Path, tool)
-	if err != nil {
-		return "", err
-	}
 	if tool == "" {
 		if err := laptop.Trust(a.claudeConfig, s.Path); err != nil {
 			return "", fmt.Errorf("trust %s for Claude Code: %w", s.Path, err)
@@ -99,9 +88,9 @@ func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model strin
 		}
 		return "", fmt.Errorf("start %s on %s: %w", s.Title, model, err)
 	}
-	if back != "" {
-		if err := a.aoe.SetConversation(ctx, id, back); err != nil {
-			return "", err
+	if s.AoeStatus != "stopped" {
+		if err := a.aoe.Stop(ctx, s.ID); err != nil {
+			return id, fmt.Errorf("stop previous %s session: %w", s.Title, err)
 		}
 	}
 	return id, nil

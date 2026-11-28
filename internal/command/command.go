@@ -98,8 +98,8 @@ type Payload struct {
 	// Question is the tool call id of the dialog an answer is for, so an
 	// answer cannot land on a later question.
 	Question string `json:"question,omitempty"`
-	// Clear asks a dispatch or stop to start the worker on a fresh
-	// conversation first, unless it already has one.
+	// Clear asks a dispatch, stop, or model switch to start the worker on a
+	// fresh conversation first, unless it already has one.
 	Clear bool `json:"clear,omitempty"`
 	// Prototype asks a dispatch for a published page of that kind instead
 	// of a code change.

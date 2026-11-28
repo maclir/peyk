@@ -192,11 +192,17 @@ func TestExecuteCommands(t *testing.T) {
 		{"answer a session asking nothing", command.Payload{Type: command.Answer, Session: "k", Question: "toolu_1", Text: "x"}, "", "knip is no longer asking"},
 		{"answer without text", command.Payload{Type: command.Answer, Session: "q", Question: "toolu_1"}, "", "needs the question and its text"},
 		{"switch an idle session's model", command.Payload{Type: command.Model, Session: "k", Text: "sonnet"}, "send k: /model sonnet", ""},
+		{"clear and switch an idle session's model", command.Payload{Type: command.Model, Session: "k", Text: "sonnet", Clear: true}, "clear k|send k: /model sonnet", ""},
+		{"clear and switch a session already cleared", command.Payload{Type: command.Model, Session: "f", Text: "sonnet", Clear: true}, "send f: /model sonnet", ""},
 		{"switch a stopped session's model", command.Payload{Type: command.Model, Session: "s", Text: "fable"}, "send s: /model fable", ""},
 		{"switch a working session's model", command.Payload{Type: command.Model, Session: "h", Text: "opus"}, "", "/model would land in its turn"},
+		{"switch a session asking a question", command.Payload{Type: command.Model, Session: "q", Text: "opus"}, "", "/model would land in its turn"},
 		{"switch an Antigravity session's model", command.Payload{Type: command.Model, Session: "g", Text: "gemini-4-carbon-high"}, "send g: /model gemini-4-carbon-high", ""},
-		{"move a busy session to another tool", command.Payload{Type: command.Model, Session: "h", Text: "gemini-4-neon-high"}, "", "hamta is not free: working"},
-		{"move a session with uncommitted changes to another tool", command.Payload{Type: command.Model, Session: "d", Text: "gemini-4-neon-high"}, "", "dorna is not free"},
+		{"move a busy session to another tool", command.Payload{Type: command.Model, Session: "h", Text: "gemini-4-neon-high"}, "", "wait for it to finish before switching tools"},
+		{"move a session asking a question to another tool", command.Payload{Type: command.Model, Session: "q", Text: "gemini-4-neon-high"}, "", "wait for it to finish before switching tools"},
+		{"move an idle session fresh to another tool", command.Payload{Type: command.Model, Session: "k", Text: "gemini-4-neon-high", Clear: true}, "swap k to antigravity on gemini-4-neon-high|start swapped-k", ""},
+		{"move an already-cleared session to another tool", command.Payload{Type: command.Model, Session: "f", Text: "gemini-4-neon-high"}, "swap f to antigravity on gemini-4-neon-high|start swapped-f", ""},
+		{"move a session with uncommitted changes fresh to another tool", command.Payload{Type: command.Model, Session: "d", Text: "gemini-4-neon-high", Clear: true}, "swap d to antigravity on gemini-4-neon-high|start swapped-d", ""},
 		{"switch to a model no tool runs", command.Payload{Type: command.Model, Session: "k", Text: "opus; rm -rf"}, "", "no model named"},
 	}
 	for _, tt := range tests {
@@ -650,6 +656,26 @@ func TestMovingAWorkerToAnotherToolPointsTheNewOneAtTheOldConversation(t *testin
 	}
 	if want := "send swapped-k: This project's worker just moved here from Claude Code."; !strings.HasPrefix(acts.calls[1], want) ||
 		!strings.Contains(acts.calls[1], "/claude/projects/-c-knip/now.jsonl") {
+		t.Fatalf("catch-up = %q", acts.calls[1])
+	}
+}
+
+func TestMovingADirtyWorkerToAnotherToolCarriesItsConversation(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, acts := commandAgent(t, ph)
+	dorna := a.sessions["d"]
+	dorna.Transcript = session.Transcript{Dir: "/claude/projects/-c-dorna", ID: "dirty-conv"}
+	a.sessions["d"] = dorna
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Model, Session: "d", Text: "gemini-4-neon-high"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Done {
+		t.Fatalf("result = %v", res)
+	}
+	if len(acts.calls) != 2 || acts.calls[0] != "swap d to antigravity on gemini-4-neon-high" {
+		t.Fatalf("calls = %q", acts.calls)
+	}
+	if !strings.Contains(acts.calls[1], "/claude/projects/-c-dorna/dirty-conv.jsonl") {
 		t.Fatalf("catch-up = %q", acts.calls[1])
 	}
 }

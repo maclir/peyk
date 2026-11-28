@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -616,5 +616,18 @@ describe('sessionModel', () => {
     expect(sessionModel({ tool: 'antigravity', model: 'Gemini 4 Neon (High)' }, ag)).toEqual({ key: 'gemini-4-neon-high', name: 'Gemini 4 Neon' });
     expect(sessionModel({ tool: 'antigravity', model: 'gemini-4-neon-low' }, ag)).toEqual({ key: 'gemini-4-neon-high', name: 'Gemini 4 Neon' });
     expect(sessionModel({}, ag)).toEqual({ key: '', name: '' });
+  });
+});
+
+describe('modelSwitchState', () => {
+  it('defaults free states to fresh, dirty and error to context, and locks active turns', () => {
+    expect(modelSwitchState({ state: 'unpushed', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: true });
+    expect(modelSwitchState({ state: 'idle', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: true });
+    expect(modelSwitchState({ state: 'stopped', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: true });
+    expect(modelSwitchState({ state: 'idle', cleared: true })).toEqual({ locked: false, cleared: true, defaultFresh: true });
+    expect(modelSwitchState({ state: 'dirty', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: false });
+    expect(modelSwitchState({ state: 'error', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: false });
+    expect(modelSwitchState({ state: 'working', cleared: false })).toEqual({ locked: true, cleared: false, defaultFresh: false });
+    expect(modelSwitchState({ state: 'needs_input', cleared: false })).toEqual({ locked: true, cleared: false, defaultFresh: false });
   });
 });

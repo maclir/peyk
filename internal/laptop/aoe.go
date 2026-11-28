@@ -244,10 +244,3 @@ func (a Aoe) Rename(ctx context.Context, id, title string) error {
 	_, err := a.cmd(ctx, "session", "rename", id, "-t", title)
 	return err
 }
-
-// SetConversation points a stopped session at conversation, which it opens
-// when it starts.
-func (a Aoe) SetConversation(ctx context.Context, id, conversation string) error {
-	_, err := a.cmd(ctx, "session", "set-session-id", id, conversation)
-	return err
-}
