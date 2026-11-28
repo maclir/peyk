@@ -960,12 +960,15 @@ test.describe('signed in', () => {
     const compose = page.getByRole('dialog', { name: 'New task' });
     const ideate = compose.getByRole('button', { name: /^Ideate:/ });
     const proto = compose.getByRole('button', { name: /^Prototype:/ });
+    const submit = compose.getByRole('button', { name: 'Add task' });
     await ideate.click();
     await expect(ideate).toHaveAccessibleName('Ideate: on');
     const lenses = compose.getByRole('group', { name: 'Lenses' });
-    await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'One experience']);
+    await expect(lenses.getByRole('button', { pressed: true })).toHaveCount(0);
+    await expect(submit).toBeDisabled();
+    await lenses.getByRole('button', { name: 'Reuse' }).click();
     await lenses.getByRole('button', { name: 'Security' }).click();
-    await lenses.getByRole('button', { name: 'One experience' }).click();
+    await expect(submit).toBeEnabled();
     await compose.getByRole('group', { name: 'At most' }).getByRole('button', { name: '10' }).click();
     await expect(lenses.getByRole('button', { pressed: true })).toHaveText(['Reuse', 'Security']);
     await expect(page.locator('#task-text')).toHaveAttribute('placeholder', /^Focus/);
@@ -982,7 +985,7 @@ test.describe('signed in', () => {
 
     await compose.getByRole('button', { name: /^Project:/ }).click();
     await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
-    await compose.getByRole('button', { name: 'Add task' }).click();
+    await submit.click();
     await expect(compose).toBeHidden();
     const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.ideate);
     await expect.poll(stored).toBeTruthy();
@@ -1000,6 +1003,89 @@ test.describe('signed in', () => {
     expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', ideate: { lenses: ['reuse', 'security'], max: 10 } });
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
     await page.request.delete(`${FIRESTORE}/${task.name.split('/documents/')[1]}`, { headers: admin });
+  });
+
+  test('project-specific lenses sit first in a tinted tray, prune on project switch, and keep saved names on ideas', async () => {
+    const knipOrig = plain(await get(page, 'projects/knip'));
+    await put(page, 'projects/knip', {
+      ...knipOrig,
+      lenses: [{ id: 'p:invariants', name: 'Invariants' }, { id: 'p:ergonomics', name: 'Ergonomics' }],
+      lens_ids: ['p:invariants', 'p:ergonomics'],
+    });
+    await put(page, 'ideas/proj-1', {
+      project: 'knip', task: 'run', lens: 'p:invariants', lens_name: 'Invariants',
+      title: 'Ticker in watcher', why: 'Breaks event-only rule', refs: ['agent.go:10'],
+      prompt: 'Remove ticker', status: 'open', created_at: new Date(Date.now() - 60_000),
+    });
+    await put(page, 'ideas/proj-2', {
+      project: 'knip', task: 'run', lens: 'p:retired', lens_name: 'Old lens',
+      title: 'Removed lens idea', why: 'Still readable after removal', refs: ['app.js:1'],
+      prompt: 'Keep name', status: 'open', created_at: new Date(Date.now() - 120_000),
+    });
+
+    await page.goto('/app/#new');
+    await passkeyOn(page);
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await compose.getByRole('button', { name: /^Ideate:/ }).click();
+
+    // Project lenses render in their tinted tray before built-ins, with none selected by default.
+    const tray = compose.getByRole('group', { name: 'knip lenses' });
+    const builtIns = compose.getByRole('group', { name: 'Lenses' });
+    await expect(tray).toBeVisible();
+    await expect(tray.getByRole('button')).toHaveText(['Invariants', 'Ergonomics']);
+    await expect(tray.getByRole('button', { pressed: true })).toHaveCount(0);
+    await expect(builtIns.getByRole('button', { pressed: true })).toHaveCount(0);
+    await expect(compose.getByRole('button', { name: 'Add task' })).toBeDisabled();
+    const order = await compose.locator('.ideatepanel > [role="group"]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    expect(order).toEqual(['knip lenses', 'Lenses', 'At most']);
+
+    await compose.getByRole('group', { name: 'At most' }).getByRole('button', { name: '5' }).click();
+    await tray.getByRole('button', { name: 'Invariants' }).click();
+    await builtIns.getByRole('button', { name: 'Security' }).click();
+    await expect(compose.getByRole('button', { name: 'Add task' })).toBeEnabled();
+
+    // Switching to a project without bespoke lenses hides the tray and drops the foreign project lens.
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /hamta/ }).click();
+    await expect(compose.locator('.proj-lenses')).toHaveCount(0);
+    await expect(builtIns.getByRole('button', { pressed: true })).toHaveText(['Security']);
+
+    // Switch back to knip, pick Invariants, and submit: project lens stays first in payload and label.
+    await compose.getByRole('button', { name: /^Project:/ }).click();
+    await page.getByRole('dialog', { name: 'Choose a project' }).getByRole('radio', { name: /knip/ }).click();
+    await tray.getByRole('button', { name: 'Invariants' }).click();
+    await compose.getByRole('button', { name: 'Add task' }).click();
+    await expect(compose).toBeHidden();
+
+    const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.ideate);
+    await expect.poll(stored).toBeTruthy();
+    const task = (await stored())!;
+    expect(task.fields.ideate.mapValue.fields.lenses.arrayValue.values.map((v: any) => v.stringValue)).toEqual(['p:invariants', 'security']);
+
+    await page.goto('/app/#inbox');
+    const card = page.locator('.task', { hasText: 'Look across the whole repository.' });
+    await expect(card.getByLabel('Ideas: Invariants, Security')).toHaveText('Ideas');
+    await card.getByRole('button', { name: /^(Clear and send|Send)$/ }).click();
+    await expect.poll(async () => (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')).toBeTruthy();
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'dispatch')!;
+    expect(JSON.parse(cmd.fields.payload.stringValue)).toMatchObject({ type: 'dispatch', project: 'knip', ideate: { lenses: ['p:invariants', 'security'], max: 5 } });
+
+    // Filed ideas from project lenses show the project-lens tag and keep saved lens_name even after removal.
+    await page.goto('/app/#s-k');
+    await page.locator('.hpage').getByRole('button', { name: /^Inbox/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'knip inbox' });
+    const invIdea = sheet.locator('.task.idea', { hasText: 'Ticker in watcher' });
+    await expect(invIdea.locator('.tag.ideas.proj')).toContainText('Invariants');
+    const oldIdea = sheet.locator('.task.idea', { hasText: 'Removed lens idea' });
+    await expect(oldIdea.locator('.tag.ideas.proj')).toContainText('Old lens');
+
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/${task.name.split('/documents/')[1]}`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/ideas/proj-1`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/ideas/proj-2`, { headers: admin });
+    await put(page, 'projects/knip', knipOrig);
   });
 
   test("a project's ideas wait in its inbox to be added, sent or dismissed", async () => {

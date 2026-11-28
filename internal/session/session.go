@@ -385,6 +385,11 @@ type Project struct {
 	// Hidden projects are left out of the phone's picker; the repository
 	// and its session are untouched.
 	Hidden bool `firestore:"hidden,omitempty" json:"hidden,omitempty"`
+	// Lenses are repository-defined ideation lenses from .peyk/lenses.md.
+	// Only id and name are published; the prompt text stays on the laptop.
+	Lenses []idea.ProjectLens `firestore:"lenses,omitempty" json:"lenses,omitempty"`
+	// LensIDs mirrors Lenses as a flat id list for Firestore security rules.
+	LensIDs []string `firestore:"lens_ids,omitempty" json:"lens_ids,omitempty"`
 }
 
 // Projects lists every session, plus every repository in repoDirs that no

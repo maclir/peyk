@@ -36,6 +36,11 @@ type logoFinder interface {
 	Logo(dir string) string
 }
 
+// lensFinder is a Collector that reads a project's bespoke ideation lenses.
+type lensFinder interface {
+	Lenses(dir string) []idea.Lens
+}
+
 // Watcher follows the working directories of the published sessions.
 type Notifier interface {
 	Notify(context.Context, []notify.Note) error
@@ -281,9 +286,13 @@ func (a *Agent) Refresh(ctx context.Context) error {
 	}
 	a.projects = map[string]session.Project{}
 	logos, _ := a.Collect.(logoFinder)
+	lenses, _ := a.Collect.(lensFinder)
 	for _, p := range session.Projects(snaps, repos) {
 		if logos != nil {
 			p.Logo = logos.Logo(p.Path)
+		}
+		if lenses != nil {
+			p.Lenses, p.LensIDs = idea.ProjectLensSummary(lenses.Lenses(p.Path))
 		}
 		a.projects[p.Name] = p
 	}
@@ -740,6 +749,21 @@ func (a *Agent) ideas(ctx context.Context, project string) ([]idea.Idea, error) 
 	return ir.Ideas(ctx, project)
 }
 
+// projectLenses returns the full bespoke lenses for p from disk when available.
+func (a *Agent) projectLenses(p session.Project) []idea.Lens {
+	if finder, ok := a.Collect.(lensFinder); ok && p.Path != "" {
+		return finder.Lenses(p.Path)
+	}
+	if len(p.Lenses) == 0 {
+		return nil
+	}
+	out := make([]idea.Lens, len(p.Lenses))
+	for i, l := range p.Lenses {
+		out[i] = idea.Lens{ID: l.ID, Name: l.Name}
+	}
+	return out
+}
+
 // fileIdeas publishes what an ideation task's run reported. Each idea's id
 // is the task's and its place, so filing a task's ideas twice rewrites them
 // rather than adding copies.
@@ -749,7 +773,7 @@ func (a *Agent) fileIdeas(ctx context.Context, taskID string, t store.Task, draf
 		return 0, err
 	}
 	at := a.Now()
-	ideas := idea.Accept(drafts, *t.Ideate, known)
+	ideas := idea.Accept(drafts, *t.Ideate, known, a.projectLenses(a.projects[t.Project])...)
 	for n, i := range ideas {
 		i.Project, i.Task, i.CreatedAt = t.Project, taskID, at
 		if err := a.Store.Put(ctx, store.Ideas, fmt.Sprintf("%s-%d", taskID, n+1), i); err != nil {

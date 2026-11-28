@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, cardProgress, currentTask, filterQueue, hasProgress, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, toolAction, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, cardProgress, currentTask, filterQueue, hasProgress, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, toolAction, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, isProjectLens, lensName, ideateText, toggleLens, pruneProjectLenses, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -871,7 +871,7 @@ async function start(cfg) {
           inProject ? null : face(projectNamed(t.project), t.project, "xs"),
           h("span", { class: "rtext" }, inProject ? null : [h("b", {}, t.project), " "], t.text),
           t.prototype ? prototypeTag(t.prototype) : null,
-          t.ideate ? ideateTag(t.ideate) : null,
+          t.ideate ? ideateTag(t.ideate, projectNamed(t.project)) : null,
           h("span", { class: statBusy ? "rstat busy" : "rstat" }, stat)),
         action),
       outcomeLine(`task:${t.id}`),
@@ -939,7 +939,7 @@ async function start(cfg) {
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
         t.saving ? h("span", { class: "when saving" }, "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         t.prototype ? prototypeTag(t.prototype) : null,
-        t.ideate ? ideateTag(t.ideate) : null,
+        t.ideate ? ideateTag(t.ideate, projectNamed(t.project)) : null,
         h("span", { class: "grow" }),
         order && order.list.length > 1 ? stepButtons(t, order) : null,
         h("div", { class: "wmenu" },
@@ -1098,34 +1098,63 @@ async function start(cfg) {
   // optional focus, and a panel picks the lenses and how many ideas. A task
   // asks for a prototype or for ideas, not both. The toggle and panel redraw
   // only themselves, so the textarea keeps its focus and caret.
-  function ideateToggle(key, onSet) {
+  function ideateToggle(key, project, onSet) {
     const button = h("button", { type: "button", class: "proto ideate", title: "Ask for improvement ideas" });
     const panel = h("div", { class: "ideatepanel", hidden: "" });
     const paint = () => {
-      const ask = state.ideates.get(key);
+      let ask = state.ideates.get(key);
+      const p = projectNamed(project());
+      const pLenses = p?.lenses ?? [];
+      if (ask) {
+        const pruned = pruneProjectLenses(ask, pLenses);
+        if (pruned !== ask) {
+          ask = pruned;
+          state.ideates.set(key, ask);
+        }
+      }
       button.dataset.kind = ask ? "ideate" : "off";
       button.setAttribute("aria-pressed", String(Boolean(ask)));
       button.setAttribute("aria-label", ask ? "Ideate: on" : "Ideate: off");
       button.replaceChildren(icon("bulb"), ...(ask ? [h("span", {}, "Ideate")] : []));
       panel.hidden = !ask;
       if (!ask) return panel.replaceChildren();
-      const change = (next) => { state.ideates.set(key, next); state.lastIdeate = next; paint(); };
-      panel.replaceChildren(
+      const change = (next) => {
+        state.ideates.set(key, next);
+        state.lastIdeate = next;
+        paint();
+        onSet?.(next);
+      };
+      const parts = [];
+      if (pLenses.length) {
+        parts.push(h("div", { class: "proj-lenses", role: "group", "aria-label": `${p.name} lenses` },
+          h("span", { class: "proj-mark" }, face(p, p.name, "tiny"), h("span", {}, p.name)),
+          pLenses.map((l) =>
+            h("button", { type: "button", class: "fchip proj", "aria-pressed": String(ask.lenses.includes(l.id)),
+              onclick: () => change(toggleLens(ask, l.id, pLenses)) }, l.name))));
+      }
+      parts.push(
         h("div", { class: "lenses", role: "group", "aria-label": "Lenses" }, LENSES.map(([id, name]) =>
-          h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.lenses.includes(id)), onclick: () => change(toggleLens(ask, id)) }, name))),
+          h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.lenses.includes(id)),
+            onclick: () => change(toggleLens(ask, id, pLenses)) }, name))),
         h("div", { class: "limits", role: "group", "aria-label": "At most" }, h("span", {}, "At most"),
-          IDEA_LIMITS.map((n) => h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.max === n), onclick: () => change({ ...ask, max: n }) }, String(n))),
+          IDEA_LIMITS.map((n) => h("button", { type: "button", class: "fchip", "aria-pressed": String(ask.max === n),
+            onclick: () => change({ ...ask, max: n }) }, String(n))),
           h("span", {}, "ideas")),
       );
+      panel.replaceChildren(...parts);
     };
     const set = (ask) => {
       ask ? state.ideates.set(key, ask) : state.ideates.delete(key);
       paint();
-      onSet?.(ask);
+      onSet?.(state.ideates.get(key) ?? null);
     };
-    button.addEventListener("click", () => set(state.ideates.has(key) ? null : state.lastIdeate));
+    const sync = () => {
+      paint();
+      onSet?.(state.ideates.get(key) ?? null);
+    };
+    button.addEventListener("click", () => set(state.ideates.has(key) ? null : pruneProjectLenses(state.lastIdeate, projectNamed(project())?.lenses)));
     paint();
-    return { button, panel, set };
+    return { button, panel, set, sync };
   }
 
   function projectPill(name, task = null) {
@@ -1152,28 +1181,41 @@ async function start(cfg) {
     const pnote = h("p", { class: "pnote", role: "status", hidden: "" });
     const c = { pnote };
     const placeholder = () => (state.ideates.has(key) ? "Focus, or leave empty for the whole repository…" : "Describe a task…");
+    const syncSubmit = () => {
+      const btn = c.form?.querySelector('button[type="submit"]');
+      if (!btn) return;
+      const ask = state.ideates.get(key);
+      const needsLens = Boolean(ask && ask.lenses.length === 0);
+      btn.disabled = state.busy.has(key) || needsLens;
+      if (needsLens) btn.title = "Choose at least one lens";
+      else btn.removeAttribute("title");
+    };
     // Turning one kind on turns the other off.
     const onProto = (kind) => { if (kind && state.ideates.has(key)) c.ideate.set(null); };
     const onIdeate = (ask) => {
       if (ask && state.protos.has(key)) { state.protos.delete(key); repaint(); }
       const box = c.form?.querySelector("textarea");
       if (box) box.placeholder = placeholder();
+      syncSubmit();
     };
     c.proto = prototypeToggle(key, pnote, onProto);
-    c.ideate = ideateToggle(key, onIdeate);
+    c.ideate = ideateToggle(key, project, onIdeate);
     const repaint = () => c.proto.replaceWith(c.proto = prototypeToggle(key, pnote, onProto));
     const add = (text, andSend) => {
       const value = text.value.trim();
       const name = project();
       const ask = state.ideates.get(key) ?? null;
-      if ((!value && !ask) || !name || state.busy.has(key)) return;
+      if ((!value && !ask) || (ask && !ask.lenses.length) || !name || state.busy.has(key)) return;
       const attaching = draft(key);
       const kind = state.protos.get(key) ?? "";
       text.value = "";
       state.drafts.delete(key);
       state.protos.delete(key);
       repaint();
-      if (ask) c.ideate.set(null);
+      if (ask) {
+        state.lastIdeate = { lenses: [], max: ask.max };
+        c.ideate.set(null);
+      }
       const ctx = added(name);
       addTask(name, ask ? ideateText(value) : value, attaching, kind, ask).then((t) => {
         forgetImages(attaching);
@@ -1184,18 +1226,22 @@ async function start(cfg) {
         if (!draft(key).length) state.drafts.set(key, attaching);
         if (kind && !state.protos.has(key)) state.protos.set(key, kind);
         repaint();
-        if (ask) c.ideate.set(ask);
+        if (ask) {
+          state.lastIdeate = ask;
+          c.ideate.set(ask);
+        }
         failed(err, name, ctx);
       });
     };
     const hold = sends ? null : {
-      armed: (text) => Boolean((text.value.trim() || state.ideates.has(key)) && projectNamed(project())?.free),
+      armed: (text) => Boolean((text.value.trim() || state.ideates.get(key)?.lenses.length) && projectNamed(project())?.free),
       fire: (text) => add(text, true),
     };
     const submit = sends ? { submitLabel: "Add to inbox and send", submitIcon: "prompt" } : { submitLabel: "Add task", submitIcon: "addtask" };
     c.form = composerForm({ key, id, label: "Task description", placeholder: placeholder(), cls, ...submit,
       send: (text) => add(text, sends), hold, lead, tools: [c.proto, c.ideate.button] });
     c.form.append(c.ideate.panel, pnote);
+    syncSubmit();
     return c;
   }
 
@@ -1205,7 +1251,7 @@ async function start(cfg) {
   function buildCompose() {
     const close = () => closeLayer("compose");
     const lead = h("span", { class: "pillslot" });
-    const { form } = taskComposer({ key: "add", id: "task-text", cls: "add", project: () => state.picked, lead,
+    const { form, ideate } = taskComposer({ key: "add", id: "task-text", cls: "add", project: () => state.picked, lead,
       added: (project) => {
         const from = compose.from;
         const shown = inboxSheet.open;
@@ -1227,7 +1273,7 @@ async function start(cfg) {
       sheetTop(head, close), alert, h("div", { class: "sheetfoot" }, form, note));
     const scrim = h("div", { class: "scrim", hidden: "", onclick: (e) => e.target === e.currentTarget && close() }, panel);
     document.body.append(scrim);
-    return { scrim, form, lead, note, alert, text: form.querySelector("textarea"), open: false, from: null };
+    return { scrim, form, ideate, lead, note, alert, text: form.querySelector("textarea"), open: false, from: null };
   }
 
   // from names the worker's project when the sheet opens on a worker's page,
@@ -1235,6 +1281,7 @@ async function start(cfg) {
   function openCompose(project, from) {
     ensureSheets();
     state.picked = project ?? state.lastPicked ?? state.picked;
+    if (!state.ideates.has("add")) state.lastIdeate = { lenses: [], max: state.lastIdeate.max };
     compose.from = from;
     compose.alert.textContent = "";
     compose.open = true;
@@ -1259,7 +1306,10 @@ async function start(cfg) {
     if (!compose.open) return;
     if (state.loaded.has("projects") && !state.projects.some((p) => p.name === state.picked)) state.picked = visibleProjects()[0]?.name ?? null;
     compose.lead.replaceChildren(projectPill(state.picked));
-    compose.text.placeholder = state.picked ? "Describe a task…" : "No projects published yet";
+    compose.ideate.sync();
+    compose.text.placeholder = state.picked
+      ? (state.ideates.has("add") ? "Focus, or leave empty for the whole repository…" : "Describe a task…")
+      : "No projects published yet";
     const elsewhere = Boolean(compose.from && state.picked && state.picked !== compose.from);
     compose.note.hidden = !elsewhere;
     compose.note.textContent = elsewhere ? `Goes to ${state.picked}, not ${compose.from}.` : "";
@@ -1518,10 +1568,12 @@ async function start(cfg) {
   }
 
   // Images an edit drops go with it, unless another task shares one.
-  async function saveTask(t, text, project, images, prototype) {
+  async function saveTask(t, text, project, images, prototype, ideate = undefined) {
     const batch = fs.writeBatch(db);
     const ids = await storeImages(batch, images);
-    batch.update(fs.doc(db, "tasks", t.id), { text, project, images: ids.length ? ids : fs.deleteField(), prototype: prototype || fs.deleteField() });
+    const patch = { text, project, images: ids.length ? ids : fs.deleteField(), prototype: prototype || fs.deleteField() };
+    if (ideate !== undefined) patch.ideate = ideate;
+    batch.update(fs.doc(db, "tasks", t.id), patch);
     const dropped = (t.images || []).filter((id) => !ids.includes(id));
     for (const id of orphanedImages(state.tasks, [{ id: t.id, images: dropped }])) batch.delete(fs.doc(db, "attachments", id));
     await batch.commit();
@@ -1816,8 +1868,16 @@ async function start(cfg) {
     const save = async (text) => {
       const value = text.value.trim();
       if (!value) return;
+      let nextIdeate;
+      if (t.ideate && chosen !== t.project) {
+        const pruned = pruneProjectLenses(t.ideate, projectNamed(chosen)?.lenses);
+        if (!pruned.lenses.length) {
+          return setOutcome(`task:${t.id}`, `Could not save: ${chosen} does not define the lenses on this task.`, false, "bad");
+        }
+        if (pruned !== t.ideate) nextIdeate = { lenses: [...pruned.lenses], max: pruned.max };
+      }
       try {
-        await track(key, () => saveTask(t, value, chosen, draft(key), state.protos.get(key) ?? ""));
+        await track(key, () => saveTask(t, value, chosen, draft(key), state.protos.get(key) ?? "", nextIdeate));
         reveal(chosen);
         close();
       } catch (err) {
@@ -2416,25 +2476,29 @@ async function start(cfg) {
   // a tap adds it, and a long press also sends it when the worker is free.
   function ideaCard(i, now, inProject) {
     const key = `idea:${i.id}`;
+    const p = projectNamed(i.project);
+    const projLens = isProjectLens(i.lens);
+    const lensTag = () => h("span", { class: projLens ? "tag ideas proj" : "tag ideas" },
+      projLens ? face(p, i.project, "tiny") : null,
+      lensName(i.lens, p?.lenses, i.lens_name));
     if (i.settled) {
       return h("article", { class: "task idea settled" },
         h("div", { class: "thead" },
-          inProject ? null : [face(projectNamed(i.project), i.project, "sm"), h("span", { class: "proj" }, i.project)],
-          h("span", { class: "tag ideas" }, lensName(i.lens))),
+          inProject ? null : [face(p, i.project, "sm"), h("span", { class: "proj" }, i.project)],
+          lensTag()),
         h("div", { class: "ttext ititle" }, i.title),
         outcomeLine(key));
     }
     const open = state.menu === key;
     const dismissing = state.dismissing === i.id;
     const note = dismissing ? h("input", { type: "text", class: "dnote", maxlength: "500", "aria-label": "Why dismiss it (optional)", placeholder: "Why, for later runs (optional)" }) : null;
-    const p = projectNamed(i.project);
     const hold = longPress(() => Boolean(projectNamed(i.project)?.free), () => addIdea(i, true));
     // The long press swallows the click that ends a hold; any other click adds.
     const onclick = (e) => { hold.onclick(e); if (!e.defaultPrevented) addIdea(i, false); };
     return h("article", { class: "task idea" },
       h("div", { class: "thead" },
-        inProject ? null : [face(projectNamed(i.project), i.project, "sm"), h("span", { class: "proj" }, i.project)],
-        h("span", { class: "tag ideas" }, lensName(i.lens)),
+        inProject ? null : [face(p, i.project, "sm"), h("span", { class: "proj" }, i.project)],
+        lensTag(),
         h("span", { class: "when" }, ago(i.created_at, now)),
         h("span", { class: "grow" }),
         h("div", { class: "wmenu" },
@@ -2959,8 +3023,8 @@ function prototypeTag(kind) {
   return h("span", { class: `tag ${k.icon} ${k.tone}`, title: label, "aria-label": label }, icon(k.icon), k.name);
 }
 
-function ideateTag(ask) {
-  const label = `Ideas: ${ask.lenses.map(lensName).join(", ")}`;
+function ideateTag(ask, project = null) {
+  const label = `Ideas: ${ask.lenses.map((id) => lensName(id, project?.lenses)).join(", ")}`;
   return h("span", { class: "tag ideas", title: label, "aria-label": label }, icon("bulb"), "Ideas");
 }
 

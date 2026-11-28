@@ -138,6 +138,25 @@ describe('tasks', () => {
     await assertFails(updateDoc(doc(owner(), 'tasks/sent'), { ideate: { lenses: ['reuse'], max: 3 } }));
   });
 
+  it('a task accepts bespoke lenses published on its own project and rejects foreign ones', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'projects/knip'), {
+        name: 'knip', free: true,
+        lenses: [{ id: 'p:invariants', name: 'Invariants' }],
+        lens_ids: ['p:invariants'],
+      });
+    });
+    const tasks = collection(owner(), 'tasks');
+    await assertSucceeds(addDoc(tasks, task({ project: 'knip', ideate: { lenses: ['p:invariants'], max: 5 } })));
+    await assertSucceeds(addDoc(tasks, task({ project: 'knip', ideate: { lenses: ['p:invariants', 'reuse'], max: 3 } })));
+    await assertFails(addDoc(tasks, task({ project: 'knip', ideate: { lenses: ['p:other'], max: 5 } })));
+    await assertFails(addDoc(tasks, task({ project: 'hamta', ideate: { lenses: ['p:invariants'], max: 5 } })));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { ideate: { lenses: ['p:invariants', 'reuse'], max: 5 } }));
+    await assertFails(updateDoc(doc(owner(), 'tasks/queued'), { project: 'hamta' }));
+    await assertSucceeds(updateDoc(doc(owner(), 'tasks/queued'), { project: 'hamta', ideate: { lenses: ['reuse'], max: 5 } }));
+  });
+
   it('a task carries the phone\'s order', async () => {
     await assertSucceeds(addDoc(collection(owner(), 'tasks'), task({ rank: 1763100000000 })));
   });

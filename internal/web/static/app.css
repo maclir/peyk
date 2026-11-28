@@ -1,6 +1,7 @@
 :root {
   --bg: #f5f6f8; --card: #ffffff; --paper: #eef0f4; --ink: #18212e; --muted: #5b6778; --line: #e1e5ec; --line-strong: #d5dbe4; --accent: #2f54c8; --accent-soft: #eef2fd;
   --ok: #1f7a4a; --ok-soft: #dcf1e5; --warn: #9a5800; --warn-soft: #fbecd3;
+  --warn-ring: rgba(154, 88, 0, 0.30); --warn-tray: rgba(154, 88, 0, 0.08);
   --bad: #b4342a; --bad-soft: #f8e0dd; --run: #2f54c8; --run-soft: #e3e9fb; --none: #9aa3b2;
   --design: #8a3fb8; --design-soft: #f3e8fa; --any: #b85a2a; --any-soft: #fbeadf;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -9,6 +10,7 @@
   :root {
     --bg: #131516; --card: #1b2029; --paper: #242a35; --ink: #e4e9f1; --muted: #9aa6b8; --line: #2c3545; --line-strong: #3a4558; --accent: #8aa6ff; --accent-soft: #25304d;
     --ok: #5fd394; --ok-soft: #173527; --warn: #f0b35a; --warn-soft: #3a2b14;
+    --warn-ring: rgba(240, 179, 90, 0.38); --warn-tray: rgba(240, 179, 90, 0.10);
     --bad: #ff8a7f; --bad-soft: #3d1e1b; --run: #8aa6ff; --run-soft: #25304d; --none: #6b7686;
     --design: #d29bf5; --design-soft: #35234a; --any: #f2a47a; --any-soft: #3e2618;
   }
@@ -92,6 +94,7 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 
 /* A project's own mark, or its initial on a tint. */
 .face { flex: none; display: inline-flex; align-items: center; justify-content: center; object-fit: contain; border-radius: 22%; font-weight: 700; line-height: 1; }
+.face.tiny { width: 15px; height: 15px; font-size: 0.5rem; border-radius: 4px; }
 .face.xs { width: 22px; height: 22px; font-size: 0.7rem; }
 .face.sm { width: 24px; height: 24px; font-size: 0.75rem; }
 .face.md { width: 30px; height: 30px; font-size: 0.85rem; }
@@ -542,9 +545,14 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 
 /* Ideation: the composer's lenses, a task's tag, and the ideas a run filed. */
 .ideatepanel { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 4px; }
+.ideatepanel .proj-lenses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 14px; background: var(--warn-tray); border: 1px solid var(--warn-ring); }
+.ideatepanel .proj-mark { display: inline-flex; align-items: center; gap: 5px; padding: 0 4px 0 2px; font-size: 0.74rem; font-weight: 650; color: var(--warn); }
+.fchip.proj { height: 30px; padding: 0 11px; background: var(--card); border-color: var(--warn-ring); color: var(--ink); font-weight: 550; }
+.fchip.proj[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--bg); font-weight: 650; }
 .ideatepanel .lenses, .ideatepanel .limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ideatepanel .limits > span { font-size: 0.82rem; color: var(--muted); }
 .tag.ideas { background: var(--warn-soft); color: var(--warn); }
+.tag.ideas.proj { background: var(--warn-tray); color: var(--warn); border: 1px solid var(--warn-ring); padding: 1px 8px 1px 4px; }
 .task.idea .ititle { font-weight: 650; }
 .iwhy { font-size: 0.88rem; line-height: 1.45; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .irefs { display: flex; flex-wrap: wrap; gap: 4px; }

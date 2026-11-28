@@ -480,10 +480,14 @@ export const LENSES = [
   ["performance", "Performance & cost"], ["accessibility", "Accessibility"], ["ui", "UI polish"], ["show", "Show, don't tell"],
 ];
 export const IDEA_LIMITS = [3, 5, 10];
-export const DEFAULT_IDEATE = { lenses: ["reuse", "experience"], max: 5 };
+export const DEFAULT_IDEATE = { lenses: [], max: 5 };
 
-export function lensName(id) {
-  return LENSES.find(([l]) => l === id)?.[1] ?? id;
+export function isProjectLens(id) {
+  return String(id ?? "").startsWith("p:");
+}
+
+export function lensName(id, projectLenses = null, savedName = "") {
+  return savedName || projectLenses?.find((l) => l.id === id)?.name || LENSES.find(([l]) => l === id)?.[1] || id;
 }
 
 // An ideation task's text is its focus; with none, it looks everywhere.
@@ -491,11 +495,25 @@ export function ideateText(focus) {
   return focus.trim() || "Look across the whole repository.";
 }
 
-// A lens is turned on or off; the last one stays, since a run needs one.
-export function toggleLens(ask, id) {
+// A lens is turned on or off; selected lenses stay ordered with project lenses
+// first, then built-in lenses in their offered order.
+export function toggleLens(ask, id, projectLenses = []) {
   const on = ask.lenses.includes(id);
-  if (on && ask.lenses.length === 1) return ask;
-  const lenses = on ? ask.lenses.filter((l) => l !== id) : LENSES.map(([l]) => l).filter((l) => l === id || ask.lenses.includes(l));
+  if (on) return { ...ask, lenses: ask.lenses.filter((l) => l !== id) };
+  const order = [...(projectLenses ?? []).map((l) => l.id), ...LENSES.map(([l]) => l)];
+  const want = new Set([...ask.lenses, id]);
+  return { ...ask, lenses: order.filter((l) => want.has(l)) };
+}
+
+// pruneProjectLenses drops project lenses not defined by projectLenses while
+// preserving built-in selections and project-first ordering.
+export function pruneProjectLenses(ask, projectLenses = []) {
+  if (!ask) return ask;
+  const order = [...(projectLenses ?? []).map((l) => l.id), ...LENSES.map(([l]) => l)];
+  const valid = new Set(order);
+  const kept = new Set(ask.lenses.filter((id) => valid.has(id)));
+  const lenses = order.filter((id) => kept.has(id));
+  if (lenses.length === ask.lenses.length && lenses.every((id, i) => id === ask.lenses[i])) return ask;
   return { ...ask, lenses };
 }
 

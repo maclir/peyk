@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/session"
 )
 
@@ -34,6 +35,8 @@ type Collector struct {
 	Prototypes *Prototypes
 	// Logos, when set, finds each project's own mark.
 	Logos *Logos
+	// ProjectLenses, when set, reads each project's .peyk/lenses.md.
+	ProjectLenses *ProjectLenses
 }
 
 // Logo returns a project directory's mark as a data URI, or "".
@@ -42,6 +45,14 @@ func (c Collector) Logo(dir string) string {
 		return ""
 	}
 	return c.Logos.Find(dir)
+}
+
+// Lenses returns the bespoke ideation lenses defined in dir/.peyk/lenses.md.
+func (c Collector) Lenses(dir string) []idea.Lens {
+	if c.ProjectLenses == nil {
+		return nil
+	}
+	return c.ProjectLenses.Find(dir)
 }
 
 // Snapshot describes one aoe session.

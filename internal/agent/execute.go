@@ -119,7 +119,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			if err != nil {
 				return err
 			}
-			if text, err = idea.Prompt(p.Text, *p.Ideate, known); err != nil {
+			if text, err = idea.Prompt(p.Text, *p.Ideate, known, a.projectLenses(proj)...); err != nil {
 				return err
 			}
 		}

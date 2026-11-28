@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -21,6 +22,118 @@ type Lens struct {
 	ID   string
 	Name string
 	Ask  string
+}
+
+// ProjectLens is the public summary of a project-defined lens published to
+// Firestore on projects/{name}. The Ask instruction stays on the laptop.
+type ProjectLens struct {
+	ID   string `firestore:"id" json:"id"`
+	Name string `firestore:"name" json:"name"`
+}
+
+const (
+	// ProjectLensPrefix namespaces repository-defined lens ids so they never
+	// collide with built-in lenses and stay identifiable on filed ideas.
+	ProjectLensPrefix = "p:"
+	// MaxProjectLenses bounds how many bespoke lenses one repository may define.
+	MaxProjectLenses = 12
+
+	maxLensName = 40
+	maxLensSlug = 32
+	maxLensAsk  = 1200
+)
+
+var customSlugRe = regexp.MustCompile(`\s+\{#([a-zA-Z0-9-]+)\}\s*$`)
+
+// ParseLenses parses a repository's .peyk/lenses.md file. Each "## Name"
+// heading (with optional trailing "{#slug}") defines one lens; lines beneath
+// it until the next "## " heading form its Ask instruction.
+func ParseLenses(raw string) []Lens {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	var out []Lens
+	seen := map[string]bool{}
+	var curName, curSlug string
+	var body []string
+	active := false
+
+	flush := func() {
+		if !active {
+			return
+		}
+		active = false
+		ask := clip(strings.TrimSpace(strings.Join(body, "\n")), maxLensAsk)
+		name := clip(oneLine(curName), maxLensName)
+		if curSlug == "" || name == "" || ask == "" {
+			return
+		}
+		id := ProjectLensPrefix + curSlug
+		if seen[id] || len(out) >= MaxProjectLenses {
+			return
+		}
+		seen[id] = true
+		out = append(out, Lens{ID: id, Name: name, Ask: ask})
+	}
+
+	for _, line := range lines {
+		if heading, ok := strings.CutPrefix(line, "## "); ok {
+			flush()
+			rawHeading := strings.TrimSpace(heading)
+			custom := ""
+			if m := customSlugRe.FindStringSubmatchIndex(rawHeading); m != nil {
+				custom = slugify(rawHeading[m[2]:m[3]])
+				rawHeading = strings.TrimSpace(rawHeading[:m[0]])
+			}
+			curName = rawHeading
+			if custom != "" {
+				curSlug = custom
+			} else {
+				curSlug = slugify(rawHeading)
+			}
+			body = nil
+			active = true
+			continue
+		}
+		if active {
+			body = append(body, line)
+		}
+	}
+	flush()
+	return out
+}
+
+// ProjectLensSummary turns parsed repository lenses into the public list and
+// flat id slice published on projects/{name}.
+func ProjectLensSummary(lenses []Lens) ([]ProjectLens, []string) {
+	if len(lenses) == 0 {
+		return nil, nil
+	}
+	summary := make([]ProjectLens, len(lenses))
+	ids := make([]string, len(lenses))
+	for i, l := range lenses {
+		summary[i] = ProjectLens{ID: l.ID, Name: l.Name}
+		ids[i] = l.ID
+	}
+	return summary, ids
+}
+
+func slugify(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(r)
+			if b.Len() >= maxLensSlug {
+				break
+			}
+		} else {
+			dash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 var Lenses = []Lens{
@@ -37,7 +150,12 @@ var Lenses = []Lens{
 	{"show", "Show, don't tell", "labels, hints, notes, titles or messages that explain what a control, icon, layout or state could show; first propose removing the text and letting an icon, shape, colour, position or state carry the meaning, and only shorten text the UI cannot replace"},
 }
 
-func lens(id string) (Lens, bool) {
+func findLens(id string, extra []Lens) (Lens, bool) {
+	for _, l := range extra {
+		if l.ID == id {
+			return l, true
+		}
+	}
 	for _, l := range Lenses {
 		if l.ID == id {
 			return l, true
@@ -55,12 +173,12 @@ type Ask struct {
 	Max    int      `firestore:"max" json:"max"`
 }
 
-func (a Ask) check() error {
+func (a Ask) check(extra []Lens) error {
 	if len(a.Lenses) == 0 {
 		return errors.New("ideation needs at least one lens")
 	}
 	for _, id := range a.Lenses {
-		if _, ok := lens(id); !ok {
+		if _, ok := findLens(id, extra); !ok {
 			return fmt.Errorf("no lens %q", id)
 		}
 	}
@@ -84,11 +202,14 @@ const (
 type Idea struct {
 	Project string `firestore:"project"`
 	// Task is the ideation task that found it.
-	Task  string   `firestore:"task"`
-	Lens  string   `firestore:"lens"`
-	Title string   `firestore:"title"`
-	Why   string   `firestore:"why"`
-	Refs  []string `firestore:"refs"`
+	Task string `firestore:"task"`
+	Lens string `firestore:"lens"`
+	// LensName keeps the display label the idea was filed under so project
+	// lenses stay readable if .peyk/lenses.md later renames or removes them.
+	LensName string   `firestore:"lens_name,omitempty"`
+	Title    string   `firestore:"title"`
+	Why      string   `firestore:"why"`
+	Refs     []string `firestore:"refs"`
 	// Prompt is the task text the idea becomes in the inbox.
 	Prompt    string    `firestore:"prompt"`
 	Status    string    `firestore:"status"`
@@ -116,14 +237,15 @@ const maxKnown = 60
 
 // Prompt turns a task's text into the instruction for an ideation run. known
 // are the project's earlier ideas, which the run must not propose again.
-func Prompt(text string, ask Ask, known []Idea) (string, error) {
-	if err := ask.check(); err != nil {
+// extra holds the project's own lenses from .peyk/lenses.md.
+func Prompt(text string, ask Ask, known []Idea, extra ...Lens) (string, error) {
+	if err := ask.check(extra); err != nil {
 		return "", err
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\nThis is an ideation task, not a code change. Read the repository and find at most %d improvements through these lenses:\n", text, ask.Max)
 	for _, id := range ask.Lenses {
-		l, _ := lens(id)
+		l, _ := findLens(id, extra)
 		fmt.Fprintf(&b, "- %s (%s): %s\n", l.Name, l.ID, l.Ask)
 	}
 	b.WriteString("\nGround every idea in code you read and cite its files and lines. Fewer strong ideas beat many weak ones; reporting fewer than the limit, or none, is fine. Do not edit, test or commit anything.\n")
@@ -190,8 +312,9 @@ const (
 
 // Accept keeps the drafts a run may report for ask and turns them into
 // ideas: a lens it was asked for, a title and a task, a title not already
-// known, and no more than its limit.
-func Accept(drafts []Draft, ask Ask, known []Idea) []Idea {
+// known, and no more than its limit. extra holds the project's own lenses so
+// each filed idea records its display name.
+func Accept(drafts []Draft, ask Ask, known []Idea, extra ...Lens) []Idea {
 	seen := map[string]bool{}
 	for _, k := range known {
 		seen[key(k.Title)] = true
@@ -212,7 +335,8 @@ func Accept(drafts []Draft, ask Ask, known []Idea) []Idea {
 				refs = append(refs, r)
 			}
 		}
-		out = append(out, Idea{Lens: d.Lens, Title: title, Why: clip(strings.TrimSpace(d.Why), maxWhy), Refs: refs, Prompt: task, Status: Open})
+		l, _ := findLens(d.Lens, extra)
+		out = append(out, Idea{Lens: d.Lens, LensName: l.Name, Title: title, Why: clip(strings.TrimSpace(d.Why), maxWhy), Refs: refs, Prompt: task, Status: Open})
 	}
 	return out
 }

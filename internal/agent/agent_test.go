@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maclir/peyk/internal/idea"
 	"github.com/maclir/peyk/internal/notify"
 	"github.com/maclir/peyk/internal/session"
 	"github.com/maclir/peyk/internal/store"
@@ -28,6 +29,13 @@ type fakeCollector struct {
 	prompts  map[string]*session.Message
 	models   map[string]string
 	progress map[string]*session.Progress
+	lenses   map[string][]idea.Lens
+}
+
+func (f *fakeCollector) Lenses(dir string) []idea.Lens {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]idea.Lens(nil), f.lenses[dir]...)
 }
 
 func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message, string) {

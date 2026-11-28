@@ -68,6 +68,10 @@ service cloud.firestore {
       return !('prototype' in data) || data.prototype in ['html', 'design', 'any'];
     }
 
+    function builtInLenses() {
+      return ['reuse', 'experience', 'architecture', 'security', 'features', 'simplify', 'tests', 'performance', 'accessibility', 'ui', 'show'];
+    }
+
     // An ideation task's lenses and limit, which the laptop checks again.
     // A task asks for a prototype or for ideas, not both.
     function validIdeate(data) {
@@ -76,8 +80,8 @@ service cloud.firestore {
           && data.ideate is map
           && data.ideate.keys().hasOnly(['lenses', 'max'])
           && data.ideate.lenses is list
-          && data.ideate.lenses.size() >= 1 && data.ideate.lenses.size() <= 11
-          && data.ideate.lenses.hasOnly(['reuse', 'experience', 'architecture', 'security', 'features', 'simplify', 'tests', 'performance', 'accessibility', 'ui', 'show'])
+          && data.ideate.lenses.size() >= 1 && data.ideate.lenses.size() <= 23
+          && data.ideate.lenses.hasOnly(builtInLenses().concat(get(/databases/$(database)/documents/projects/$(data.project)).data.get('lens_ids', [])))
           && data.ideate.max in [3, 5, 10]);
     }
 

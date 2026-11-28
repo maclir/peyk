@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, cardProgress, ciStatus, actionsLeft, hasProgress, laptopOnline, mergeReply, progressLine, pushLabel, quickAction, replyFields, shareSessions, sortSessions, tags, toolAction, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, cardProgress, ciStatus, actionsLeft, hasProgress, laptopOnline, mergeReply, progressLine, pushLabel, quickAction, replyFields, shareSessions, sortSessions, tags, toolAction, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, DEFAULT_IDEATE, isProjectLens, ideateText, toggleLens, pruneProjectLenses, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -536,15 +536,33 @@ describe('ideas', () => {
     expect(ideateText(' the worker page ')).toBe('the worker page');
   });
 
-  it('lenses turn on in the offered order and the last one stays on', () => {
-    const ask = { lenses: ['experience'], max: 5 };
-    expect(toggleLens(ask, 'reuse').lenses).toEqual(['reuse', 'experience']);
-    expect(toggleLens(ask, 'experience')).toBe(ask);
+  it('defaults to no lenses selected and orders project lenses ahead of built-ins', () => {
+    const projectLenses = [{ id: 'p:invariants', name: 'Invariants' }, { id: 'p:offline', name: 'Offline' }];
+    expect(DEFAULT_IDEATE).toEqual({ lenses: [], max: 5 });
+    const one = toggleLens(DEFAULT_IDEATE, 'experience', projectLenses);
+    expect(one.lenses).toEqual(['experience']);
+    expect(toggleLens(one, 'experience', projectLenses).lenses).toEqual([]);
+    const two = toggleLens(one, 'p:invariants', projectLenses);
+    expect(two.lenses).toEqual(['p:invariants', 'experience']);
+    const three = toggleLens(two, 'reuse', projectLenses);
+    expect(three.lenses).toEqual(['p:invariants', 'reuse', 'experience']);
     expect(toggleLens({ lenses: ['reuse', 'experience'], max: 3 }, 'reuse')).toEqual({ lenses: ['experience'], max: 3 });
   });
 
-  it('names a lens, or shows an id it does not know', () => {
+  it('prunes foreign project lenses when switching projects while keeping built-ins', () => {
+    const ask = { lenses: ['p:invariants', 'reuse'], max: 5 };
+    expect(pruneProjectLenses(ask, [])).toEqual({ lenses: ['reuse'], max: 5 });
+    expect(pruneProjectLenses(ask, [{ id: 'p:invariants', name: 'Invariants' }])).toBe(ask);
+    expect(pruneProjectLenses({ lenses: ['p:invariants'], max: 5 }, [])).toEqual({ lenses: [], max: 5 });
+  });
+
+  it('names a lens from saved name, project lenses, built-ins, or raw id', () => {
+    const projectLenses = [{ id: 'p:invariants', name: 'Invariants' }];
+    expect(isProjectLens('p:invariants')).toBe(true);
+    expect(isProjectLens('reuse')).toBe(false);
     expect(lensName('experience')).toBe('One experience');
+    expect(lensName('p:invariants', projectLenses)).toBe('Invariants');
+    expect(lensName('p:retired', projectLenses, 'Old lens')).toBe('Old lens');
     expect(lensName('vibes')).toBe('vibes');
     expect(LENSES.length).toBe(11);
   });

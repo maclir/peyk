@@ -93,11 +93,62 @@ func TestFinishedIdeationTaskFilesTheIdeasItsRunReported(t *testing.T) {
 		t.Fatal("no idea filed")
 	}
 	got := v.(idea.Idea)
-	if got.Project != "knip" || got.Task != "t1" || got.Title != "Two formatters" || got.Prompt != "Merge them" || got.Status != idea.Open || got.CreatedAt.IsZero() {
+	if got.Project != "knip" || got.Task != "t1" || got.LensName != "Reuse" || got.Title != "Two formatters" || got.Prompt != "Merge them" || got.Status != idea.Open || got.CreatedAt.IsZero() {
 		t.Fatalf("idea = %+v", got)
 	}
 	if _, ok := mem.Get(store.Ideas, "t1-2"); ok {
 		t.Fatal("filed an idea the run was not asked for or already knew")
+	}
+}
+
+func TestProjectLensesPublishDispatchAndSaveLensNameOnFiledIdeas(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, acts := commandAgent(t, ph)
+	fc := a.Collect.(*fakeCollector)
+	fc.lenses = map[string][]idea.Lens{
+		"/c/knip": {{ID: "p:invariants", Name: "Invariants", Ask: "Check project invariants."}},
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	projDoc, ok := mem.Get(store.Projects, "knip")
+	if !ok {
+		t.Fatal("knip project not published")
+	}
+	proj := projDoc.(session.Project)
+	if len(proj.Lenses) != 1 || proj.Lenses[0].ID != "p:invariants" || proj.Lenses[0].Name != "Invariants" || len(proj.LensIDs) != 1 || proj.LensIDs[0] != "p:invariants" {
+		t.Fatalf("published project = %+v", proj)
+	}
+
+	ask := &idea.Ask{Lenses: []string{"p:invariants", "reuse"}, Max: 3}
+	_ = mem.Put(ctx, store.Tasks, "t1", store.Task{Project: "knip", Text: "Look across the whole repository.", Status: store.TaskQueued, Ideate: ask})
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "Look across the whole repository.", Ideate: ask}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c1"); res["status"] != command.Done {
+		t.Fatalf("dispatch result = %v", res)
+	}
+	sent := strings.Join(acts.calls, "|")
+	if !strings.Contains(sent, "- Invariants (p:invariants): Check project invariants.\n") {
+		t.Fatalf("prompt lacks project lens:\n%s", sent)
+	}
+
+	later := a.Now().Add(time.Hour)
+	fc.set(session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, Message: &session.Message{At: later},
+		Ideas: []idea.Draft{
+			{Lens: "p:invariants", Title: "Ticker in watcher", Why: "Breaks event-only rule", Refs: []string{"agent.go:10"}, Task: "Remove ticker"},
+		}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := mem.Get(store.Ideas, "t1-1")
+	if !ok {
+		t.Fatal("no project-lens idea filed")
+	}
+	got := v.(idea.Idea)
+	if got.Lens != "p:invariants" || got.LensName != "Invariants" || got.Title != "Ticker in watcher" {
+		t.Fatalf("idea = %+v", got)
 	}
 }
 

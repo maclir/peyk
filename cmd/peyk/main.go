@@ -132,11 +132,12 @@ func collector() laptop.Collector {
 		ClaudeDirs:     claudeDirs(),
 		AntigravityDir: laptop.AntigravityDir(),
 		// aoe's hook writes under /tmp itself, not under $TMPDIR.
-		AoeHooks:   fmt.Sprintf("/tmp/aoe-hooks-%d", os.Getuid()),
-		Root:       projectsRoot(),
-		Now:        time.Now,
-		Prototypes: &laptop.Prototypes{Path: prototypesPath()},
-		Logos:      &laptop.Logos{Now: time.Now, TTL: 10 * time.Minute},
+		AoeHooks:      fmt.Sprintf("/tmp/aoe-hooks-%d", os.Getuid()),
+		Root:          projectsRoot(),
+		Now:           time.Now,
+		Prototypes:    &laptop.Prototypes{Path: prototypesPath()},
+		Logos:         &laptop.Logos{Now: time.Now, TTL: 10 * time.Minute},
+		ProjectLenses: &laptop.ProjectLenses{},
 	}
 }
 

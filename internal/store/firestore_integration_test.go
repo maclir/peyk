@@ -316,13 +316,33 @@ func TestFirestoreListsAProjectsIdeasOldestFirst(t *testing.T) {
 	}
 	defer s.Close()
 	at := time.Date(2026, 11, 26, 9, 0, 0, 0, time.UTC)
-	ask := &idea.Ask{Lenses: []string{"reuse"}, Max: 3}
+	ask := &idea.Ask{Lenses: []string{"p:invariants", "reuse"}, Max: 3}
+	if err := s.Put(ctx, Projects, "it-ideas", session.Project{
+		Name:    "it-ideas",
+		Free:    true,
+		Lenses:  []idea.ProjectLens{{ID: "p:invariants", Name: "Invariants"}},
+		LensIDs: []string{"p:invariants"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Delete(ctx, Projects, "it-ideas")
+	pdoc, err := s.client.Collection(Projects).Doc("it-ideas").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotProj session.Project
+	if err := pdoc.DataTo(&gotProj); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotProj.Lenses) != 1 || gotProj.Lenses[0].ID != "p:invariants" || gotProj.Lenses[0].Name != "Invariants" || len(gotProj.LensIDs) != 1 || gotProj.LensIDs[0] != "p:invariants" {
+		t.Fatalf("project = %+v", gotProj)
+	}
 	if err := s.Put(ctx, Tasks, "it-ideate", Task{Project: "it-ideas", Text: "x", Status: TaskDispatched, Ideate: ask}); err != nil {
 		t.Fatal(err)
 	}
 	for id, i := range map[string]idea.Idea{
-		"it-ideate-2": {Project: "it-ideas", Title: "Newer", Status: idea.Open, CreatedAt: at.Add(time.Minute)},
-		"it-ideate-1": {Project: "it-ideas", Title: "Older", Status: idea.Open, CreatedAt: at, Refs: []string{"a.go:1"}},
+		"it-ideate-2": {Project: "it-ideas", Lens: "p:invariants", LensName: "Invariants", Title: "Newer", Status: idea.Open, CreatedAt: at.Add(time.Minute)},
+		"it-ideate-1": {Project: "it-ideas", Lens: "reuse", LensName: "Reuse", Title: "Older", Status: idea.Open, CreatedAt: at, Refs: []string{"a.go:1"}},
 		"it-other-1":  {Project: "it-elsewhere", Title: "Other", Status: idea.Open, CreatedAt: at},
 	} {
 		if err := s.Put(ctx, Ideas, id, i); err != nil {
@@ -336,14 +356,14 @@ func TestFirestoreListsAProjectsIdeasOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Title != "Older" || got[0].Status != idea.Dismissed || got[0].Note != "fine" || got[0].Refs[0] != "a.go:1" || got[1].Title != "Newer" {
+	if len(got) != 2 || got[0].Title != "Older" || got[0].LensName != "Reuse" || got[0].Status != idea.Dismissed || got[0].Note != "fine" || got[0].Refs[0] != "a.go:1" || got[1].Title != "Newer" || got[1].LensName != "Invariants" {
 		t.Fatalf("ideas = %+v", got)
 	}
 	tasks, err := s.DispatchedTasks(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tk := tasks["it-ideate"]; tk.Ideate == nil || tk.Ideate.Max != 3 || tk.Ideate.Lenses[0] != "reuse" {
+	if tk := tasks["it-ideate"]; tk.Ideate == nil || tk.Ideate.Max != 3 || tk.Ideate.Lenses[0] != "p:invariants" {
 		t.Fatalf("task = %+v", tk)
 	}
 }

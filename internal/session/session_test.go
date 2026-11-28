@@ -1,6 +1,7 @@
 package session
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func TestProjectsFromSessionsAndRepositories(t *testing.T) {
 		t.Fatalf("got %d projects: %+v", len(got), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("project %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}

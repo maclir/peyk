@@ -37,8 +37,8 @@ func TestPhoneAndRulesNameTheLaptopsLenses(t *testing.T) {
 	for i, id := range want {
 		quoted[i] = "'" + id + "'"
 	}
-	if !strings.Contains(string(rules), "lenses.hasOnly(["+strings.Join(quoted, ", ")+"])") {
-		t.Errorf("firestore.rules does not list the lenses %v", want)
+	if !strings.Contains(string(rules), "return ["+strings.Join(quoted, ", ")+"];") {
+		t.Errorf("firestore.rules does not list the built-in lenses %v", want)
 	}
 	if !strings.Contains(string(rules), "data.ideate.max in [3, 5, 10]") || len(Limits) != 3 || Limits[0] != 3 || Limits[1] != 5 || Limits[2] != 10 {
 		t.Errorf("firestore.rules and Limits disagree on the limits")

@@ -125,4 +125,83 @@ func TestAcceptClipsLongFields(t *testing.T) {
 	if n := len([]rune(got[0].Title)); n != maxTitle {
 		t.Fatalf("title has %d runes", n)
 	}
+	if got[0].LensName != "Reuse" {
+		t.Fatalf("lens_name = %q, want Reuse", got[0].LensName)
+	}
+}
+
+func TestParseLensesReadsHeadingsSlugsAndBounds(t *testing.T) {
+	raw := strings.Join([]string{
+		"# Ignored title",
+		"Intro text ignored.",
+		"",
+		"## Invariants",
+		"Violations of AGENTS.md invariants.",
+		"Second line of ask.",
+		"",
+		"## Phone ergonomics {#mobile-ux}",
+		"Tight touch targets.",
+		"",
+		"## Empty ask",
+		"",
+		"## Invariants",
+		"Duplicate slug ignored.",
+		"",
+		"## !!!",
+		"No slug characters.",
+	}, "\r\n")
+	got := ParseLenses(raw)
+	want := []Lens{
+		{ID: "p:invariants", Name: "Invariants", Ask: "Violations of AGENTS.md invariants.\nSecond line of ask."},
+		{ID: "p:mobile-ux", Name: "Phone ergonomics", Ask: "Tight touch targets."},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParseLenses = %+v, want %+v", got, want)
+	}
+	summary, ids := ProjectLensSummary(got)
+	wantSummary := []ProjectLens{{ID: "p:invariants", Name: "Invariants"}, {ID: "p:mobile-ux", Name: "Phone ergonomics"}}
+	if !reflect.DeepEqual(summary, wantSummary) || !reflect.DeepEqual(ids, []string{"p:invariants", "p:mobile-ux"}) {
+		t.Fatalf("summary = %+v, ids = %v", summary, ids)
+	}
+	if s, i := ProjectLensSummary(nil); s != nil || i != nil {
+		t.Fatalf("empty summary = %v, %v", s, i)
+	}
+
+	var many strings.Builder
+	for i := range MaxProjectLenses + 4 {
+		many.WriteString("## Lens ")
+		many.WriteString(strings.Repeat("a", i+1))
+		many.WriteString("\nBody.\n")
+	}
+	if capped := ParseLenses(many.String()); len(capped) != MaxProjectLenses {
+		t.Fatalf("len = %d, want %d", len(capped), MaxProjectLenses)
+	}
+}
+
+func TestPromptAndAcceptSupportProjectLensesAndSaveLensName(t *testing.T) {
+	extra := []Lens{{ID: "p:invariants", Name: "Invariants", Ask: "Check AGENTS.md invariants"}}
+	ask := Ask{Lenses: []string{"p:invariants", "reuse"}, Max: 3}
+	got, err := Prompt("Look across the whole repository.", ask, nil, extra...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Invariants (p:invariants): Check AGENTS.md invariants\n",
+		"- Reuse (reuse): ",
+		"lens is one of: p:invariants, reuse.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, got)
+		}
+	}
+	if _, err := Prompt("x", Ask{Lenses: []string{"p:missing"}, Max: 3}, nil, extra...); err == nil {
+		t.Fatal("expected error for undefined project lens")
+	}
+	accepted := Accept([]Draft{
+		{Lens: "p:invariants", Title: "Ticker fallback", Task: "Remove ticker"},
+		{Lens: "reuse", Title: "Shared helper", Task: "Merge helpers"},
+	}, ask, nil, extra...)
+	if len(accepted) != 2 || accepted[0].LensName != "Invariants" || accepted[1].LensName != "Reuse" {
+		t.Fatalf("accepted = %+v", accepted)
+	}
 }
