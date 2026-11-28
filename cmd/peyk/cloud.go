@@ -273,7 +273,12 @@ func runAgent(ctx context.Context) error {
 		PublishRequests: pubReqs, LatestPrototype: c.Prototypes.LatestHostedID, RecordPrototype: c.Prototypes.Record,
 		Seen: seen,
 		Commands: &agent.Commands{
-			Act:         actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig()},
+			Act: actions{
+				aoe:                 c.Aoe,
+				group:               env("PEYK_AOE_GROUP", "personal"),
+				claudeConfig:        claudeConfig(),
+				antigravitySettings: filepath.Join(c.AntigravityDir, "settings.json"),
+			},
 			Keys:        keyring().Load,
 			Origin:      o.String(),
 			RPID:        o.Hostname(),

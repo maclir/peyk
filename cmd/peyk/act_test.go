@@ -23,7 +23,13 @@ func TestSwapStartsFreshAndStopsPreviousSession(t *testing.T) {
 		}
 		return nil, nil
 	}
-	a := actions{aoe: laptop.Aoe{Profile: "personal", Run: run}, group: "personal", claudeConfig: filepath.Join(t.TempDir(), ".claude.json")}
+	agSettings := filepath.Join(t.TempDir(), "settings.json")
+	a := actions{
+		aoe:                 laptop.Aoe{Profile: "personal", Run: run},
+		group:               "personal",
+		claudeConfig:        filepath.Join(t.TempDir(), ".claude.json"),
+		antigravitySettings: agSettings,
+	}
 	s := session.Snapshot{ID: "old123456789", Title: "knip", Path: "/c/knip", AoeStatus: "idle", Transcript: session.Transcript{ID: "conv-1"}}
 
 	id, err := a.Swap(context.Background(), s, session.Antigravity, "gemini-4-neon-high")
@@ -32,6 +38,16 @@ func TestSwapStartsFreshAndStopsPreviousSession(t *testing.T) {
 	}
 	if id != "new-id" {
 		t.Fatalf("id = %q, want new-id", id)
+	}
+	b, err := os.ReadFile(agSettings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		TrustedWorkspaces []string `json:"trustedWorkspaces"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil || len(parsed.TrustedWorkspaces) != 1 || parsed.TrustedWorkspaces[0] != "/c/knip" {
+		t.Fatalf("antigravity settings did not trust /c/knip: %s", b)
 	}
 	want := []string{
 		"aoe -p personal session rename old123456789 -t knip~old12345",
@@ -91,7 +107,12 @@ func TestSwapRestoresOldTitleWhenAddFails(t *testing.T) {
 		}
 		return nil, nil
 	}
-	a := actions{aoe: laptop.Aoe{Profile: "personal", Run: run}, group: "personal", claudeConfig: filepath.Join(t.TempDir(), ".claude.json")}
+	a := actions{
+		aoe:                 laptop.Aoe{Profile: "personal", Run: run},
+		group:               "personal",
+		claudeConfig:        filepath.Join(t.TempDir(), ".claude.json"),
+		antigravitySettings: filepath.Join(t.TempDir(), "settings.json"),
+	}
 	s := session.Snapshot{ID: "old123456789", Title: "knip", Path: "/c/knip", AoeStatus: "idle"}
 
 	if _, err := a.Swap(context.Background(), s, session.Antigravity, "gemini-4-neon-high"); err == nil {

@@ -833,3 +833,48 @@ func TestWorkerKeepsItsModelAcrossClearSwitchAndMove(t *testing.T) {
 		t.Fatalf("after move: model = %q, want gemini-4-neon-high", got)
 	}
 }
+
+func TestDispatchedTaskFollowsContextSwapAndFinishesOnNewSession(t *testing.T) {
+	ctx := context.Background()
+	ph := newPhone(t)
+	a, mem, _ := commandAgent(t, ph)
+	sent := a.Now()
+	_ = mem.Put(ctx, store.Tasks, "t1", store.Task{Project: "dorna", Text: "Finish edit", Status: store.TaskDispatched, SessionID: "d", ConversationID: "old-conv", DispatchedAt: sent})
+	_ = mem.Put(ctx, store.Tasks, "t2", store.Task{Project: "knip", Text: "Other", Status: store.TaskDispatched, SessionID: "k", ConversationID: "now", DispatchedAt: sent})
+
+	knip := a.sessions["k"]
+	c := a.Collect.(*fakeCollector)
+	c.set(knip, session.Snapshot{ID: "swapped-d", Title: "dorna", Path: "/c/dorna", State: session.Dirty, Tool: session.Antigravity, Git: &session.Git{Dirty: 1}})
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Model, Session: "d", Text: "gemini-4-neon-high"}, sent)); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1"); got["session_id"] != "swapped-d" || got["conversation_id"] != "" {
+		t.Fatalf("t1 after context swap = %v", got)
+	}
+	if got := mem.Updated(store.Tasks, "t2"); got != nil {
+		t.Fatalf("unrelated task t2 updated: %v", got)
+	}
+
+	later := sent.Add(time.Hour)
+	c.set(knip, session.Snapshot{ID: "swapped-d", Title: "dorna", Path: "/c/dorna", State: session.Unpushed, Tool: session.Antigravity,
+		Transcript: session.Transcript{ID: "ag-conv"}, Message: &session.Message{At: later},
+		Git: &session.Git{Unpushed: 1, Last: &session.Commit{Hash: "abc1234", At: later}}})
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := mem.Updated(store.Tasks, "t1"); got["status"] != store.TaskDone || got["commit"] != "abc1234" || got["conversation_id"] != "ag-conv" {
+		t.Fatalf("t1 after finish = %v", got)
+	}
+
+	// A fresh swap leaves any prior dispatched task untouched.
+	_ = mem.Put(ctx, store.Tasks, "t3", store.Task{Project: "knip", Text: "Old", Status: store.TaskDispatched, SessionID: "k", ConversationID: "now", DispatchedAt: sent})
+	if err := a.execute(ctx, ph.command("c2", command.Payload{Type: command.Model, Session: "k", Text: "gemini-4-neon-high", Clear: true}, sent)); err != nil {
+		t.Fatal(err)
+	}
+	if res := mem.Updated(store.Commands, "c2"); res["status"] != command.Done {
+		t.Fatalf("c2 = %v", res)
+	}
+	if got := mem.Updated(store.Tasks, "t3"); got != nil {
+		t.Fatalf("fresh swap reattached t3: %v", got)
+	}
+}

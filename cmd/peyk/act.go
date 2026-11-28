@@ -15,6 +15,8 @@ type actions struct {
 	group string
 	// claudeConfig is Claude Code's global config, where folder trust is kept.
 	claudeConfig string
+	// antigravitySettings is Antigravity CLI's settings.json, where workspace trust is kept.
+	antigravitySettings string
 }
 
 func (a actions) Send(ctx context.Context, session, text string) error {
@@ -69,9 +71,14 @@ func (a actions) Push(ctx context.Context, dir string) error {
 // a context handoff. If the new session cannot be added, the old one keeps its
 // title and state.
 func (a actions) Swap(ctx context.Context, s session.Snapshot, tool, model string) (string, error) {
-	if tool == "" {
+	switch tool {
+	case "":
 		if err := laptop.Trust(a.claudeConfig, s.Path); err != nil {
 			return "", fmt.Errorf("trust %s for Claude Code: %w", s.Path, err)
+		}
+	case session.Antigravity:
+		if err := laptop.TrustAntigravity(a.antigravitySettings, s.Path); err != nil {
+			return "", fmt.Errorf("trust %s for Antigravity: %w", s.Path, err)
 		}
 	}
 	if err := a.aoe.Rename(ctx, s.ID, laptop.KeptTitle(s.ID, s.Title)); err != nil {

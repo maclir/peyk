@@ -404,7 +404,33 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 	if clear || s.Cleared {
 		return act.Start(ctx, id)
 	}
+	if err := a.reattachTasks(ctx, s.ID, id); err != nil {
+		return err
+	}
 	return act.Send(ctx, id, catchUp(s))
+}
+
+// reattachTasks points dispatched tasks carried across a tool swap at the new
+// session, clearing conversation_id so finishTasks records the new worker's
+// conversation once it finishes.
+func (a *Agent) reattachTasks(ctx context.Context, from, to string) error {
+	tr, ok := a.Store.(store.TaskReader)
+	if !ok {
+		return nil
+	}
+	tasks, err := tr.DispatchedTasks(ctx)
+	if err != nil {
+		return err
+	}
+	for id, t := range tasks {
+		if t.SessionID != from {
+			continue
+		}
+		if err := a.Store.Update(ctx, store.Tasks, id, map[string]any{"session_id": to, "conversation_id": ""}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // catchUp is the first prompt to a worker moved to another tool. It points
