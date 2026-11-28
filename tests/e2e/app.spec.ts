@@ -10,6 +10,7 @@ const AUTH = `http://127.0.0.1:9190`;
 const admin = { Authorization: 'Bearer owner' };
 const EMAIL = 'owner@example.com';
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+const PNG2 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
 
 type Value = string | number | boolean | Date | null | Value[] | { [k: string]: Value };
 
@@ -1267,31 +1268,61 @@ test.describe('signed in', () => {
     await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await expect(compose.getByLabel('Task description')).toHaveValue('Shared from Photos');
 
-    // The share is used once; a reload does not reopen it or re-attach the
-    // image, and keeps the shared text once as a draft.
+    // The share is used once; a reload does not reopen the share sheet or
+    // duplicate the image, and keeps the shared text and screenshot drafted.
     await page.reload();
     await expect(share).toBeHidden();
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     await expect(compose).toBeVisible();
-    await expect(compose.locator('form.add .thumb')).toHaveCount(0);
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await expect(page.locator('#task-text')).toHaveValue('Shared from Photos');
+
+    // Going back to another app and sharing a second screenshot appends to the
+    // drafted New task across the full /app/share navigation.
+    await page.evaluate((png) => {
+      const form = Object.assign(document.createElement('form'), { method: 'post', action: '/app/share', enctype: 'multipart/form-data' });
+      const input = Object.assign(document.createElement('input'), { type: 'file', name: 'images' });
+      const files = new DataTransfer();
+      files.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'shot2.png', { type: 'image/png' }));
+      input.files = files.files;
+      const text = Object.assign(document.createElement('input'), { type: 'hidden', name: 'text', value: 'Second shot' });
+      form.append(input, text);
+      document.body.append(form);
+      form.submit();
+    }, PNG2.toString('base64'));
+    await expect(share).toBeVisible();
+    await share.getByRole('button', { name: /New inbox task/ }).click();
+    await expect(compose).toBeVisible();
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(2);
+    await expect(page.locator('#task-text')).toHaveValue('Shared from Photos\nSecond shot');
+
+    // Removing thumbnails and clearing text removes the draft across reloads.
+    await compose.getByRole('button', { name: 'Remove image 1' }).click();
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
+    await page.reload();
+    await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
+    await compose.getByRole('button', { name: 'Remove image 1' }).click();
+    await expect(compose.locator('form.add .thumb')).toHaveCount(0);
     await page.locator('#task-text').fill('');
   });
 
   test("Android's share sheet attaches a screenshot to an ongoing session", async () => {
     await page.goto('/app/');
     await page.waitForFunction(() => navigator.serviceWorker.controller);
-    await page.evaluate((png) => {
+    const postShare = (buf: Buffer, text: string) => page.evaluate(({ png, text }) => {
       const form = Object.assign(document.createElement('form'), { method: 'post', action: '/app/share', enctype: 'multipart/form-data' });
       const input = Object.assign(document.createElement('input'), { type: 'file', name: 'images' });
       const files = new DataTransfer();
       files.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
       input.files = files.files;
-      const text = Object.assign(document.createElement('input'), { type: 'hidden', name: 'text', value: 'Check this layout' });
-      form.append(input, text);
+      const hidden = Object.assign(document.createElement('input'), { type: 'hidden', name: 'text', value: text });
+      form.append(input, hidden);
       document.body.append(form);
       form.submit();
-    }, PNG.toString('base64'));
+    }, { png: buf.toString('base64'), text });
+
+    await postShare(PNG, 'Check this layout');
     const share = page.getByRole('dialog', { name: 'Share to' });
     await expect(share).toBeVisible();
     await share.getByRole('group', { name: 'Ongoing sessions' }).getByRole('button', { name: /hamta/ }).click();
@@ -1302,12 +1333,22 @@ test.describe('signed in', () => {
     await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout');
 
     // Back returns directly to the board without reopening the share sheet,
-    // and returning keeps the shared text drafted until cleared.
+    // and sharing a second screenshot appends to the same session draft.
     await page.goBack();
     await expect(page).toHaveURL(/\/app\/$/);
     await expect(share).toBeHidden();
-    await page.locator('.card', { hasText: 'hamta' }).click();
-    await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout');
+    await postShare(PNG2, 'And this state');
+    await expect(share).toBeVisible();
+    await share.getByRole('group', { name: 'Ongoing sessions' }).getByRole('button', { name: /hamta/ }).click();
+    await expect(page).toHaveURL(/\/app\/#s-h$/);
+    await expect(reply.locator('.thumb img')).toHaveCount(2);
+    await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout\nAnd this state');
+
+    await page.reload();
+    await expect(reply.locator('.thumb img')).toHaveCount(2);
+    await reply.getByRole('button', { name: 'Remove image 1' }).click();
+    await reply.getByRole('button', { name: 'Remove image 1' }).click();
+    await expect(reply.locator('.thumb')).toHaveCount(0);
     await reply.getByRole('textbox', { name: 'Reply' }).fill('');
   });
 
@@ -2191,20 +2232,24 @@ test.describe('signed in', () => {
     await page.goto('/app/#s-k');
     await page.locator('#reply-k').fill('Add draft support');
 
-    // Type a new task and close the sheet without adding it.
+    // Type a new task with a screenshot and close the sheet without adding it.
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     const compose = page.getByRole('dialog', { name: 'New task' });
     await page.locator('#task-text').fill('Ship draft persistence');
+    await compose.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await compose.getByRole('button', { name: 'Close' }).click();
     await expect(compose).toBeHidden();
 
-    // Start editing a task and writing an idea dismissal note, then close the inbox.
+    // Start editing a task (with a new screenshot) and writing an idea dismissal note, then close the inbox.
     await page.goto('/app/#inbox');
     const inbox = page.getByRole('dialog', { name: 'Inbox' });
     const card = inbox.locator('.task:not(.idea)', { hasText: 'Original task' });
     await card.getByRole('button', { name: /More actions/ }).click();
     await card.getByRole('menuitem', { name: /Edit task/ }).click();
     await inbox.locator('#edit-draft-edit').fill('Original task with details');
+    await inbox.locator('form.composer.edit').getByLabel('Attach images').setInputFiles({ name: 'edit.png', mimeType: 'image/png', buffer: PNG2 });
+    await expect(inbox.locator('form.composer.edit .thumb img')).toHaveCount(1);
     const idea = inbox.locator('.task.idea', { hasText: 'Merge helpers' });
     await idea.getByRole('button', { name: /More actions/ }).click();
     await idea.getByRole('menuitem', { name: 'Dismiss' }).click();
@@ -2231,6 +2276,9 @@ test.describe('signed in', () => {
 
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     await expect(page.locator('#task-text')).toHaveValue('Ship draft persistence');
+    await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
+    await compose.getByRole('button', { name: 'Remove image 1' }).click();
+    await expect(compose.locator('form.add .thumb')).toHaveCount(0);
     await page.locator('#task-text').fill('');
     await compose.getByRole('button', { name: 'Close' }).click();
 
@@ -2238,10 +2286,12 @@ test.describe('signed in', () => {
     await card.getByRole('button', { name: /More actions/ }).click();
     await card.getByRole('menuitem', { name: /Edit task/ }).click();
     await expect(inbox.locator('#edit-draft-edit')).toHaveValue('Original task with details');
+    await expect(inbox.locator('form.composer.edit .thumb img')).toHaveCount(1);
     await inbox.locator('form.composer.edit').getByRole('button', { name: 'Cancel' }).click();
     await card.getByRole('button', { name: /More actions/ }).click();
     await card.getByRole('menuitem', { name: /Edit task/ }).click();
     await expect(inbox.locator('#edit-draft-edit')).toHaveValue('Original task');
+    await expect(inbox.locator('form.composer.edit .thumb')).toHaveCount(0);
     await inbox.locator('form.composer.edit').getByRole('button', { name: 'Cancel' }).click();
 
     await idea.getByRole('button', { name: /More actions/ }).click();

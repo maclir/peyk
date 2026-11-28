@@ -802,4 +802,96 @@ describe('drafts', () => {
     blocked.delete('add');
     expect(blocked.get('add')).toBeNull();
   });
+
+  function fakeImageBackend(limit = Infinity) {
+    const map = new Map<string, any>();
+    return {
+      map,
+      keys: async () => [...map.keys()],
+      getAll: async () => [...map.entries()],
+      put: async (k: string, v: any) => {
+        if (!map.has(k) && map.size >= limit) throw new DOMException('full', 'QuotaExceededError');
+        map.set(k, v);
+      },
+      delete: async (k: string) => { map.delete(k); },
+    };
+  }
+
+  it('persists local and stored draft images, strips URLs, and deletes empty entries', async () => {
+    const { createImageDraftStore } = await load();
+    const backend = fakeImageBackend();
+    let now = 5_000;
+    const store = createImageDraftStore(backend, () => now);
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    await store.set('add', [{ bytes, type: 'image/png', url: 'blob:ephemeral' }]);
+    await store.set('edit:t1', [{ id: 'abc' }, { bytes, type: 'image/jpeg', url: 'blob:ephemeral-2' }]);
+    const loaded = await store.loadAll();
+    expect(loaded.get('add')).toEqual([{ bytes, type: 'image/png' }]);
+    expect(loaded.get('edit:t1')).toEqual([{ id: 'abc' }, { bytes, type: 'image/jpeg' }]);
+
+    await store.set('add', []);
+    expect(backend.map.has('add')).toBe(false);
+
+    await store.set('edit:t1', [], { keepEmpty: true });
+    expect((await store.loadAll()).get('edit:t1')).toEqual([]);
+  });
+
+  it('expires, prunes, evicts on quota errors, and serializes image draft writes', async () => {
+    const { createImageDraftStore, MAX_DRAFT_AGE_MS, MAX_IMAGE_DRAFTS } = await load();
+    const backend = fakeImageBackend();
+    let now = 10_000;
+    const store = createImageDraftStore(backend, () => now);
+    const bytes = new Uint8Array([7, 8]);
+
+    backend.map.set('bad', { at: now, images: 'not-array' });
+    await store.set('stale', [{ bytes, type: 'image/png' }]);
+    now += MAX_DRAFT_AGE_MS + 1;
+    expect((await store.loadAll()).size).toBe(0);
+    expect(backend.map.size).toBe(0);
+
+    for (let i = 0; i < MAX_IMAGE_DRAFTS + 2; i++) {
+      now += 10;
+      await store.set(`k${i}`, [{ bytes, type: 'image/png' }]);
+    }
+    const afterPrune = await store.loadAll();
+    expect(afterPrune.has('k0')).toBe(false);
+    expect(afterPrune.has('k1')).toBe(false);
+    expect(afterPrune.has('k2')).toBe(true);
+    expect(afterPrune.has(`k${MAX_IMAGE_DRAFTS + 1}`)).toBe(true);
+
+    // Evicts oldest draft when storage quota is reached.
+    const tight = fakeImageBackend(2);
+    const tightStore = createImageDraftStore(tight, () => now);
+    await tightStore.set('a', [{ bytes, type: 'image/png' }]);
+    now += 10;
+    await tightStore.set('b', [{ bytes, type: 'image/png' }]);
+    now += 10;
+    await tightStore.set('c', [{ bytes, type: 'image/png' }]);
+    const afterEvict = await tightStore.loadAll();
+    expect([...afterEvict.keys()].sort()).toEqual(['b', 'c']);
+
+    // An earlier slow set never overwrites a subsequent delete.
+    let releasePut!: () => void;
+    let markStarted!: () => void;
+    const putStarted = new Promise<void>((r) => { markStarted = r; });
+    const slowBackend = fakeImageBackend();
+    const origPut = slowBackend.put;
+    let blockFirst = true;
+    slowBackend.put = async (k: string, v: any) => {
+      if (blockFirst) {
+        blockFirst = false;
+        markStarted();
+        await new Promise<void>((r) => { releasePut = r; });
+      }
+      return origPut(k, v);
+    };
+    const ordered = createImageDraftStore(slowBackend, () => now);
+    const pendingSet = ordered.set('add', [{ bytes, type: 'image/png' }]);
+    const pendingDel = ordered.delete('add');
+    await putStarted;
+    releasePut();
+    await Promise.all([pendingSet, pendingDel]);
+    expect((await ordered.loadAll()).has('add')).toBe(false);
+  });
 });

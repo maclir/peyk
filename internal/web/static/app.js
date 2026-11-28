@@ -1,6 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
 import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, cardProgress, currentTask, filterQueue, hasProgress, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, toolAction, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, isProjectLens, lensName, ideateText, toggleLens, pruneProjectLenses, openIdeas, ideaCount } from "./board.js";
-import { createDraftStore } from "./drafts.js";
+import { createDraftStore, createImageDraftStore } from "./drafts.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -245,6 +245,8 @@ async function start(cfg) {
     // published yet, by session id: { text, images, at, after }.
     delivered: new Map() };
   const textDrafts = createDraftStore();
+  const imageDrafts = createImageDraftStore();
+  let imageDraftsLoaded = null;
   let unsubscribe = [];
 
   const signIn = () =>
@@ -411,6 +413,7 @@ async function start(cfg) {
       return;
     }
     state.user = user;
+    await hydrateImageDrafts();
     listen();
     receiveShare().catch((err) => {
       openCompose(null, null);
@@ -645,6 +648,15 @@ async function start(cfg) {
     if (replyDraft != null) {
       textDrafts.delete(`reply:${id}`);
       if (textDrafts.get(`reply:${next.id}`) == null) textDrafts.set(`reply:${next.id}`, replyDraft);
+    }
+    const replyImages = state.drafts.get(`reply:${id}`);
+    if (replyImages?.length) {
+      state.drafts.delete(`reply:${id}`);
+      imageDrafts.delete(`reply:${id}`);
+      if (!draft(`reply:${next.id}`).length) {
+        state.drafts.set(`reply:${next.id}`, replyImages);
+        persistImageDraft(`reply:${next.id}`);
+      } else forgetImages(replyImages);
     }
     history.replaceState(history.state, "", `#s-${encodeURIComponent(next.id)}`);
   }
@@ -1227,6 +1239,7 @@ async function start(cfg) {
       text.value = "";
       textDrafts.delete(key);
       state.drafts.delete(key);
+      imageDrafts.delete(key);
       state.protos.delete(key);
       repaint();
       if (ask) {
@@ -1243,7 +1256,10 @@ async function start(cfg) {
           textDrafts.set(key, value);
           if (box) box.value = value;
         }
-        if (!draft(key).length) state.drafts.set(key, attaching);
+        if (!draft(key).length && attaching.length) {
+          state.drafts.set(key, attaching);
+          persistImageDraft(key);
+        }
         if (kind && !state.protos.has(key)) state.protos.set(key, kind);
         repaint();
         if (ask) {
@@ -1480,6 +1496,8 @@ async function start(cfg) {
       batch.delete(fs.doc(db, "tasks", t.id));
       for (const id of orphanedImages([...state.tasks, ...sharing], [t])) batch.delete(fs.doc(db, "attachments", id));
       await batch.commit();
+      textDrafts.delete(`edit:${t.id}`);
+      dropDraft(`edit:${t.id}`);
       for (const d of done.values()) d.tasks = d.tasks.filter((x) => x.id !== t.id);
       render();
     } catch (err) {
@@ -1615,8 +1633,36 @@ async function start(cfg) {
     return ids;
   }
 
-  // A composer's images: each is either still only in this page
-  // ({bytes, type, url}) or already stored ({id}).
+  // A composer's images: each is either still only on this device
+  // ({bytes, type, url}) or already stored ({id}). Local images are mirrored
+  // in IndexedDB so reloads and repeated Android shares keep them.
+  function hydrateImageDrafts() {
+    if (imageDraftsLoaded) return imageDraftsLoaded;
+    imageDraftsLoaded = imageDrafts.loadAll().then((loaded) => {
+      for (const [key, images] of loaded) {
+        if (state.drafts.get(key)?.length) continue;
+        state.drafts.set(key, images.map((img) => (img.bytes
+          ? { bytes: img.bytes, type: img.type, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) }
+          : { id: img.id })));
+      }
+    }).catch(() => {});
+    return imageDraftsLoaded;
+  }
+
+  function sameStoredImages(imgs, ids = []) {
+    return Boolean(imgs) && imgs.length === ids.length && imgs.every((img, i) => !img.bytes && img.id === ids[i]);
+  }
+
+  function persistImageDraft(key) {
+    const imgs = state.drafts.get(key) || [];
+    if (key.startsWith("edit:")) {
+      const task = state.tasks.find((t) => t.id === key.slice(5));
+      if (task && sameStoredImages(imgs, task.images)) return imageDrafts.delete(key);
+      return imageDrafts.set(key, imgs, { keepEmpty: true });
+    }
+    return imageDrafts.set(key, imgs);
+  }
+
   function draft(key) {
     if (!state.drafts.has(key)) state.drafts.set(key, []);
     return state.drafts.get(key);
@@ -1625,6 +1671,7 @@ async function start(cfg) {
   function dropDraft(key) {
     forgetImages(state.drafts.get(key) || []);
     state.drafts.delete(key);
+    imageDrafts.delete(key);
   }
 
   function forgetImages(images) {
@@ -1635,19 +1682,22 @@ async function start(cfg) {
     const imgs = draft(key);
     const room = MAX_IMAGES - imgs.length;
     if (files.length > room) attachNote(key, `At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
+    let added = false;
     for (const file of files.slice(0, Math.max(0, room))) {
       try {
         const img = await prepareImage(file);
         imgs.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
+        added = true;
       } catch (err) {
         attachNote(key, `Could not attach: ${err.message}`, "bad");
       }
     }
+    if (added) await persistImageDraft(key);
     render();
   }
 
   function appendPreparedImages(key, incoming) {
-    if (!incoming.length) return;
+    if (!incoming.length) return Promise.resolve();
     const imgs = draft(key);
     const room = Math.max(0, MAX_IMAGES - imgs.length);
     const kept = incoming.slice(0, room);
@@ -1657,6 +1707,7 @@ async function start(cfg) {
       forgetImages(dropped);
       attachNote(key, `At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
     }
+    return kept.length ? persistImageDraft(key) : Promise.resolve();
   }
 
   // A share from another app asks whether to start a new inbox task or attach
@@ -1709,7 +1760,7 @@ async function start(cfg) {
     render();
   }
 
-  function shareToNewTask() {
+  async function shareToNewTask() {
     const share = state.share;
     if (!share) return;
     state.share = null;
@@ -1728,13 +1779,13 @@ async function start(cfg) {
       compose.text.value = compose.text.value ? `${compose.text.value}\n${share.text}` : share.text;
       textDrafts.set("add", compose.text.value);
     }
-    appendPreparedImages("add", share.images);
+    await appendPreparedImages("add", share.images);
     if (share.note && !compose.alert.textContent) composeAlert(share.note.text, share.note.tone);
     render();
     compose.text.focus();
   }
 
-  function shareToSession(s) {
+  async function shareToSession(s) {
     const share = state.share;
     if (!share) return;
     state.share = null;
@@ -1747,7 +1798,7 @@ async function start(cfg) {
     // directly to the board.
     history.replaceState(null, "", `#s-${encodeURIComponent(s.id)}`);
     const key = `reply:${s.id}`;
-    appendPreparedImages(key, share.images);
+    await appendPreparedImages(key, share.images);
     if (share.note && !state.outcomes.has(`attach:${key}`)) attachNote(key, share.note.text, share.note.tone);
     render();
     const box = document.getElementById(`reply-${s.id}`);
@@ -1833,9 +1884,12 @@ async function start(cfg) {
     const url = img.url ?? storedImage(img.id);
     return h("span", { class: `thumb${url ? "" : " empty"}${url === "" ? " loading" : ""}` },
       url ? h("img", { src: url, alt: `Attached image ${i + 1}` }) : null,
-      h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: () => {
+      h("button", { type: "button", class: "icon", "aria-label": `Remove image ${i + 1}`, onclick: async () => {
         forgetImages([img]);
-        draft(key).splice(i, 1);
+        const imgs = draft(key);
+        const idx = imgs.indexOf(img);
+        if (idx !== -1) imgs.splice(idx, 1);
+        await persistImageDraft(key);
         render();
       } }, icon("x")),
     );
@@ -1873,12 +1927,14 @@ async function start(cfg) {
   }
 
   function startEdit(t) {
+    const key = `edit:${t.id}`;
     state.editing = t.id;
     state.editProject = undefined;
     state.menu = null;
-    dropDraft(`edit:${t.id}`);
-    state.drafts.set(`edit:${t.id}`, (t.images || []).map((id) => ({ id })));
-    t.prototype ? state.protos.set(`edit:${t.id}`, t.prototype) : state.protos.delete(`edit:${t.id}`);
+    if (!state.drafts.has(key)) {
+      state.drafts.set(key, (t.images || []).map((id) => ({ id })));
+    }
+    t.prototype ? state.protos.set(key, t.prototype) : state.protos.delete(key);
     render();
   }
 
@@ -2740,7 +2796,9 @@ async function start(cfg) {
     inboxSheet.scrim.hidden = true;
     Object.assign(state, { menu: null, sheetSent: null });
     if (state.editing && inboxSheet.body.contains(document.getElementById(`edit-${state.editing}`))) {
-      dropDraft(`edit:${state.editing}`);
+      const key = `edit:${state.editing}`;
+      const task = state.tasks.find((t) => t.id === state.editing);
+      if (sameStoredImages(state.drafts.get(key), task?.images)) state.drafts.delete(key);
       state.editing = null;
     }
     render();
@@ -2928,8 +2986,10 @@ async function start(cfg) {
       }
     }
     if (images.length) {
-      if (!draft(key).length) state.drafts.set(key, images);
-      else forgetImages(images);
+      if (!draft(key).length) {
+        state.drafts.set(key, images);
+        persistImageDraft(key);
+      } else forgetImages(images);
     }
   }
 
@@ -2973,6 +3033,7 @@ async function start(cfg) {
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
         state.drafts.delete(key);
+        await imageDrafts.delete(key);
         render();
         // The sent reply lands at the end of the conversation, under the composer.
         const sc = scrollHost();
