@@ -69,8 +69,9 @@ self.addEventListener("fetch", (event) => {
 });
 
 // The manifest's share target. Shared files never reach the server: they wait
-// here, in the database share.js reads, until a signed-in page attaches them
-// to a new task's draft. A newer share replaces one never opened.
+// here, in the database share.js reads, until a signed-in page asks whether
+// they go to a new task or an ongoing session. A newer share replaces one
+// never opened.
 const SHARE = "/app/share";
 
 async function keepShare(request) {
@@ -101,7 +102,7 @@ async function keepShare(request) {
   } catch (err) {
     await log("share failed", { error: String(err) });
   }
-  return Response.redirect("/app/#new", 303);
+  return Response.redirect("/app/", 303);
 }
 
 // Notifications from the laptop. The payload is encrypted to this browser's

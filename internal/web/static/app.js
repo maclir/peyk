@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -214,7 +214,7 @@ async function start(cfg) {
     // A composer's ideation ask by its key, and the last one made, which the next starts from.
     ideates: new Map(), lastIdeate: DEFAULT_IDEATE,
     // The idea whose dismissal note is being written.
-    dismissing: null, modelFor: null, modelFresh: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(),
+    dismissing: null, modelFor: null, modelFresh: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(), share: null,
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
     outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: false, factsOpen: false, menu: null, picking: false, pickFor: null, pickQuery: "",
@@ -542,9 +542,9 @@ async function start(cfg) {
     renderCompose();
     const modelFor = state.modelFor && shownWorker(state.modelFor);
     if (state.modelFor && !modelFor) { state.modelFor = null; state.modelFresh = null; }
-    pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : modelFor ? [modelSheet(modelFor)] : []));
+    pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : state.share ? [shareSheet(state.share)] : modelFor ? [modelSheet(modelFor)] : []));
     for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
-    document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking || Boolean(modelFor));
+    document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking || Boolean(state.share) || Boolean(modelFor));
     if (focused) document.getElementById(focused)?.focus();
     keepHistoryAnchor();
     if (s && !document.hidden) dismissNotes(s.id);
@@ -1548,19 +1548,171 @@ async function start(cfg) {
     render();
   }
 
-  // A share from another app becomes the new task's draft. It waits for
-  // sign-in, since only a signed-in page can store the task.
+  function appendPreparedImages(key, incoming) {
+    if (!incoming.length) return;
+    const imgs = draft(key);
+    const room = Math.max(0, MAX_IMAGES - imgs.length);
+    const kept = incoming.slice(0, room);
+    const dropped = incoming.slice(room);
+    imgs.push(...kept);
+    if (dropped.length) {
+      forgetImages(dropped);
+      attachNote(key, `At most ${MAX_IMAGES} images go with one message; the rest were left out.`, "warn");
+    }
+  }
+
+  // A share from another app asks whether to start a new inbox task or attach
+  // to an ongoing session. It waits for sign-in, since only a signed-in page
+  // can read sessions or store attachments.
   async function receiveShare() {
     const shared = await takeShare();
     if (!shared) return;
-    openCompose(null, null);
-    const box = compose.text;
     const text = sharedText(shared);
-    if (text) box.value = box.value ? `${box.value}\n${text}` : text;
     const all = shared.files || [];
     const files = all.filter((f) => f.type.startsWith("image/"));
-    if (files.length) await attachImages("add", files);
-    if (files.length < all.length) composeAlert("Only images can be attached; the other files were left out.", "warn");
+    const images = [];
+    const notes = [];
+    if (files.length < all.length) notes.push({ text: "Only images can be attached; the other files were left out.", tone: "warn" });
+    if (files.length > MAX_IMAGES) notes.push({ text: `At most ${MAX_IMAGES} images go with one message; the rest were left out.`, tone: "warn" });
+    for (const file of files.slice(0, MAX_IMAGES)) {
+      try {
+        const img = await prepareImage(file);
+        images.push({ ...img, url: URL.createObjectURL(new Blob([img.bytes], { type: img.type })) });
+      } catch (err) {
+        notes.push({ text: `Could not attach: ${err.message}`, tone: "bad" });
+      }
+    }
+    if (!text && !images.length && !notes.length) return;
+    openShare({ text, images, note: notes[0] ?? null });
+  }
+
+  function openShare(share) {
+    ensureSheets();
+    if (state.share) forgetImages(state.share.images);
+    state.share = share;
+    if (compose.open) {
+      compose.open = false;
+      compose.scrim.hidden = true;
+      compose.alert.textContent = "";
+      const i = layers.indexOf("compose");
+      if (i !== -1) layers[i] = "share";
+      else openLayer("share");
+    } else {
+      openLayer("share");
+    }
+    render();
+  }
+
+  function hideShare() {
+    if (state.share) {
+      forgetImages(state.share.images);
+      state.share = null;
+    }
+    render();
+  }
+
+  function shareToNewTask() {
+    const share = state.share;
+    if (!share) return;
+    state.share = null;
+    // Reuse the share sheet's history entry so Back closes New task in one step
+    // without racing an asynchronous history.back().
+    const i = layers.indexOf("share");
+    if (i !== -1) layers[i] = "compose";
+    else openLayer("compose");
+    state.picked = state.lastPicked ?? state.picked;
+    compose.from = null;
+    compose.alert.textContent = "";
+    compose.open = true;
+    compose.scrim.hidden = false;
+    if (share.text) compose.text.value = compose.text.value ? `${compose.text.value}\n${share.text}` : share.text;
+    appendPreparedImages("add", share.images);
+    if (share.note && !compose.alert.textContent) composeAlert(share.note.text, share.note.tone);
+    render();
+    compose.text.focus();
+  }
+
+  function shareToSession(s) {
+    const share = state.share;
+    if (!share) return;
+    state.share = null;
+    const i = layers.indexOf("share");
+    if (i !== -1) layers.splice(i, 1);
+    document.documentElement.classList.remove("tuck");
+    if (wide()) { app.scrollTop = 0; sideEl.scrollTop = 0; }
+    newVisit();
+    // Replace the share sheet's history entry with the session so Back returns
+    // directly to the board.
+    history.replaceState(null, "", `#s-${encodeURIComponent(s.id)}`);
+    const key = `reply:${s.id}`;
+    appendPreparedImages(key, share.images);
+    if (share.note && !state.outcomes.has(`attach:${key}`)) attachNote(key, share.note.text, share.note.tone);
+    render();
+    const box = document.getElementById(`reply-${s.id}`);
+    if (box && share.text) box.value = box.value ? `${box.value}\n${share.text}` : share.text;
+    const sc = scrollHost();
+    sc.to({ top: sc.el.scrollHeight, behavior: "instant" });
+    box?.focus();
+  }
+
+  function shareSheet(share) {
+    const close = () => closeLayer("share");
+    const now = Date.now();
+    const sessions = shareSessions([...state.sessions.keys()].map(shownWorker));
+    const head = h("div", { class: "sheethead" },
+      h("h2", {}, "Share to"),
+      h("button", { type: "button", class: "icon", "aria-label": "Close", onclick: close }, icon("x")),
+    );
+    const preview = share.images.length || share.text || share.note
+      ? h("div", { class: "shareprev" },
+        share.images.length ? h("div", { class: "thumbs" }, share.images.map((img, i) =>
+          h("span", { class: "thumb" }, h("img", { src: img.url, alt: `Shared image ${i + 1}` })))) : null,
+        share.text ? h("p", { class: "sharetext" }, oneLine(share.text)) : null,
+        share.note ? h("p", { class: "alert", role: "status", "data-tone": share.note.tone }, share.note.text) : null,
+      )
+      : null;
+    const sessionRow = (s) => {
+      const st = STATES[s.state] || { label: s.state, tone: "idle" };
+      const at = activity(s);
+      const task = currentTask(state.tasks, s.id);
+      const summary = s.question ? `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`
+        : task ? oneLine(task.text)
+        : s.cleared ? "New conversation"
+        : s.message ? oneLine(s.message.text)
+        : st.label;
+      return h("button", { type: "button", class: "prow", onclick: () => shareToSession(s) },
+        h("span", { class: "facewrap" }, face(projectOf(s), s.title, "lg"), h("span", { class: `sdot ${st.tone}` })),
+        h("span", { class: "pmain" },
+          h("span", { class: "sharetop" },
+            h("span", { class: "pname" }, s.title),
+            chip(st),
+            at ? h("span", { class: "when" }, ago(at, now)) : null),
+          h("span", { class: "pstat sharemsg" }, summary),
+        ),
+      );
+    };
+    const body = h("div", { class: "sheetbody" },
+      h("div", { class: "plist" },
+        h("button", { type: "button", class: "prow", onclick: shareToNewTask },
+          h("span", { class: "shareicon", "aria-hidden": "true" }, icon("addtask")),
+          h("span", { class: "pmain" },
+            h("span", { class: "pname" }, "New inbox task"),
+            h("span", { class: "pstat" }, "Pick a project and add to inbox"),
+          ),
+        ),
+      ),
+      h("h3", { class: "group" }, "Ongoing sessions"),
+      !state.loaded.has("sessions") ? loading("Loading sessions…")
+        : sessions.length ? h("div", { class: "plist", role: "group", "aria-label": "Ongoing sessions" }, sessions.map(sessionRow))
+        : h("p", { class: "empty" }, "No ongoing sessions."),
+    );
+    return h("div", { class: "scrim", onclick: (e) => e.target === e.currentTarget && close() },
+      h("section", { class: "sheet share", role: "dialog", "aria-modal": "true", "aria-label": "Share to", onkeydown: (e) => e.key === "Escape" && close() },
+        sheetTop(head, close),
+        preview,
+        body,
+      ),
+    );
   }
 
   function pasteImages(key, e) {
@@ -2376,6 +2528,7 @@ async function start(cfg) {
 
   function hideLayer(name) {
     if (name === "inbox") hideInbox();
+    else if (name === "share") hideShare();
     else hideCompose();
   }
 

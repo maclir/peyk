@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, shareSessions, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -378,6 +378,21 @@ describe('shared text', () => {
     expect(sharedText({ title: '', text: '', url: '' })).toBe('');
     expect(sharedText({ title: 'Docs', text: 'Read https://x.dev/a', url: 'https://x.dev/a' })).toBe('Docs\nRead https://x.dev/a');
     expect(sharedText({ title: ' Docs ', url: 'https://x.dev/a' })).toBe('Docs\nhttps://x.dev/a');
+  });
+});
+
+describe('shareSessions', () => {
+  it('excludes stopped workers and puts recent active conversations before cleared ones', () => {
+    const t = (m: number) => new Date(Date.UTC(2026, 10, 1, 12, m));
+    const sessions = [
+      { id: 's1', title: 'stopped-state', state: 'stopped', aoe_status: 'idle', message: { at: t(50) } },
+      { id: 's2', title: 'stopped-aoe', state: 'idle', aoe_status: 'stopped', message: { at: t(55) } },
+      { id: 's3', title: 'cleared-fresh', state: 'idle', aoe_status: 'idle', cleared: true, message: { at: t(45) } },
+      { id: 's4', title: 'older', state: 'idle', aoe_status: 'idle', message: { at: t(10) } },
+      { id: 's5', title: 'working-now', state: 'working', aoe_status: 'running', prompt: { at: t(40) } },
+      { id: 's6', title: 'needs-now', state: 'needs_input', aoe_status: 'waiting', message: { at: t(30) } },
+    ];
+    expect(shareSessions(sessions).map((s: any) => s.id)).toEqual(['s5', 's6', 's4', 's3']);
   });
 });
 

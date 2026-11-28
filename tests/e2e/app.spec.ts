@@ -1167,18 +1167,56 @@ test.describe('signed in', () => {
       document.body.append(form);
       form.submit();
     }, PNG.toString('base64'));
+    const share = page.getByRole('dialog', { name: 'Share to' });
+    await expect(share).toBeVisible();
+    await expect(page).toHaveURL(/\/app\/$/);
+    await expect(share.locator('.shareprev .thumb img')).toHaveCount(1);
+    await expect(share.locator('.sharetext')).toHaveText('Shared from Photos');
+    await expect(share.getByRole('group', { name: 'Ongoing sessions' }).getByRole('button')).toHaveCount(2);
+
+    await share.getByRole('button', { name: /New inbox task/ }).click();
     const compose = page.getByRole('dialog', { name: 'New task' });
     await expect(compose).toBeVisible();
-    await expect(page).toHaveURL(/\/app\/$/);
+    await expect(share).toBeHidden();
     await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await expect(compose.getByLabel('Task description')).toHaveValue('Shared from Photos');
 
     // The share is used once; a reload starts empty.
     await page.reload();
+    await expect(share).toBeHidden();
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     await expect(compose).toBeVisible();
     await expect(compose.locator('form.add .thumb')).toHaveCount(0);
     await expect(page.locator('#task-text')).toHaveValue('');
+  });
+
+  test("Android's share sheet attaches a screenshot to an ongoing session", async () => {
+    await page.goto('/app/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await page.evaluate((png) => {
+      const form = Object.assign(document.createElement('form'), { method: 'post', action: '/app/share', enctype: 'multipart/form-data' });
+      const input = Object.assign(document.createElement('input'), { type: 'file', name: 'images' });
+      const files = new DataTransfer();
+      files.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
+      input.files = files.files;
+      const text = Object.assign(document.createElement('input'), { type: 'hidden', name: 'text', value: 'Check this layout' });
+      form.append(input, text);
+      document.body.append(form);
+      form.submit();
+    }, PNG.toString('base64'));
+    const share = page.getByRole('dialog', { name: 'Share to' });
+    await expect(share).toBeVisible();
+    await share.getByRole('group', { name: 'Ongoing sessions' }).getByRole('button', { name: /hamta/ }).click();
+    await expect(share).toBeHidden();
+    await expect(page).toHaveURL(/\/app\/#s-h$/);
+    const reply = page.locator('form.composer.respond');
+    await expect(reply.locator('.thumb img')).toHaveCount(1);
+    await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout');
+
+    // Back returns directly to the board without reopening the share sheet.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/app\/$/);
+    await expect(share).toBeHidden();
   });
 
   test('a reply carries a screenshot to its worker', async () => {

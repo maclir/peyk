@@ -23,6 +23,16 @@ export function sortSessions(sessions, inboxCount = () => 0) {
   );
 }
 
+// Ongoing sessions a share can attach to: running workers, with active
+// conversations before cleared ones, most recently active first.
+export function shareSessions(sessions) {
+  return [...sessions]
+    .filter((s) => s.state !== "stopped" && s.aoe_status !== "stopped")
+    .sort((a, b) => Number(Boolean(a.cleared)) - Number(Boolean(b.cleared))
+      || activity(b) - activity(a)
+      || String(a.title).localeCompare(String(b.title)));
+}
+
 export function activity(s) {
   if (s.state === "unpushed" && s.git?.last) return time(s.git.last.at);
   return Math.max(time(s.message?.at), time(s.prompt?.at));
