@@ -50,6 +50,19 @@ func WriteHealth(path string, h Health) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// ReadHealth reads the agent's last health file.
+func ReadHealth(path string) (Health, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Health{}, err
+	}
+	var h Health
+	if err := json.Unmarshal(b, &h); err != nil {
+		return Health{}, err
+	}
+	return h, nil
+}
+
 // RemoveHealth says the agent is gone. A file left by an agent that was
 // killed names a dead pid, which the menu bar app checks for.
 func RemoveHealth(path string) error {

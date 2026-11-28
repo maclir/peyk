@@ -62,6 +62,28 @@ func Asleep() bool {
 	return c >= 0 && c&graphicsCapability == 0
 }
 
+// StayAwake holds PreventUserIdleSystemSleep and PreventSystemSleep until the
+// returned function is called. Taking them before stopping the agent closes
+// the gap where macOS can start Idle Sleep on battery before the replacement
+// agent's caffeinate registers.
+func StayAwake() func() {
+	idle, sys := holdPowerAssertions()
+	return sync.OnceFunc(func() {
+		releasePowerAssertion(idle)
+		releasePowerAssertion(sys)
+	})
+}
+
+func holdPowerAssertions() (uint32, uint32) {
+	var idle, sys C.uint32_t
+	C.peyk_power_stay_awake(&idle, &sys)
+	return uint32(idle), uint32(sys)
+}
+
+func releasePowerAssertion(id uint32) {
+	C.peyk_power_release(C.uint32_t(id))
+}
+
 //export peykPower
 func peykPower(kind C.int, id C.long) {
 	switch kind {

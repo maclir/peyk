@@ -99,14 +99,13 @@ status: ## Print every live aoe session: state, last commit, push state, last re
 # builds first so the process that stays up is the small binary, not the Go
 # toolchain, and execs it so the agent is make's direct child: launchd stops
 # the job with SIGTERM to make, which passes it on, and the agent then marks
-# the laptop offline. caffeinate holds the Mac awake (idle sleep; system sleep
-# on AC) only while that process lives.
+# the laptop offline. caffeinate starts before go build and watches $$ (which
+# exec preserves), holding the Mac awake across both build and run.
 CAFFEINATE := $(if $(shell command -v caffeinate),caffeinate -is -w $$$$ &)
 serve: ## Publish session state for the phone until stopped (launchd runs this).
 	@test -n "$(GOOGLE_CLOUD_PROJECT)" || { echo "GOOGLE_CLOUD_PROJECT is required; set it in .env"; exit 1; }
 	@mkdir -p bin
-	@go build -trimpath -o bin/peyk ./cmd/peyk
-	@$(CAFFEINATE) exec bin/peyk agent
+	@$(CAFFEINATE) go build -trimpath -o bin/peyk ./cmd/peyk && exec bin/peyk agent
 
 menu: ## Build the menu bar app into bin/Peyk.app (macOS).
 	@mkdir -p bin/Peyk.app/Contents/MacOS
@@ -125,7 +124,7 @@ uninstall-agent: ## Stop the agent and the menu bar app and remove them from lau
 	@go run ./cmd/peyk uninstall
 
 restart-agent: ## Rebuild and restart the launchd agent.
-	@launchctl kickstart -k gui/$$(id -u)/com.peyk.agent
+	@go run ./cmd/peyk restart
 
 pair: ## Trust this device's passkey for signing commands: make pair LABEL=pixel
 	@test -n "$(LABEL)" || { echo "LABEL is required"; exit 1; }

@@ -310,7 +310,13 @@ final class Model: ObservableObject {
 
     func start() { act("bootstrap", domain, plistPath) }
     func stop() { act("bootout", "\(domain)/\(agentLabel)") }
-    func restart() { act("kickstart", "-k", "\(domain)/\(agentLabel)") }
+    func restart() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (status, out) = peyk("restart")
+            if status != 0 { NSLog("peyk restart: %@", String(decoding: out, as: UTF8.self)) }
+            DispatchQueue.main.async { self.refresh() }
+        }
+    }
 }
 
 func launchctl(_ args: [String]) -> (status: Int32, output: String) {

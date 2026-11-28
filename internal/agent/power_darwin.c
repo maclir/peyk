@@ -46,3 +46,25 @@ int peyk_power_capabilities(void) {
 	if (v != NULL) CFRelease(v);
 	return n;
 }
+
+void peyk_power_stay_awake(uint32_t *idle_id, uint32_t *system_id) {
+	*idle_id = kIOPMNullAssertionID;
+	*system_id = kIOPMNullAssertionID;
+	CFStringRef reason = CFSTR("peyk restarting agent");
+	IOPMAssertionID id = kIOPMNullAssertionID;
+	if (IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,
+		kIOPMAssertionLevelOn, reason, &id) == kIOReturnSuccess) {
+		*idle_id = id;
+	}
+	id = kIOPMNullAssertionID;
+	if (IOPMAssertionCreateWithName(kIOPMAssertionTypePreventSystemSleep,
+		kIOPMAssertionLevelOn, reason, &id) == kIOReturnSuccess) {
+		*system_id = id;
+	}
+}
+
+void peyk_power_release(uint32_t id) {
+	if (id != kIOPMNullAssertionID) {
+		IOPMAssertionRelease(id);
+	}
+}

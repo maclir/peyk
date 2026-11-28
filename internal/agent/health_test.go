@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,10 +23,9 @@ func TestHealthIsWrittenWholeAndRemoved(t *testing.T) {
 	if err := WriteHealth(path, Health{PID: 42, StartedAt: start, RefreshedAt: start.Add(time.Minute), Workers: 3}); err != nil {
 		t.Fatal(err)
 	}
-	var h Health
-	b, _ = os.ReadFile(path)
-	if err := json.Unmarshal(b, &h); err != nil || h.Workers != 3 || !h.RefreshedAt.Equal(start.Add(time.Minute)) {
-		t.Fatalf("after a refresh = %s (%v)", b, err)
+	h, err := ReadHealth(path)
+	if err != nil || h.Workers != 3 || !h.RefreshedAt.Equal(start.Add(time.Minute)) {
+		t.Fatalf("after a refresh = %+v (%v)", h, err)
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
 		t.Fatalf("temporary files left: %v", entries)

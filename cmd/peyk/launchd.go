@@ -7,8 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/maclir/peyk/internal/agent"
 	"github.com/maclir/peyk/internal/laptop"
 	"github.com/maclir/peyk/internal/launchd"
 )
@@ -56,6 +60,10 @@ func installJobs(ctx context.Context, out io.Writer) error {
 			return err
 		}
 	}
+	r := defaultRestarter()
+	before := r.currentHealth()
+	release := r.stayAwake()
+	defer release()
 	for _, j := range js {
 		path := launchd.Path(home, j.Label)
 		if err := os.WriteFile(path, j.Plist(), 0o644); err != nil {
@@ -67,6 +75,7 @@ func installJobs(ctx context.Context, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "started %s (%s)\n", j.Label, path)
 	}
+	r.waitForReplacement(ctx, before, 0)
 	return nil
 }
 
@@ -102,8 +111,104 @@ func uninstallJobs(ctx context.Context, out io.Writer) error {
 	return nil
 }
 
-// restartAgent rebuilds and restarts the agent.
+// restartAgent rebuilds and restarts the agent while holding a sleep assertion
+// so macOS does not enter Idle Sleep on battery during the restart gap.
 func restartAgent(ctx context.Context) error {
-	_, err := laptop.Exec(ctx, "", "launchctl", "kickstart", "-k", launchd.Domain()+"/"+launchd.Agent)
-	return err
+	return defaultRestarter().restart(ctx, launchd.Domain()+"/"+launchd.Agent)
+}
+
+type restarter struct {
+	run       laptop.Runner
+	stayAwake func() func()
+	health    func() (agent.Health, error)
+	alive     func(int) bool
+	wait      time.Duration
+	poll      time.Duration
+}
+
+func defaultRestarter() restarter {
+	return restarter{
+		run:       laptop.Exec,
+		stayAwake: agent.StayAwake,
+		health:    func() (agent.Health, error) { return agent.ReadHealth(healthPath()) },
+		alive:     pidAlive,
+		wait:      30 * time.Second,
+		poll:      200 * time.Millisecond,
+	}
+}
+
+func (r restarter) currentHealth() agent.Health {
+	h, err := r.health()
+	if err != nil || !r.alive(h.PID) {
+		return agent.Health{}
+	}
+	return h
+}
+
+func (r restarter) restart(ctx context.Context, target string) error {
+	before := r.currentHealth()
+	release := r.stayAwake()
+	defer release()
+	out, err := r.run(ctx, "", "launchctl", "kickstart", "-kp", target)
+	if err != nil {
+		return err
+	}
+	r.waitForReplacement(ctx, before, parseSpawnedPID(out))
+	return nil
+}
+
+// waitForReplacement holds the caller's sleep assertion until the replacement
+// agent writes a new live health file (at which point its own caffeinate is
+// already running), the spawned make job exits early, or the wait expires.
+func (r restarter) waitForReplacement(ctx context.Context, before agent.Health, spawned int) {
+	if r.isReady(before) || (spawned > 0 && !r.alive(spawned)) {
+		return
+	}
+	deadline := time.NewTimer(r.wait)
+	defer deadline.Stop()
+	tick := time.NewTicker(r.poll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+			if r.isReady(before) || (spawned > 0 && !r.alive(spawned)) {
+				return
+			}
+		}
+	}
+}
+
+func (r restarter) isReady(before agent.Health) bool {
+	h, err := r.health()
+	if err != nil || h.PID <= 0 {
+		return false
+	}
+	if h.PID == before.PID && h.StartedAt.Equal(before.StartedAt) {
+		return false
+	}
+	return r.alive(h.PID)
+}
+
+func parseSpawnedPID(out []byte) int {
+	const prefix = "service spawned with pid:"
+	for _, line := range strings.Split(string(out), "\n") {
+		if i := strings.Index(line, prefix); i >= 0 {
+			if pid, err := strconv.Atoi(strings.TrimSpace(line[i+len(prefix):])); err == nil && pid > 0 {
+				return pid
+			}
+		}
+	}
+	return 0
+}
+
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
