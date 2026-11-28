@@ -647,15 +647,22 @@ func TestResumePointsTheSessionAtTheConversationAndRelaunchesIt(t *testing.T) {
 		stopped bool
 		want    string
 	}{
-		{false, "session set-session-id k older|session restart k"},
-		{true, "session set-session-id k older|session start k"},
+		{false, "session set-session-id k older|session restart k|session show k --json"},
+		{true, "session set-session-id k older|session start k|session show k --json"},
 	} {
 		var calls []string
-		run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
-			calls = append(calls, strings.Join(args[2:], " "))
+		run := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+			if name == "tmux" {
+				return nil, errors.New("no tmux")
+			}
+			call := strings.Join(args[2:], " ")
+			calls = append(calls, call)
+			if strings.HasPrefix(call, "session show ") {
+				return []byte(`{"id":"k","tool":"claude","status":"idle"}`), nil
+			}
 			return nil, nil
 		}
-		if err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: dir}, "older", tt.stopped); err != nil {
+		if err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: dir}, "older", tt.stopped, time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
 		if got := strings.Join(calls, "|"); got != tt.want {
@@ -671,10 +678,191 @@ func TestResumeRefusesAConversationFromAnotherProject(t *testing.T) {
 		t.Fatal("aoe was asked to resume a conversation this session cannot reach")
 		return nil, nil
 	}
-	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: TranscriptDir(claude, "/w")}, "other", false)
+	err := (Aoe{Profile: "p", Run: run}).Resume(context.Background(), "k", session.Transcript{Dir: TranscriptDir(claude, "/w")}, "other", false, time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "no conversation other") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestStartRestartAndResumeWaitUntilReady(t *testing.T) {
+	readyPane := "──────────\n❯ \n──────────\n"
+	dialogPane := "──────────\nYes, trust\nEsc to cancel\n"
+
+	t.Run("waits for idle status and ready tmux pane", func(t *testing.T) {
+		statuses := []string{"starting", "running", "waiting", "idle", "idle", "idle"}
+		panes := []string{"Loading...", dialogPane, readyPane}
+		var si, pi int
+		run := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+			if name == "tmux" {
+				if args[0] == "list-sessions" {
+					return []byte("aoe_knip_12345678\n"), nil
+				}
+				p := panes[min(pi, len(panes)-1)]
+				pi++
+				return []byte(p), nil
+			}
+			if len(args) >= 4 && args[2] == "session" && args[3] == "show" {
+				st := statuses[min(si, len(statuses)-1)]
+				si++
+				return []byte(`{"id":"12345678abcd","tool":"claude","status":"` + st + `"}`), nil
+			}
+			return nil, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := (Aoe{Profile: "p", Run: run}).Restart(ctx, "12345678abcd", time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		if si != 6 || pi != 3 {
+			t.Fatalf("polled status %d times and pane %d times, want 6 and 3", si, pi)
+		}
+	})
+
+	t.Run("antigravity accepts waiting once pane is not running", func(t *testing.T) {
+		panes := []string{
+			"──────────\n>\n──────────\nesc to cancel\n",
+			"──────────\n>\n──────────\n? for shortcuts\n",
+		}
+		var pi int
+		run := func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+			if name == "tmux" {
+				if args[0] == "list-sessions" {
+					return []byte("aoe_gemi_87654321\n"), nil
+				}
+				p := panes[min(pi, len(panes)-1)]
+				pi++
+				return []byte(p), nil
+			}
+			if len(args) >= 4 && args[2] == "session" && args[3] == "show" {
+				return []byte(`{"id":"87654321abcd","tool":"antigravity","status":"waiting"}`), nil
+			}
+			return nil, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := (Aoe{Profile: "p", Run: run}).Start(ctx, "87654321abcd", time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		if pi != 2 {
+			t.Fatalf("pane checks = %d, want 2", pi)
+		}
+	})
+
+	t.Run("fails immediately on error status", func(t *testing.T) {
+		run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+			if len(args) >= 4 && args[2] == "session" && args[3] == "show" {
+				return []byte(`{"id":"k","tool":"claude","status":"error"}`), nil
+			}
+			return nil, nil
+		}
+		err := (Aoe{Profile: "p", Run: run}).Start(context.Background(), "k", time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), "error state") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("reports last status on timeout", func(t *testing.T) {
+		run := func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+			if len(args) >= 4 && args[2] == "session" && args[3] == "show" {
+				return []byte(`{"id":"k","tool":"claude","status":"starting"}`), nil
+			}
+			return nil, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		err := (Aoe{Profile: "p", Run: run}).Restart(ctx, "k", time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), "status: starting") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestDeliverVerifiesPromptArrival(t *testing.T) {
+	t.Run("waits for claude prompt in transcript", func(t *testing.T) {
+		claude, work := t.TempDir(), "/w"
+		writeTranscript(t, claude, work, "c1", time.Now(),
+			human("2026-11-14T09:00:00Z", `"old"`),
+			assistant("2026-11-14T09:00:05Z", "done"),
+		)
+		tr := session.Transcript{Dir: TranscriptDir(claude, work), ID: "c1"}
+		run := func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil }
+
+		done := make(chan error, 1)
+		go func() {
+			done <- (Aoe{Profile: "p", Run: run}).Deliver(context.Background(), "k", tr, "new ask", time.Second, time.Millisecond)
+		}()
+		select {
+		case err := <-done:
+			t.Fatalf("returned before prompt landed: %v", err)
+		case <-time.After(15 * time.Millisecond):
+		}
+		f, err := os.OpenFile(filepath.Join(tr.Dir, "c1.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = f.WriteString(human("2026-11-14T09:01:00Z", `"new ask"`) + "\n")
+		f.Close()
+		if err := <-done; err != nil {
+			t.Fatalf("deliver err = %v", err)
+		}
+	})
+
+	t.Run("waits after /clear until a human prompt lands", func(t *testing.T) {
+		claude, work := t.TempDir(), "/w"
+		writeTranscript(t, claude, work, "fresh", time.Now(), clearEntry("2026-11-14T09:00:00Z"))
+		tr := session.Transcript{Dir: TranscriptDir(claude, work), ID: "fresh"}
+		run := func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil }
+		err := (Aoe{Profile: "p", Run: run}).Deliver(context.Background(), "k", tr, "hello", 20*time.Millisecond, time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), "did not record the prompt") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("accepts queued prompt while working", func(t *testing.T) {
+		claude, work := t.TempDir(), "/w"
+		writeTranscript(t, claude, work, "c1", time.Now(), human("2026-11-14T09:00:00Z", `"first"`))
+		tr := session.Transcript{Dir: TranscriptDir(claude, work), ID: "c1"}
+		run := func(context.Context, string, string, ...string) ([]byte, error) {
+			f, err := os.OpenFile(filepath.Join(tr.Dir, "c1.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+			_, err = f.WriteString(queued("2026-11-14T09:00:30Z", "second") + "\n")
+			return nil, err
+		}
+		if err := (Aoe{Profile: "p", Run: run}).Deliver(context.Background(), "k", tr, "second", time.Second, time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("skips verification for slash commands and unknown transcript", func(t *testing.T) {
+		claude, work := t.TempDir(), "/w"
+		tr := session.Transcript{Dir: TranscriptDir(claude, work), ID: "c1"}
+		run := func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil }
+		a := Aoe{Profile: "p", Run: run}
+		if err := a.Deliver(context.Background(), "k", tr, "/model sonnet", 10*time.Millisecond, time.Millisecond); err != nil {
+			t.Fatalf("slash command failed: %v", err)
+		}
+		if err := a.Deliver(context.Background(), "k", session.Transcript{}, "hello", 10*time.Millisecond, time.Millisecond); err != nil {
+			t.Fatalf("unknown transcript failed: %v", err)
+		}
+	})
+
+	t.Run("waits for antigravity prompt step", func(t *testing.T) {
+		appDir, work := t.TempDir(), "/c/gemi"
+		tr := session.Transcript{Tool: session.Antigravity, AppDir: appDir, Workdir: work}.WithID("ag-1")
+		if err := os.MkdirAll(tr.Dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		run := func(context.Context, string, string, ...string) ([]byte, error) {
+			line := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","created_at":"2026-11-14T09:01:00Z","content":"<USER_REQUEST>hello</USER_REQUEST>"}`
+			return nil, os.WriteFile(filepath.Join(tr.Dir, "transcript.jsonl"), []byte(line+"\n"), 0o644)
+		}
+		if err := (Aoe{Profile: "p", Run: run}).Deliver(context.Background(), "g", tr, "hello", time.Second, time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestSendPassesAMessageStartingWithADashAsTheMessage(t *testing.T) {

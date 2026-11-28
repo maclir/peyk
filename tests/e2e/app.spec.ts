@@ -1302,6 +1302,47 @@ test.describe('signed in', () => {
     await setCleared(page, true);
   });
 
+  test('a failed reply restores its text and screenshot to the composer', async () => {
+    await put(page, 'laptop/status', { online: true, seen_at: new Date() });
+    await setCleared(page, false);
+    await page.goto('/app/#s-k');
+    await passkeyOn(page);
+    const reply = page.locator('form.composer.respond');
+    await reply.getByLabel('Reply', { exact: true }).fill('Check notifications');
+    await reply.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
+    await expect(reply.locator('.thumb img')).toHaveCount(1);
+    await reply.getByRole('button', { name: 'Send reply' }).click();
+    await expect(reply.getByLabel('Reply', { exact: true })).toHaveValue('');
+    await expect(reply.locator('.thumb')).toHaveCount(0);
+
+    const cmd = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'reply' && c.fields.payload.stringValue.includes('Check notifications'))!;
+    await put(page, `commands/${cmd.name.split('/').pop()}`, {
+      ...plain(cmd.fields), status: 'failed', error: 'the session did not record the prompt',
+    });
+    await expect(reply.locator('.outcome')).toHaveText('Reply failed: the session did not record the prompt');
+    await expect(reply.getByLabel('Reply', { exact: true })).toHaveValue('Check notifications');
+    await expect(reply.locator('.thumb img')).toHaveCount(1);
+    await expect(page.locator('.reply.sent.queued')).toHaveCount(0);
+    await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
+
+    // Navigating away while waiting still restores the text when returning.
+    await reply.getByLabel('Reply', { exact: true }).fill('Second try');
+    await reply.locator('.thumb button').click();
+    await reply.getByRole('button', { name: 'Send reply' }).click();
+    await expect(reply.getByLabel('Reply', { exact: true })).toHaveValue('');
+    await page.goto('/app/#');
+    const second = (await list(page, 'commands')).find((c) => c.fields.type.stringValue === 'reply' && c.fields.payload.stringValue.includes('Second try'))!;
+    await put(page, `commands/${second.name.split('/').pop()}`, {
+      ...plain(second.fields), status: 'failed', error: 'the session did not record the prompt',
+    });
+    await page.goto('/app/#s-k');
+    await expect(reply.getByLabel('Reply', { exact: true })).toHaveValue('Second try');
+    await expect(reply.locator('.outcome')).toHaveText('Reply failed: the session did not record the prompt');
+    await reply.getByLabel('Reply', { exact: true }).fill('');
+    await page.request.delete(`${FIRESTORE}/${second.name.split('/documents/')[1]}`, { headers: admin });
+    await setCleared(page, true);
+  });
+
   test('the inbox filters by state and project, and keeps the order you set', async () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });

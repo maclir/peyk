@@ -46,7 +46,7 @@ func (a Aoe) Answer(ctx context.Context, id string, t session.Transcript, questi
 			return ErrAnswered
 		}
 		if done {
-			return a.Send(ctx, id, text)
+			return a.Deliver(ctx, id, t, text, 0, poll)
 		}
 		select {
 		case <-ctx.Done():

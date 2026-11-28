@@ -216,7 +216,7 @@ async function start(cfg) {
     // The idea whose dismissal note is being written.
     dismissing: null, modelFor: null, modelFresh: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(), share: null,
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
-    outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
+    outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), restoredText: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: false, factsOpen: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
@@ -726,7 +726,7 @@ async function start(cfg) {
   // queue, the command is stored while the laptop is offline too, for it to
   // pick up when it is back; the reply's own row then shows where it stands.
   // cancel names a waiting reply this one replaces, withdrawn in the same write.
-  async function sendCommand(type, fields, label, key, report = (text, busy, tone) => setOutcome(key, text, busy, tone), onDone = null, { queue = false, cancel = null, done = "Done" } = {}) {
+  async function sendCommand(type, fields, label, key, report = (text, busy, tone) => setOutcome(key, text, busy, tone), onDone = null, { queue = false, cancel = null, done = "Done", onFail = null } = {}) {
     if (state.busy.has(key)) return false;
     if (!queue && !laptopOnline(state.laptop, Date.now())) {
       report("Not sent: the laptop is offline.", false, "bad");
@@ -776,7 +776,10 @@ async function start(cfg) {
       if (!c || c.status === "pending") return;
       clearTimeout(timer);
       unsub();
-      if (c.status === "failed" && String(c.error).startsWith("session approval:")) passkey.forgetGrant();
+      if (c.status === "failed") {
+        if (String(c.error).startsWith("session approval:")) passkey.forgetGrant();
+        onFail?.(c);
+      }
       const [text, tone] = c.status === "done" ? [done ?? "", "ok"]
         : c.status === "failed" ? [`${label} failed: ${c.error}`, "bad"]
         : ["", ""];
@@ -975,6 +978,10 @@ async function start(cfg) {
   function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tools = null, tail = null }) {
     const imgs = draft(key);
     const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
+    if (state.restoredText.has(key)) {
+      text.value = state.restoredText.get(key);
+      state.restoredText.delete(key);
+    }
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
     return h("form", { class: `composer ${cls}`, onsubmit: (e) => { e.preventDefault(); send(text); } },
       imgs.length ? h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))) : null,
@@ -2773,6 +2780,24 @@ async function start(cfg) {
     };
   }
 
+  // restoreReply puts a failed reply's text and local images back into its
+  // worker's composer, or remembers the text until that worker is opened again.
+  function restoreReply(sessionID, text, images = []) {
+    const key = `reply:${sessionID}`;
+    if (text) {
+      const box = document.getElementById(`reply-${sessionID}`);
+      if (box) {
+        if (!box.value) box.value = text;
+      } else if (!state.restoredText.has(key)) {
+        state.restoredText.set(key, text);
+      }
+    }
+    if (images.length) {
+      if (!draft(key).length) state.drafts.set(key, images);
+      else forgetImages(images);
+    }
+  }
+
   function replyBox(s) {
     const p = projectOf(s);
     if (s.cleared && p?.free && p.session_id === s.id) return taskBox(s, p);
@@ -2782,11 +2807,12 @@ async function start(cfg) {
       const v = text.value.trim();
       const imgs = draft(key);
       if ((!v && !imgs.length) || state.busy.has(key)) return;
+      const attaching = [...imgs];
       let ids = [];
-      if (imgs.length) {
+      if (attaching.length) {
         try {
           const batch = fs.writeBatch(db);
-          ids = await storeImages(batch, imgs);
+          ids = await storeImages(batch, attaching);
           await batch.commit();
         } catch (err) {
           setOutcome(key, `Not sent: ${err.message}`, false, "bad");
@@ -2800,11 +2826,18 @@ async function start(cfg) {
         dropUnused([{ images: ids }]);
         return;
       }
-      if (await sendCommand("reply", replyFields(s, merged.text, merged.images), "Reply", key, undefined, delivered(s, merged.text, merged.images), { queue: true, cancel: queued?.id, done: null })) {
+      const markDelivered = delivered(s, merged.text, merged.images);
+      const onDone = () => {
+        forgetImages(attaching);
+        markDelivered();
+      };
+      const onFail = () => restoreReply(s.id, merged.text, attaching);
+      if (await sendCommand("reply", replyFields(s, merged.text, merged.images), "Reply", key, undefined, onDone, { queue: true, cancel: queued?.id, done: null, onFail })) {
         // A redraw while sending replaces this textarea, so clear the one on screen.
+        state.restoredText.delete(key);
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
-        dropDraft(key);
+        state.drafts.delete(key);
         render();
         // The sent reply lands at the end of the conversation, under the composer.
         const sc = scrollHost();
@@ -2854,7 +2887,7 @@ async function start(cfg) {
       const held = r.status === "held";
       const actions = held
         ? [busyButton(`resend:${r.id}`, { type: "button", class: "link", onclick: () =>
-            sendCommand("reply", replyFields(s, r.text, r.images), "Reply", `resend:${r.id}`, undefined, delivered(s, r.text, r.images), { queue: true, cancel: r.id, done: null }) }, "Send anyway"),
+            sendCommand("reply", replyFields(s, r.text, r.images), "Reply", `resend:${r.id}`, undefined, delivered(s, r.text, r.images), { queue: true, cancel: r.id, done: null, onFail: () => restoreReply(s.id, r.text) }) }, "Send anyway"),
           busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "discard") }, "Discard")]
         : [busyButton(`withdraw:${r.id}`, { type: "button", class: "link", onclick: () => withdraw(r, "cancel") }, "Cancel")];
       return h("div", { class: "waitrow" },

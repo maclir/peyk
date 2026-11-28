@@ -14,8 +14,9 @@ import (
 
 // Actions are the things a command can make the laptop do.
 type Actions interface {
-	// Send delivers a prompt to a session, by id or title, starting it if stopped.
-	Send(ctx context.Context, session, text string) error
+	// Send delivers a prompt to a session, by id or title, starting it if
+	// stopped, and verifies that non-slash prompts land in t's transcript.
+	Send(ctx context.Context, session string, t session.Transcript, text string) error
 	// Create adds a session for a repository that has none and returns its id.
 	Create(ctx context.Context, dir, title string) (string, error)
 	// Clear starts a session on a fresh conversation, which Claude Code
@@ -143,7 +144,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 			conversation = t
 		}
 		sentAt := a.Now()
-		if err := act.Send(ctx, id, text); err != nil {
+		if err := act.Send(ctx, id, a.sessions[id].Transcript, text); err != nil {
 			return err
 		}
 		fields := map[string]any{"status": store.TaskDispatched, "dispatched_at": sentAt, "session_id": id}
@@ -170,7 +171,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if err != nil {
 			return err
 		}
-		return act.Send(ctx, s.ID, text)
+		return act.Send(ctx, s.ID, s.Transcript, text)
 	case command.Answer:
 		s, err := a.session(p.Session)
 		if err != nil {
@@ -385,7 +386,7 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 			}
 			s = a.sessions[s.ID]
 		}
-		if err := act.Send(ctx, s.ID, "/model "+model); err != nil {
+		if err := act.Send(ctx, s.ID, s.Transcript, "/model "+model); err != nil {
 			return err
 		}
 		a.recordModelSwitch(s.ID, model, s)
@@ -407,7 +408,7 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 	if err := a.reattachTasks(ctx, s.ID, id); err != nil {
 		return err
 	}
-	return act.Send(ctx, id, catchUp(s))
+	return act.Send(ctx, id, session.Transcript{}, catchUp(s))
 }
 
 // reattachTasks points dispatched tasks carried across a tool swap at the new

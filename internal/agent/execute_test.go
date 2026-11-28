@@ -25,11 +25,16 @@ const (
 	testRP     = "peyk.test"
 )
 
-type fakeActions struct{ calls []string }
+type fakeActions struct {
+	calls       []string
+	transcripts []session.Transcript
+	sendErr     error
+}
 
-func (f *fakeActions) Send(_ context.Context, s, text string) error {
+func (f *fakeActions) Send(_ context.Context, s string, t session.Transcript, text string) error {
 	f.calls = append(f.calls, "send "+s+": "+text)
-	return nil
+	f.transcripts = append(f.transcripts, t)
+	return f.sendErr
 }
 func (f *fakeActions) Create(_ context.Context, dir, title string) (string, error) {
 	f.calls = append(f.calls, "create "+title+" in "+dir)
@@ -876,5 +881,25 @@ func TestDispatchedTaskFollowsContextSwapAndFinishesOnNewSession(t *testing.T) {
 	}
 	if got := mem.Updated(store.Tasks, "t3"); got != nil {
 		t.Fatalf("fresh swap reattached t3: %v", got)
+	}
+}
+
+func TestSendPassesTranscriptAndReportsDeliveryFailure(t *testing.T) {
+	ph := newPhone(t)
+	a, mem, acts := commandAgent(t, ph)
+	if err := a.execute(context.Background(), ph.command("c1", command.Payload{Type: command.Dispatch, Project: "knip", Task: "t1", Text: "x", Clear: true}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if len(acts.transcripts) != 1 || acts.transcripts[0].ID != "cleared-k" {
+		t.Fatalf("dispatch after clear sent with transcript %+v, want cleared-k", acts.transcripts)
+	}
+
+	acts.sendErr = errors.New("the session did not record the prompt")
+	if err := a.execute(context.Background(), ph.command("c2", command.Payload{Type: command.Reply, Session: "k", Text: "lost"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	res := mem.Updated(store.Commands, "c2")
+	if res["status"] != command.Failed || !strings.Contains(res["error"].(string), "did not record the prompt") {
+		t.Fatalf("failed reply = %v", res)
 	}
 }

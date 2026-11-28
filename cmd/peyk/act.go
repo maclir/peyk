@@ -19,8 +19,12 @@ type actions struct {
 	antigravitySettings string
 }
 
-func (a actions) Send(ctx context.Context, session, text string) error {
-	return a.aoe.Send(ctx, session, text)
+// deliverWithin bounds the wait for a sent prompt to appear in the session's
+// transcript after aoe send returns.
+const deliverWithin = 15 * time.Second
+
+func (a actions) Send(ctx context.Context, session string, t session.Transcript, text string) error {
+	return a.aoe.Deliver(ctx, session, t, text, deliverWithin, 250*time.Millisecond)
 }
 
 func (a actions) Create(ctx context.Context, dir, title string) (string, error) {
@@ -51,14 +55,26 @@ func (a actions) Answer(ctx context.Context, session string, t session.Transcrip
 
 func (a actions) Stop(ctx context.Context, session string) error { return a.aoe.Stop(ctx, session) }
 
-func (a actions) Start(ctx context.Context, session string) error { return a.aoe.Start(ctx, session) }
+// readyWithin bounds the wait for a started, restarted, or resumed session to
+// finish loading and accept input.
+const readyWithin = 30 * time.Second
+
+func (a actions) Start(ctx context.Context, session string) error {
+	ctx, cancel := context.WithTimeout(ctx, readyWithin)
+	defer cancel()
+	return a.aoe.Start(ctx, session, 250*time.Millisecond)
+}
 
 func (a actions) Restart(ctx context.Context, session string) error {
-	return a.aoe.Restart(ctx, session)
+	ctx, cancel := context.WithTimeout(ctx, readyWithin)
+	defer cancel()
+	return a.aoe.Restart(ctx, session, 250*time.Millisecond)
 }
 
 func (a actions) Resume(ctx context.Context, session string, t session.Transcript, conversation string, stopped bool) error {
-	return a.aoe.Resume(ctx, session, t, conversation, stopped)
+	ctx, cancel := context.WithTimeout(ctx, readyWithin)
+	defer cancel()
+	return a.aoe.Resume(ctx, session, t, conversation, stopped, 250*time.Millisecond)
 }
 
 func (a actions) Push(ctx context.Context, dir string) error {

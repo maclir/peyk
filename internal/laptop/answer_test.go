@@ -19,6 +19,7 @@ type dialog struct {
 	tr     session.Transcript
 	screen string
 	onEsc  string
+	onSend string
 	calls  []string
 }
 
@@ -31,6 +32,7 @@ func newDialog(t *testing.T) *dialog {
 		tr:     session.Transcript{Dir: TranscriptDir(claude, work), ID: "conv"},
 		screen: "←  ☐ Colour  ☐ Pets  ✔ Submit  →\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel\n",
 		onEsc:  `{"type":"user","message":{"content":[{"type":"tool_result","content":"rejected","is_error":true,"tool_use_id":"toolu_1"}]}}`,
+		onSend: human("2026-11-14T09:01:00Z", `"Colour: Blue"`),
 	}
 }
 
@@ -43,19 +45,27 @@ func (d *dialog) run(_ context.Context, _, name string, args ...string) ([]byte,
 	case strings.HasPrefix(call, "tmux capture-pane"):
 		return []byte(d.screen), nil
 	case strings.HasPrefix(call, "tmux send-keys"):
-		f, err := os.OpenFile(filepath.Join(d.tr.Dir, d.tr.ID+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			d.t.Fatal(err)
+		return nil, d.append(d.onEsc)
+	case strings.HasPrefix(call, "aoe -p personal send "):
+		if d.onSend != "" {
+			return nil, d.append(d.onSend)
 		}
-		defer f.Close()
-		_, err = f.WriteString(d.onEsc + "\n")
-		return nil, err
 	}
 	return nil, nil
 }
 
+func (d *dialog) append(line string) error {
+	f, err := os.OpenFile(filepath.Join(d.tr.Dir, d.tr.ID+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	defer f.Close()
+	_, err = f.WriteString(line + "\n")
+	return err
+}
+
 func (d *dialog) answer() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	return Aoe{Profile: "personal", Run: d.run}.Answer(ctx, "7ab0c36356b64513", d.tr, "toolu_1", "Colour: Blue", time.Millisecond)
 }
@@ -105,5 +115,13 @@ func TestAnswerStopsWhenTheTerminalAnsweredFirst(t *testing.T) {
 	f.Close()
 	if err := d.answer(); !errors.Is(err, ErrAnswered) || len(d.calls) != 0 {
 		t.Fatalf("err = %v, calls = %v", err, d.calls)
+	}
+}
+
+func TestAnswerFailsWhenThePromptIsNotRecorded(t *testing.T) {
+	d := newDialog(t)
+	d.onSend = ""
+	if err := d.answer(); err == nil || !strings.Contains(err.Error(), "did not record the prompt") {
+		t.Fatalf("err = %v", err)
 	}
 }
