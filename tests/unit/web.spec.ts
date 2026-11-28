@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, shareSessions, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, cardProgress, ciStatus, actionsLeft, hasProgress, laptopOnline, mergeReply, progressLine, pushLabel, quickAction, replyFields, shareSessions, sortSessions, tags, toolAction, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, modelSwitchState, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -344,7 +344,7 @@ describe('delivered reply', () => {
     const s = { id: 'k', state: 'idle', prompt: { id: 'p1', text: 'old', at: new Date(2026, 0, 1) }, message: { text: 'done', at: new Date(2026, 0, 1, 1) } };
     expect(withDelivered(s, undefined)).toBe(s);
     const shown = withDelivered(s, { text: 'next', images: 0, at, after: 'p1' });
-    expect(shown).toMatchObject({ state: 'working', prompt: { text: 'next', at, unrecorded: true } });
+    expect(shown).toMatchObject({ state: 'working', prompt: { text: 'next', at, unrecorded: true }, progress: null });
     expect(awaitingReply(shown)).toBe(true);
     expect(withDelivered(s, { text: '', images: 2, at, after: 'p1' }).prompt.text).toBe('2 images');
     expect(withDelivered({ id: 'k', cleared: true }, { text: 'go', images: 0, at, after: '' }).cleared).toBe(false);
@@ -644,5 +644,47 @@ describe('modelSwitchState', () => {
     expect(modelSwitchState({ state: 'error', cleared: false })).toEqual({ locked: false, cleared: false, defaultFresh: false });
     expect(modelSwitchState({ state: 'working', cleared: false })).toEqual({ locked: true, cleared: false, defaultFresh: false });
     expect(modelSwitchState({ state: 'needs_input', cleared: false })).toEqual({ locked: true, cleared: false, defaultFresh: false });
+  });
+});
+
+describe('working progress', () => {
+  it('summarizes active step, tool call, or thinking for working cards', () => {
+    const early = new Date('2026-11-28T12:00:00Z');
+    const mid = new Date('2026-11-28T12:01:00Z');
+    const late = new Date('2026-11-28T12:02:00Z');
+
+    expect(toolAction('read_file', 'cmd/peyk/main.go')).toBe('Reading · cmd/peyk/main.go');
+    expect(toolAction('run_command', 'Run full test suite')).toBe('Running · Run full test suite');
+    expect(toolAction('Bash', 'make test')).toBe('Running · make test');
+    expect(toolAction('custom', '')).toBe('custom');
+    expect(hasProgress(null)).toBe(false);
+    expect(hasProgress({ tool: 'read_file' })).toBe(true);
+
+    expect(progressLine({ state: 'idle', progress: { tool: 'read_file', detail: 'a.go' } })).toBe('');
+    expect(progressLine({
+      state: 'working',
+      progress: {
+        steps: [{ title: 'Inspect', status: 'done' }, { title: 'Edit code', status: 'in_progress' }, { title: 'Test', status: 'pending' }],
+        tool: 'edit_file',
+        detail: 'main.go',
+        thinking: 'Checking edits.',
+      },
+    })).toBe('2/3 · Edit code');
+    expect(progressLine({
+      state: 'working',
+      progress: { tool: 'edit_file', detail: 'main.go', thinking: 'Checking edits.' },
+    })).toBe('Editing · main.go');
+    expect(progressLine({
+      state: 'working',
+      progress: { thinking: 'Checking edits.' },
+    })).toBe('Checking edits.');
+
+    // Shows progress on the card while awaiting a reply, or when progress is newer than a mid-turn reply.
+    expect(cardProgress({ state: 'working', prompt: { at: mid }, message: { at: early }, progress: { tool: 'read_file', detail: 'a.go', at: mid } }))
+      .toBe('Reading · a.go');
+    expect(cardProgress({ state: 'working', prompt: { at: early }, message: { at: mid }, progress: { tool: 'read_file', detail: 'a.go', at: mid } }))
+      .toBe('');
+    expect(cardProgress({ state: 'working', prompt: { at: early }, message: { at: mid }, progress: { tool: 'run_command', detail: 'Run tests', at: late } }))
+      .toBe('Running · Run tests');
   });
 });

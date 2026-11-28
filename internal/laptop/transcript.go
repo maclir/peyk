@@ -30,7 +30,7 @@ func TranscriptDir(claudeDir, workdir string) string {
 // the directory holding that transcript, else the one with the directory's
 // newest transcript, else the first.
 func FindTranscript(claudeDirs []string, workdir, id string) session.Transcript {
-	t := session.Transcript{ID: id}
+	t := session.Transcript{ID: id, Workdir: workdir}
 	var latest time.Time
 	for _, c := range claudeDirs {
 		dir := TranscriptDir(c, workdir)
@@ -521,4 +521,129 @@ func Backgrounded(t session.Transcript) bool {
 		}
 	}
 	return len(running) > 0
+}
+
+// Progress returns what a working session is currently doing in its latest
+// turn: its checklist, latest tool call, and (for Antigravity) thinking
+// summary. Returns nil when no progress has been recorded after the latest
+// prompt.
+func Progress(t session.Transcript) *session.Progress {
+	if t.Tool == session.Antigravity {
+		return antigravityProgress(t)
+	}
+	return claudeProgress(t)
+}
+
+func claudeProgress(t session.Transcript) *session.Progress {
+	path := filepath.Join(t.Dir, t.ID+".jsonl")
+	if t.ID == "" {
+		newest := newestFirst(t.Dir)
+		if len(newest) == 0 {
+			return nil
+		}
+		path = newest[0]
+	}
+	lines := tail(path)
+	var prog session.Progress
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if bytes.Contains(line, clearMarker) {
+			var e entry
+			if json.Unmarshal(line, &e) == nil && e.Type == "user" && !e.IsSidechain {
+				break
+			}
+		}
+		isPrompt := bytes.Contains(line, []byte(`"kind":"human"`)) || bytes.Contains(line, bashInput)
+		isAssistant := bytes.Contains(line, []byte(`"type":"assistant"`))
+		if !isPrompt && !isAssistant {
+			continue
+		}
+		var e entry
+		if json.Unmarshal(line, &e) != nil || e.IsSidechain {
+			continue
+		}
+		if isPrompt && e.humanPrompt() != "" {
+			break
+		}
+		if !isAssistant || e.Type != "assistant" {
+			continue
+		}
+		var parts []contentPart
+		if json.Unmarshal(e.Message.Content, &parts) != nil {
+			continue
+		}
+		for j := len(parts) - 1; j >= 0; j-- {
+			p := parts[j]
+			if p.Type != "tool_use" || p.Name == "" {
+				continue
+			}
+			if p.Name == "TodoWrite" {
+				if len(prog.Steps) == 0 {
+					if steps := parseClaudeTodos(p.Input["todos"]); len(steps) > 0 {
+						prog.Steps = steps
+						if prog.At.IsZero() {
+							prog.At = e.Timestamp
+						}
+					}
+				}
+				continue
+			}
+			if prog.Tool == "" {
+				prog.Tool = p.Name
+				prog.Detail = shortToolDetail(toolLine(p.Input), t.Workdir)
+				if prog.At.IsZero() {
+					prog.At = e.Timestamp
+				}
+			}
+		}
+		if prog.Tool != "" && len(prog.Steps) > 0 {
+			break
+		}
+	}
+	if prog.Tool == "" && len(prog.Steps) == 0 {
+		return nil
+	}
+	return &prog
+}
+
+func parseClaudeTodos(raw json.RawMessage) []session.Step {
+	if len(raw) == 0 {
+		return nil
+	}
+	var todos []struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	}
+	if json.Unmarshal(raw, &todos) != nil {
+		return nil
+	}
+	out := make([]session.Step, 0, len(todos))
+	for _, td := range todos {
+		title := strings.Join(strings.Fields(td.Content), " ")
+		if title == "" {
+			continue
+		}
+		if r := []rune(title); len(r) > maxToolLine {
+			title = string(r[:maxToolLine-1]) + "…"
+		}
+		status := td.Status
+		if status == "completed" {
+			status = "done"
+		}
+		out = append(out, session.Step{Title: title, Status: status})
+	}
+	return out
+}
+
+// shortToolDetail trims a session's working directory prefix from file paths
+// so narrow phone cards show project-relative paths.
+func shortToolDetail(detail, workdir string) string {
+	if detail == "" || workdir == "" {
+		return detail
+	}
+	prefix := strings.TrimRight(workdir, string(filepath.Separator)) + string(filepath.Separator)
+	if rest, ok := strings.CutPrefix(detail, prefix); ok && rest != "" {
+		return rest
+	}
+	return detail
 }

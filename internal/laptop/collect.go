@@ -98,6 +98,10 @@ func (c Collector) Transcribe(s *session.Snapshot) {
 	if s.State == session.NeedsInput {
 		s.Question = PendingQuestion(s.Transcript)
 	}
+	s.Progress = nil
+	if s.State == session.Working {
+		s.Progress = Progress(s.Transcript)
+	}
 	s.Prototypes = nil
 	if c.Prototypes != nil {
 		s.Prototypes = c.Prototypes.Find(s.Transcript)
@@ -107,6 +111,11 @@ func (c Collector) Transcribe(s *session.Snapshot) {
 // Exchange rereads a session's latest reply, prompt, and model from its transcript.
 func (Collector) Exchange(t session.Transcript) (reply, prompt *session.Message, model string) {
 	return LastExchange(t)
+}
+
+// Progress rereads a working session's current mid-turn activity from its transcript.
+func (Collector) Progress(t session.Transcript) *session.Progress {
+	return Progress(t)
 }
 
 // All describes every live Claude Code session in board order.

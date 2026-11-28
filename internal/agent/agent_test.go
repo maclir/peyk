@@ -23,10 +23,11 @@ type fakeCollector struct {
 	snaps []session.Snapshot
 	err   error
 	calls int
-	// replies, prompts and models hold what each transcript, by id, now says.
-	replies map[string]*session.Message
-	prompts map[string]*session.Message
-	models  map[string]string
+	// replies, prompts, models and progress hold what each transcript, by id, now says.
+	replies  map[string]*session.Message
+	prompts  map[string]*session.Message
+	models   map[string]string
+	progress map[string]*session.Progress
 }
 
 func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message, string) {
@@ -40,8 +41,18 @@ func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *sessi
 	return r, f.prompts[t.ID], m
 }
 
+func (f *fakeCollector) Progress(t session.Transcript) *session.Progress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.progress[t.ID]
+}
+
 func (f *fakeCollector) Transcribe(s *session.Snapshot) {
 	s.SetExchange(f.Exchange(s.Transcript))
+	s.Progress = nil
+	if s.State == session.Working {
+		s.Progress = f.Progress(s.Transcript)
+	}
 }
 
 func (f *fakeCollector) All(context.Context) ([]session.Snapshot, error) {
@@ -1034,5 +1045,45 @@ func TestAntigravityTranscriptWritesRefreshOnConversationOrExchangeChanges(t *te
 	}
 	if c.count() != 4 {
 		t.Fatalf("conversation switch: refreshes = %d, want 4", c.count())
+	}
+}
+
+func TestAntigravityMidTurnProgressPublishesWithoutAFullRefresh(t *testing.T) {
+	ctx := context.Background()
+	app := t.TempDir()
+	mem := store.NewMemory()
+	c := &fakeCollector{
+		prompts:  map[string]*session.Message{"c1": {ID: "0", Text: "start"}},
+		progress: map[string]*session.Progress{"c1": {Tool: "read_file", Detail: "main.go", Thinking: "Checking main."}},
+	}
+	tr := session.Transcript{Tool: session.Antigravity, AppDir: app, Workdir: "/c/gemi"}.WithID("c1")
+	snap := session.Snapshot{ID: "g", Title: "gemi", Path: "/c/gemi", Tool: session.Antigravity, State: session.Working, Transcript: tr}
+	c.Transcribe(&snap)
+	c.set(snap)
+	a := newAgent(c, mem)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := mem.Get(store.Sessions, "g")
+	if got := v.(session.Snapshot).Progress; got == nil || got.Tool != "read_file" {
+		t.Fatalf("initial progress = %+v", got)
+	}
+
+	c.progress["c1"] = &session.Progress{
+		Tool:     "run_command",
+		Detail:   "Run full test suite",
+		Thinking: "Validating edits.",
+		Steps:    []session.Step{{Title: "Edit code", Status: "done"}, {Title: "Run tests", Status: "in_progress"}},
+	}
+	if err := a.RefreshReplies(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() != 1 {
+		t.Fatalf("mid-turn progress caused %d full refreshes", c.count()-1)
+	}
+	v, _ = mem.Get(store.Sessions, "g")
+	got := v.(session.Snapshot).Progress
+	if got == nil || got.Tool != "run_command" || got.Detail != "Run full test suite" || len(got.Steps) != 2 {
+		t.Fatalf("updated progress = %+v", got)
 	}
 }

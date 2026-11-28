@@ -25,6 +25,8 @@ type Collector interface {
 	Repos() ([]string, error)
 	// Exchange rereads a session's latest reply, prompt, and model.
 	Exchange(session.Transcript) (reply, prompt *session.Message, model string)
+	// Progress rereads a working session's current mid-turn activity.
+	Progress(session.Transcript) *session.Progress
 	// Transcribe fills in everything a snapshot reads from its transcript.
 	Transcribe(*session.Snapshot)
 }
@@ -649,6 +651,7 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 		if s.State == session.Working {
 			s.SetExchange(a.Collect.Exchange(s.Transcript))
 			a.applyModel(&s)
+			s.Progress = a.Collect.Progress(s.Transcript)
 			a.sessions[id] = s
 		}
 	}

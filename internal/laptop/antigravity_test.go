@@ -295,3 +295,50 @@ func TestAnAntigravitySessionStatusIsDerivedFromItsTranscriptAndPaneThoughAoeSay
 		t.Errorf("empty conversation: state = %v, want %v", s.State, session.Idle)
 	}
 }
+
+func TestAntigravityProgressReadsStepsThinkingAndToolInCurrentTurn(t *testing.T) {
+	app := t.TempDir()
+	prompt2 := `{"step_index": 4, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-09-10T10:00:00Z", "content": "<USER_REQUEST>\nFix restarts\n</USER_REQUEST>"}`
+
+	// A fresh prompt with no model steps yet must not inherit the prior turn's progress.
+	tr := writeConversation(t, app, "/c/knip", "conv-1", []string{agyPrompt, agyTool, agyResult, agyReply, prompt2}, nil)
+	if p := Progress(tr); p != nil {
+		t.Fatalf("after new prompt: progress = %+v, want nil", p)
+	}
+
+	// Thinking (first paragraph only) and file Path trimmed relative to workdir.
+	readStep := `{"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T10:00:05Z", "thinking": "Inspecting restart paths.\n\nSecond paragraph detail.", "tool_calls": [{"name": "read_file", "args": {"Path": "\"/c/knip/cmd/launchd.go\""}}]}`
+	tr = writeConversation(t, app, "/c/knip", "conv-1", []string{agyPrompt, agyTool, agyResult, agyReply, prompt2, readStep}, nil)
+	p := Progress(tr)
+	if p == nil || p.Tool != "read_file" || p.Detail != "cmd/launchd.go" || p.Thinking != "Inspecting restart paths." {
+		t.Fatalf("read step progress = %+v", p)
+	}
+
+	// Truncated tool_calls with update_steps falls back to transcript_full.jsonl for the checklist.
+	cutSteps := `{"step_index": 6, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T10:00:15Z", "thinking": "**Editing**", "truncated_fields": ["tool_calls"], "tool_calls": [{"name": "update_steps", "args": {"steps": "[{\"status\":\"done\",\"title\":\"Inspect"}}, {"name": "edit_file", "args": {"Path": "\"/c/knip/main.go\""}}]}`
+	fullSteps := `{"step_index": 6, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T10:00:15Z", "thinking": "**Editing**", "tool_calls": [{"name": "update_steps", "args": {"steps": "[{\"status\":\"done\",\"title\":\"Inspect restart paths\"},{\"status\":\"in_progress\",\"title\":\"Update launcher\"}]"}}, {"name": "edit_file", "args": {"Path": "\"/c/knip/main.go\""}}]}`
+	tr = writeConversation(t, app, "/c/knip", "conv-1", []string{prompt2, readStep, cutSteps}, []string{fullSteps})
+	p = Progress(tr)
+	if p == nil || p.Tool != "edit_file" || p.Detail != "main.go" || p.Thinking != "Editing" {
+		t.Fatalf("steps progress = %+v", p)
+	}
+	if len(p.Steps) != 2 || p.Steps[0] != (session.Step{Title: "Inspect restart paths", Status: "done"}) || p.Steps[1] != (session.Step{Title: "Update launcher", Status: "in_progress"}) {
+		t.Fatalf("steps = %+v", p.Steps)
+	}
+
+	// A mid-turn visible reply suppresses its own and older thinking while keeping steps and tool.
+	midReply := `{"step_index": 7, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T10:00:30Z", "content": "Updated launcher; running tests.", "thinking": "Running full test suite now.", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"make test\"", "toolSummary": "\"Run full test suite\""}}]}`
+	tr = writeConversation(t, app, "/c/knip", "conv-1", []string{prompt2, readStep, cutSteps, midReply}, []string{fullSteps})
+	p = Progress(tr)
+	if p == nil || p.Tool != "run_command" || p.Detail != "Run full test suite" || p.Thinking != "" || len(p.Steps) != 2 {
+		t.Fatalf("after mid-turn reply: progress = %+v", p)
+	}
+
+	// A newer tool-only step after the mid-turn reply surfaces its new thinking.
+	afterMid := `{"step_index": 8, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-10T10:00:45Z", "thinking": "Tests passed, checking git status.", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"git status\"", "toolSummary": "\"Check git status\""}}]}`
+	tr = writeConversation(t, app, "/c/knip", "conv-1", []string{prompt2, readStep, cutSteps, midReply, afterMid}, []string{fullSteps})
+	p = Progress(tr)
+	if p == nil || p.Tool != "run_command" || p.Detail != "Check git status" || p.Thinking != "Tests passed, checking git status." || len(p.Steps) != 2 {
+		t.Fatalf("after subsequent step: progress = %+v", p)
+	}
+}

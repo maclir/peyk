@@ -372,6 +372,58 @@ export function pendingLabel(s) {
   return s.state === "working" ? "Working…" : s.state === "needs_input" ? "Waiting for you…" : "Not replied yet";
 }
 
+const TOOL_VERBS = {
+  read_file: "Reading", view_file: "Reading", Read: "Reading",
+  edit_file: "Editing", replace_file_content: "Editing", Edit: "Editing",
+  write_file: "Writing", Write: "Writing",
+  run_command: "Running", Bash: "Running",
+  grep_search: "Searching", Grep: "Searching",
+  find_by_name: "Finding", Glob: "Finding",
+  search_web: "Searching web", WebSearch: "Searching web", WebFetch: "Reading web",
+  invoke_subagent: "Subagent", Agent: "Subagent",
+  run_workflow: "Workflow",
+  manage_task: "Task",
+};
+
+export function hasProgress(p) {
+  return Boolean(p && (p.tool || p.detail || p.thinking || p.steps?.length));
+}
+
+export function toolAction(tool, detail) {
+  if (!tool && !detail) return "";
+  const verb = TOOL_VERBS[tool] ?? tool ?? "";
+  if (!detail) return verb;
+  return verb ? `${verb} · ${detail}` : detail;
+}
+
+// progressLine summarizes what a working agent is currently doing into one
+// line for board cards: the active step from its checklist, else the latest
+// tool call, else its thinking summary.
+export function progressLine(s) {
+  if (s?.state !== "working" || !hasProgress(s.progress)) return "";
+  const p = s.progress;
+  const steps = p.steps ?? [];
+  const active = steps.find((st) => st.status === "in_progress");
+  if (active?.title) {
+    const done = steps.filter((st) => st.status === "done").length;
+    return `${done + 1}/${steps.length} · ${active.title}`;
+  }
+  const action = toolAction(p.tool, p.detail);
+  if (action) return action;
+  return p.thinking || "";
+}
+
+// cardProgress returns a live working line when a worker's progress is newer
+// than its latest visible reply (or no reply has landed for the prompt yet).
+export function cardProgress(s) {
+  const line = progressLine(s);
+  if (!line) return "";
+  if (awaitingReply(s)) return line;
+  const progAt = toDate(s.progress?.at);
+  const msgAt = toDate(s.message?.at);
+  return progAt && (!msgAt || progAt > msgAt) ? line : "";
+}
+
 // withDelivered shows a reply the laptop has typed into a session as its
 // prompt, marked unrecorded, with the agent working on it, until the
 // session's own prompt changes. The laptop publishes that prompt only after the next full refresh.
@@ -383,7 +435,7 @@ export function withDelivered(s, d) {
   if (toDate(s.message?.at) > d.at) return s;
   const n = d.images;
   const text = d.text || `${n} image${n === 1 ? "" : "s"}`;
-  return { ...s, prompt: { text, at: d.at, unrecorded: true }, state: "working", cleared: false };
+  return { ...s, prompt: { text, at: d.at, unrecorded: true }, state: "working", cleared: false, progress: null };
 }
 
 // waitingReplies turns reply commands the laptop has not finished, pending

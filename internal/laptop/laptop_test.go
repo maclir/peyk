@@ -752,3 +752,43 @@ func TestRename(t *testing.T) {
 		t.Fatalf("calls = %s", got)
 	}
 }
+
+func TestClaudeProgressReadsLatestToolAndTodosInCurrentTurn(t *testing.T) {
+	claude := t.TempDir()
+	work := "/c/knip"
+	writeTranscript(t, claude, work, "s", time.Now(),
+		human("2026-11-14T09:00:00Z", `"First task"`),
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:05Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"old cmd"}}]}}`,
+		human("2026-11-14T09:05:00Z", `"Second task"`),
+	)
+	tr := FindTranscript([]string{claude}, work, "s")
+	if p := Progress(tr); p != nil {
+		t.Fatalf("before any tool in current turn: progress = %+v, want nil", p)
+	}
+
+	writeTranscript(t, claude, work, "s", time.Now(),
+		human("2026-11-14T09:05:00Z", `"Second task"`),
+		`{"type":"assistant","timestamp":"2026-11-14T09:05:02Z","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Read code","status":"completed"},{"content":"Edit file","status":"in_progress"}]}}]}}`,
+		`{"type":"assistant","timestamp":"2026-11-14T09:05:04Z","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/c/knip/internal/app.go"}}]}}`,
+	)
+	p := Progress(tr)
+	if p == nil || p.Tool != "Edit" || p.Detail != "internal/app.go" {
+		t.Fatalf("claude progress = %+v", p)
+	}
+	if len(p.Steps) != 2 || p.Steps[0] != (session.Step{Title: "Read code", Status: "done"}) || p.Steps[1] != (session.Step{Title: "Edit file", Status: "in_progress"}) {
+		t.Fatalf("claude steps = %+v", p.Steps)
+	}
+
+	notGit := func(context.Context, string, string, ...string) ([]byte, error) {
+		return nil, errors.New("not a repository")
+	}
+	c := Collector{Run: notGit, ClaudeDirs: []string{claude}, Now: time.Now}
+	working := c.Snapshot(context.Background(), AoeSession{ID: "a", Path: work, AgentSessionID: "s", Status: "running"})
+	if working.Progress == nil || working.Progress.Tool != "Edit" {
+		t.Fatalf("working snapshot progress = %+v", working.Progress)
+	}
+	idle := c.Snapshot(context.Background(), AoeSession{ID: "a", Path: work, AgentSessionID: "s", Status: "idle"})
+	if idle.Progress != nil {
+		t.Fatalf("idle snapshot kept progress = %+v", idle.Progress)
+	}
+}

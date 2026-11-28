@@ -113,6 +113,7 @@ type step struct {
 	Model     string      `json:"model"`
 	CreatedAt time.Time   `json:"created_at"`
 	Content   string      `json:"content"`
+	Thinking  string      `json:"thinking"`
 	ToolCalls []struct {
 		Name string                     `json:"name"`
 		Args map[string]json.RawMessage `json:"args"`
@@ -334,27 +335,171 @@ func antigravityPaneRunning(screen []byte) bool {
 	return hasCancel && hasSpinner
 }
 
-// fullContent finds a step's whole content in transcript_full.jsonl, or
-// keeps the cut one when that file does not have it.
-func fullContent(t session.Transcript, index, cut string) string {
-	f, err := os.Open(filepath.Join(t.Dir, "transcript_full.jsonl"))
+// fullStep finds a step's unclipped record in transcript_full.jsonl, checking
+// the tail first so current-turn lookups avoid scanning older history.
+func fullStep(t session.Transcript, index string) (step, bool) {
+	path := filepath.Join(t.Dir, "transcript_full.jsonl")
+	needle := []byte(index)
+	lines := tail(path)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if bytes.Contains(lines[i], needle) {
+			var s step
+			if json.Unmarshal(lines[i], &s) == nil && s.Index.String() == index {
+				return s, true
+			}
+		}
+	}
+	f, err := os.Open(path)
 	if err != nil {
-		return cut
+		return step{}, false
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 64<<10)
 	for {
 		line, err := r.ReadBytes('\n')
-		if bytes.Contains(line, []byte(index)) {
+		if bytes.Contains(line, needle) {
 			var s step
 			if json.Unmarshal(line, &s) == nil && s.Index.String() == index {
-				return s.Content
+				return s, true
 			}
 		}
 		if err != nil {
-			return cut
+			return step{}, false
 		}
 	}
+}
+
+// fullContent finds a step's whole content in transcript_full.jsonl, or
+// keeps the cut one when that file does not have it.
+func fullContent(t session.Transcript, index, cut string) string {
+	if s, ok := fullStep(t, index); ok {
+		return s.Content
+	}
+	return cut
+}
+
+const maxThinkingRunes = 280
+
+// antigravityProgress reads the current turn's live checklist, latest tool
+// call, and latest thinking summary. Scanning stops at the newest prompt so a
+// previous turn's activity never appears on a new one; thinking stops once a
+// newer visible reply has already landed in the turn.
+func antigravityProgress(t session.Transcript) *session.Progress {
+	if t.ID == "" {
+		return nil
+	}
+	lines := tail(antigravityTranscript(t))
+	var prog session.Progress
+	var sawReply bool
+	for i := len(lines) - 1; i >= 0; i-- {
+		var s step
+		if json.Unmarshal(lines[i], &s) != nil {
+			continue
+		}
+		if s.prompt() {
+			break
+		}
+		if s.Source != "MODEL" || s.Type != "PLANNER_RESPONSE" {
+			continue
+		}
+		if s.reply() {
+			sawReply = true
+		}
+		calls := s.ToolCalls
+		if len(calls) > 0 {
+			if len(prog.Steps) == 0 && contains(s.Truncated, "tool_calls") {
+				for _, c := range calls {
+					if c.Name == "update_steps" {
+						if full, ok := fullStep(t, s.Index.String()); ok {
+							calls = full.ToolCalls
+						}
+						break
+					}
+				}
+			}
+			for j := len(calls) - 1; j >= 0; j-- {
+				c := calls[j]
+				if c.Name == "update_steps" {
+					if len(prog.Steps) == 0 {
+						if steps := parseSteps(c.Args["steps"]); len(steps) > 0 {
+							prog.Steps = steps
+							if prog.At.IsZero() {
+								prog.At = s.CreatedAt
+							}
+						}
+					}
+					continue
+				}
+				if prog.Tool == "" && c.Name != "" {
+					prog.Tool = c.Name
+					prog.Detail = shortToolDetail(antigravityToolLine(c.Args), t.Workdir)
+					if prog.At.IsZero() {
+						prog.At = s.CreatedAt
+					}
+				}
+			}
+		}
+		if prog.Thinking == "" && !sawReply {
+			if th := thinkingSummary(s.Thinking); th != "" {
+				prog.Thinking = th
+				if prog.At.IsZero() {
+					prog.At = s.CreatedAt
+				}
+			}
+		}
+		if prog.Tool != "" && len(prog.Steps) > 0 && (prog.Thinking != "" || sawReply) {
+			break
+		}
+	}
+	if prog.Tool == "" && prog.Thinking == "" && len(prog.Steps) == 0 {
+		return nil
+	}
+	return &prog
+}
+
+func parseSteps(raw json.RawMessage) []session.Step {
+	if len(raw) == 0 {
+		return nil
+	}
+	var inner string
+	if json.Unmarshal(raw, &inner) == nil {
+		raw = []byte(inner)
+	}
+	var rawSteps []session.Step
+	if json.Unmarshal(raw, &rawSteps) != nil {
+		return nil
+	}
+	out := make([]session.Step, 0, len(rawSteps))
+	for _, st := range rawSteps {
+		st.Title = strings.Join(strings.Fields(st.Title), " ")
+		if st.Title == "" {
+			continue
+		}
+		if r := []rune(st.Title); len(r) > maxToolLine {
+			st.Title = string(r[:maxToolLine-1]) + "…"
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// thinkingSummary extracts the first paragraph of an Antigravity thinking
+// summary, bounded so a long step never bloats the session snapshot.
+func thinkingSummary(text string) string {
+	for _, p := range strings.Split(text, "\n\n") {
+		p = strings.Join(strings.Fields(p), " ")
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "**") && strings.HasSuffix(p, "**") && len(p) > 4 {
+			p = strings.TrimSpace(p[2 : len(p)-2])
+		}
+		if r := []rune(p); len(r) > maxThinkingRunes {
+			p = string(r[:maxThinkingRunes-1]) + "…"
+		}
+		return p
+	}
+	return ""
 }
 
 // antigravityHistory is History for an Antigravity conversation. A tool call
@@ -410,7 +555,7 @@ func antigravityToolLine(args map[string]json.RawMessage) string {
 			decoded[k] = v
 		}
 	}
-	for _, k := range []string{"toolSummary", "CommandLine", "AbsolutePath", "TargetFile", "Query", "query", "Url"} {
+	for _, k := range []string{"toolSummary", "CommandLine", "Path", "AbsolutePath", "TargetFile", "Query", "query", "Pattern", "Role", "Description", "Url"} {
 		if line := toolLine(map[string]json.RawMessage{"description": decoded[k]}); line != "" {
 			return line
 		}

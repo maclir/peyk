@@ -1932,6 +1932,72 @@ test.describe('signed in', () => {
     await expect.poll(async () => (await list(page, 'history')).length).toBe(0);
     await expect(convo.locator('.reply:not(.sent)')).toHaveText('Third answer');
   });
+
+  test('a working session shows live progress on the board and in its conversation', async () => {
+    const t0 = new Date(Date.now() - 120_000);
+    const t1 = new Date(Date.now() - 60_000);
+    const t2 = new Date(Date.now() - 30_000);
+    const base = {
+      id: 'g', title: 'gemi', path: '/c/gemi', tool: 'antigravity', model: 'Gemini 4 Neon (High)',
+      aoe_status: 'running', state: 'working', updated_at: new Date(),
+      prompt: { id: '0', text: 'Hold caffeinate across restart', at: t0 },
+    };
+    await put(page, 'sessions/g', {
+      ...base,
+      progress: {
+        tool: 'run_command',
+        detail: 'Run full test suite',
+        thinking: 'Executing the full suite to verify sleep assertions across restarts.',
+        steps: [
+          { title: 'Add sleep assertion', status: 'done' },
+          { title: 'Run full test suite', status: 'in_progress' },
+          { title: 'Restart agent', status: 'pending' },
+        ],
+        at: t1,
+      },
+    });
+    await page.goto('/app/');
+    const card = page.locator('.card', { hasText: 'gemi' });
+    await expect(card.locator('.msg.progline')).toHaveText('2/3 · Run full test suite');
+
+    await card.click();
+    const pending = page.locator('.reply.pending.prog');
+    await expect(pending.locator('.pstep')).toHaveCount(3);
+    await expect(pending.locator('.pstep.in_progress')).toContainText('Run full test suite');
+    await expect(pending.locator('.pthink')).toHaveText('Executing the full suite to verify sleep assertions across restarts.');
+    await expect(pending.locator('.ptool')).toHaveText('Running · Run full test suite');
+
+    // Once a mid-turn reply arrives, it shows in the reply bubble with live progress underneath.
+    await put(page, 'sessions/g', {
+      ...base,
+      message: { id: '5', text: 'Added assertions; running `make test`.', at: t1 },
+      progress: {
+        tool: 'run_command',
+        detail: 'Run full test suite',
+        steps: [
+          { title: 'Add sleep assertion', status: 'done' },
+          { title: 'Run full test suite', status: 'in_progress' },
+          { title: 'Restart agent', status: 'pending' },
+        ],
+        at: t2,
+      },
+    });
+    await expect(page.locator('.convo .reply:not(.sent):not(.pending)')).toContainText('Added assertions; running make test.');
+    await expect(page.locator('.convo .progstrip .ptool')).toHaveText('Running · Run full test suite');
+
+    // Finishing clears the progress strip and shows the final reply on the board.
+    await put(page, 'sessions/g', {
+      ...base,
+      aoe_status: 'idle', state: 'idle',
+      message: { id: '9', text: 'Done and verified.', at: new Date() },
+    });
+    await expect(page.locator('.convo .progstrip')).toHaveCount(0);
+    await expect(page.locator('.convo .reply:not(.sent)')).toHaveText('Done and verified.');
+    await page.goto('/app/');
+    await expect(page.locator('.card', { hasText: 'gemi' }).locator('.msg')).toHaveText('Done and verified.');
+
+    await page.request.delete(`${FIRESTORE}/sessions/g`, { headers: admin });
+  });
 });
 
 // Strips Firestore's typed values back to plain ones for a rewrite.

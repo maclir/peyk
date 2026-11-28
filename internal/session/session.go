@@ -132,6 +132,28 @@ type Message struct {
 	Model string `firestore:"model,omitempty" json:"model,omitempty"`
 }
 
+// Progress is what a working agent is currently doing, read from its
+// transcript mid-turn. It is published only while State is Working and stays
+// separate from Message so notifications, reply binding, and task completion
+// still follow visible replies alone.
+type Progress struct {
+	// Tool and Detail name the latest tool call in the current turn.
+	Tool   string `firestore:"tool,omitempty" json:"tool,omitempty"`
+	Detail string `firestore:"detail,omitempty" json:"detail,omitempty"`
+	// Thinking is the latest summarized thought in the current turn, before
+	// any newer visible reply has landed (Antigravity).
+	Thinking string `firestore:"thinking,omitempty" json:"thinking,omitempty"`
+	// Steps is the current turn's checklist, in order.
+	Steps []Step    `firestore:"steps,omitempty" json:"steps,omitempty"`
+	At    time.Time `firestore:"at,omitempty" json:"at,omitempty"`
+}
+
+// Step is one item of a working agent's live checklist.
+type Step struct {
+	Title  string `firestore:"title" json:"title"`
+	Status string `firestore:"status" json:"status"`
+}
+
 // Entry kinds in a conversation's history.
 const (
 	EntryPrompt = "prompt"
@@ -181,6 +203,9 @@ type Snapshot struct {
 	// Question is what the agent is asking with its multiple-choice dialog,
 	// while that dialog is open.
 	Question *Question `firestore:"question" json:"question,omitempty"`
+	// Progress is what the agent is currently doing mid-turn, present only
+	// while State is Working.
+	Progress *Progress `firestore:"progress,omitempty" json:"progress,omitempty"`
 	// Notified is true from a notification about the session until a device
 	// shows the session. Swiping the notification away leaves it set: only
 	// opening the worker means it was dealt with.

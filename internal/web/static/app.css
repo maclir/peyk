@@ -245,6 +245,19 @@ button.tool.inboxbtn { width: auto; min-width: 40px; padding: 0 8px; gap: 4px; }
 .msg.ask { color: var(--bad); }
 .msg.pending, .reply.pending { font-style: italic; color: var(--muted); }
 .card .msg.pending.working { display: inline-block; align-self: flex-start; max-width: 100%; padding-bottom: 2px; }
+.card .msg.pending.working.progline { font-style: normal; }
+.reply.pending.prog { font-style: normal; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+.reply.pending.prog.progstrip { margin-top: 2px; background: var(--paper); border-color: var(--line); }
+.psteps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.84rem; line-height: 1.35; }
+.pstep { display: flex; align-items: baseline; gap: 7px; color: var(--muted); }
+.pstep .pmark { flex: none; width: 12px; text-align: center; font: 600 0.78rem var(--mono); }
+.pstep.done .pmark { color: var(--ok); }
+.pstep.in_progress { color: var(--ink); font-weight: 600; }
+.pstep.in_progress .pmark { color: var(--run); }
+.pstep.failed, .pstep.failed .pmark { color: var(--bad); }
+.pstep.skipped { text-decoration: line-through; opacity: 0.7; }
+.pthink { margin: 0; font-size: 0.84rem; line-height: 1.42; color: var(--muted); }
+.ptool { margin: 0; font: 0.76rem/1.35 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .convo { display: flex; flex-direction: column; gap: 4px; }
 .convo .earlier { align-self: center; display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
 .convo .earlier .ico svg, .convobar .ico svg { width: 14px; height: 14px; }

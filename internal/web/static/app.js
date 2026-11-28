@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, cardProgress, currentTask, filterQueue, hasProgress, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, toolAction, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -1675,8 +1675,10 @@ async function start(cfg) {
       const st = STATES[s.state] || { label: s.state, tone: "idle" };
       const at = activity(s);
       const task = currentTask(state.tasks, s.id);
+      const prog = cardProgress(s);
       const summary = s.question ? `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`
         : task ? oneLine(task.text)
+        : prog ? oneLine(prog)
         : s.cleared ? "New conversation"
         : s.message ? oneLine(s.message.text)
         : st.label;
@@ -1957,7 +1959,9 @@ async function start(cfg) {
       const at = activity(s);
       const queued = inboxCount(s);
       const ideas = projectOf(s) ? ideaCount(state.ideas, projectOf(s).name) : 0;
+      const prog = cardProgress(s);
       const line = s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
+        : prog ? h("span", { class: "msg pending working progline" }, oneLine(prog))
         : awaitingReply(s) ? h("span", { class: s.state === "working" ? "msg pending working" : "msg pending" }, pendingLabel(s))
         : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
         : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null;
@@ -2006,14 +2010,26 @@ async function start(cfg) {
     const you = () => h("span", { class: "who mine", ...(unrecorded ? { role: "status" } : {}) },
       unrecorded ? "Typed on the laptop · not in the conversation yet" : ["You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""]);
     const pending = awaitingReply(s);
-    const msg = h("div", { class: pending ? (s.state === "working" ? "reply pending working" : "reply pending") : "reply" });
-    if (pending) msg.append(h("p", { role: "status" }, pendingLabel(s)));
-    else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
+    const liveProgress = s.state === "working" && hasProgress(s.progress) ? s.progress : null;
+    const msg = h("div", { class: pending ? (s.state === "working" ? `reply pending working${liveProgress ? " prog" : ""}` : "reply pending") : "reply" });
+    if (pending) {
+      if (liveProgress) {
+        msg.setAttribute("role", "status");
+        msg.append(...progressBody(liveProgress));
+      } else {
+        msg.append(h("p", { role: "status" }, pendingLabel(s)));
+      }
+    } else {
+      msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
+    }
+    const strip = !pending && liveProgress
+      ? h("div", { class: "reply pending working prog progstrip", role: "status" }, ...progressBody(liveProgress))
+      : null;
     const whole = state.history?.id === s.id ? state.history : null;
     const convo = whole
       ? h("div", { class: "convo" }, historyView(s, whole, now),
         unrecorded ? [you(), sent] : null,
-        pending ? msg : null)
+        pending ? msg : strip)
       : h("div", { class: "convo" },
         s.prompt || s.message
           ? h("button", { type: "button", class: "link earlier", onclick: () => openHistory(s) }, icon("up"), "Whole conversation")
@@ -2022,6 +2038,7 @@ async function start(cfg) {
         sent,
         h("span", { class: "who" }, s.title, s.message && !pending ? ` · ${ago(s.message.at, now)}` : ""),
         msg,
+        strip,
       );
     return h("article", { class: "detail" },
       h("div", { class: "dhead" },
@@ -2044,6 +2061,23 @@ async function start(cfg) {
       isWide ? null : facts(s, now),
       replyBox(s),
     );
+  }
+
+  const STEP_MARKS = { done: "✓", in_progress: "●", pending: "○", skipped: "–", failed: "✕" };
+
+  function progressBody(p) {
+    const parts = [];
+    if (p.steps?.length) {
+      parts.push(h("ul", { class: "psteps", "aria-label": "Steps" }, p.steps.map((st) =>
+        h("li", { class: `pstep ${st.status || "pending"}` },
+          h("span", { class: "pmark", "aria-hidden": "true" }, STEP_MARKS[st.status] ?? "○"),
+          h("span", {}, st.title)))));
+    }
+    if (p.thinking) parts.push(h("p", { class: "pthink" }, p.thinking));
+    const action = toolAction(p.tool, p.detail);
+    if (action) parts.push(h("p", { class: "ptool" }, action));
+    if (!parts.length) parts.push(h("p", {}, "Working…"));
+    return parts;
   }
 
   // A render rebuilds the details, so their open state outlives it here.
