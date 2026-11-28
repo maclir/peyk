@@ -148,13 +148,13 @@ func TestPublishPrototypeSendsFileOverSocket(t *testing.T) {
 			call.Reply <- agent.PublishResponse{Error: "unexpected request"}
 			return
 		}
-		call.Reply <- agent.PublishResponse{ID: "abc", URL: "https://peyk.test/#p-abc"}
+		call.Reply <- agent.PublishResponse{ID: "abc", URL: "https://peyk.test/p/abc"}
 	}()
 	var out bytes.Buffer
 	if err := publishPrototype(ctx, []string{htmlPath}, sock, "/code/peyk", &out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out.String()) != "https://peyk.test/#p-abc" {
+	if strings.TrimSpace(out.String()) != "https://peyk.test/p/abc" {
 		t.Fatalf("out = %q", out.String())
 	}
 }

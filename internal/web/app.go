@@ -46,9 +46,10 @@ type Emulators struct {
 }
 
 type App struct {
-	firebase Firebase
-	page     *template.Template
-	revision string
+	firebase  Firebase
+	page      *template.Template
+	protoPage *template.Template
+	revision  string
 	// release names the shell the worker caches. It covers the revision as
 	// well as the assets, so every deploy installs a new worker and refills
 	// its cache with this deploy's release.js; otherwise a deploy that changed
@@ -65,12 +66,13 @@ func New(fb Firebase, revision string) *App {
 	sum := sha256.Sum256([]byte(staticVersion + "\n" + revision))
 	release := hex.EncodeToString(sum[:8])
 	return &App{
-		firebase: fb,
-		page:     template.Must(template.New("page").Parse(pageHTML)),
-		revision: revision,
-		release:  release,
-		worker:   bytes.ReplaceAll(serviceWorkerSource, []byte("__VERSION__"), []byte(release)),
-		module:   []byte(fmt.Sprintf("export const revision = %q;\n", revision)),
+		firebase:  fb,
+		page:      template.Must(template.New("page").Parse(pageHTML)),
+		protoPage: template.Must(template.New("proto").Parse(protoPageHTML)),
+		revision:  revision,
+		release:   release,
+		worker:    bytes.ReplaceAll(serviceWorkerSource, []byte("__VERSION__"), []byte(release)),
+		module:    []byte(fmt.Sprintf("export const revision = %q;\n", revision)),
 	}
 }
 
@@ -84,22 +86,52 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
 	mux.HandleFunc("GET "+SandboxPath, sandbox)
+	mux.HandleFunc("GET /p/{id}", a.prototype)
 	mux.HandleFunc("POST "+SharePath, shareFallback)
 	mux.HandleFunc("GET /robots.txt", robots)
 	mux.HandleFunc("GET /{$}", a.home)
 	return securityHeaders(a.firebase, mux)
 }
 
-func (a *App) home(w http.ResponseWriter, _ *http.Request) {
-	cfg := ""
-	if a.firebase.APIKey != "" {
-		b, _ := json.Marshal(a.firebase)
-		cfg = string(b)
+func (a *App) firebaseJSON() string {
+	if a.firebase.APIKey == "" {
+		return ""
 	}
+	b, _ := json.Marshal(a.firebase)
+	return string(b)
+}
+
+func (a *App) home(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.page.Execute(w, cfg); err != nil {
+	if err := a.page.Execute(w, a.firebaseJSON()); err != nil {
 		http.Error(w, "could not render page", http.StatusInternalServerError)
 	}
+}
+
+func (a *App) prototype(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !isPrototypeID(id) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := struct{ Config, ID string }{Config: a.firebaseJSON(), ID: id}
+	if err := a.protoPage.Execute(w, data); err != nil {
+		http.Error(w, "could not render page", http.StatusInternalServerError)
+	}
+}
+
+func isPrototypeID(id string) bool {
+	if len(id) != 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // robots asks crawlers to stay out. It is advisory; the X-Robots-Tag header on
@@ -308,6 +340,26 @@ const offlineHTML = `<!doctype html>
 <p>This needs the network, and there is none right now. Everything you saved is
 on the server, waiting.</p>
 <p><a href="/">Try again</a></p></main></body></html>`
+
+// protoPageHTML is the standalone page at /p/{id}: full-bleed viewport with
+// none of peyk's app chrome. prototype.js reads the document with the owner's
+// Firebase session and loads it into the full-viewport /sandbox frame.
+const protoPageHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131516" media="(prefers-color-scheme: dark)">
+<title>Prototype · peyk</title>
+<link rel="icon" href="/static/favicon.ico" sizes="32x32">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<style>html,body{margin:0;height:100%;color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;color:#18212e;background:#f5f6f8}
+@media(prefers-color-scheme:dark){html,body{color:#e4e9f1;background:#131516}}
+main{padding:2rem 1rem;max-width:36rem;margin:0 auto}
+button{font:inherit;font-weight:600;padding:.6rem 1rem;border-radius:10px;border:1px solid #2f54c8;background:#2f54c8;color:#f5f6f8;cursor:pointer}
+@media(prefers-color-scheme:dark){button{border-color:#8aa6ff;background:#8aa6ff;color:#131516}}
+iframe{display:block;width:100%;height:100%;border:0}</style></head>
+<body data-firebase="{{.Config}}" data-id="{{.ID}}"><main id="status"><p>Loading…</p></main>
+<script type="module" src="/static/prototype.js"></script></body></html>`
 
 // sandboxHTML waits for the embedding peyk window to post a prototype's HTML,
 // then replaces itself with that document while keeping /sandbox's strict CSP.

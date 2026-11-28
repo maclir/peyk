@@ -68,7 +68,7 @@ func TestPublishStoresHTMLAndAttachesItToTheMatchingWorker(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 	wantID := PrototypeID(html)
-	if resp.ID != wantID || resp.URL != testOrigin+"/#p-"+wantID {
+	if resp.ID != wantID || resp.URL != testOrigin+"/p/"+wantID {
 		t.Fatalf("resp = %+v, want id %s", resp, wantID)
 	}
 	stored, ok := mem.Get(store.Prototypes, wantID)
@@ -81,7 +81,7 @@ func TestPublishStoresHTMLAndAttachesItToTheMatchingWorker(t *testing.T) {
 	}
 	snapVal, _ := mem.Get(store.Sessions, "g")
 	snap := snapVal.(session.Snapshot)
-	if len(snap.Prototypes) != 1 || snap.Prototypes[0].URL != "#p-"+wantID || snap.Prototypes[0].Title != "Working tag" {
+	if len(snap.Prototypes) != 1 || snap.Prototypes[0].URL != "/p/"+wantID || snap.Prototypes[0].Title != "Working tag" {
 		t.Fatalf("session prototypes = %+v", snap.Prototypes)
 	}
 

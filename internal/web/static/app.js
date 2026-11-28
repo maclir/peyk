@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, hostedPrototypeID, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -210,8 +210,6 @@ async function start(cfg) {
     answers: new Map(),
     // The worker whose whole conversation is open: { id, latest, data, nodes, unsub }.
     history: null,
-    // The self-hosted prototype shown on #p-<id>: { id, loading, doc, error, el, cleanup }.
-    proto: null,
     // Replies the laptop has typed into a session whose prompt it has not
     // published yet, by session id: { text, images, at, after }.
     delivered: new Map() };
@@ -361,7 +359,6 @@ async function start(cfg) {
 
   auth.onAuthStateChanged(a, async (user) => {
     stop();
-    closeProto();
     state.user = null;
     if (!user) {
       hstatEl.hidden = true;
@@ -502,18 +499,14 @@ async function start(cfg) {
     const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
 
     followMove(shownSession());
-    const protoID = shownPrototype();
-    if (!protoID && state.proto) closeProto();
-    const id = protoID ? null : shownSession();
+    const id = shownSession();
     const s = id && shownWorker(id);
     followHistory(s);
-    renderHeader(s, protoID);
+    renderHeader(s);
     const isWide = wide();
-    const page = location.hash.startsWith("#pair-") || location.hash === "#log" || Boolean(protoID);
-    document.documentElement.classList.toggle("proto", Boolean(protoID));
+    const page = location.hash.startsWith("#pair-") || location.hash === "#log";
     if (location.hash.startsWith("#pair-")) app.replaceChildren(pairView(location.hash.slice(6)));
     else if (location.hash === "#log") app.replaceChildren(logView());
-    else if (protoID) renderPrototype(protoID);
     else if (s) app.replaceChildren(detail(s, isWide));
     else app.replaceChildren(isWide ? inboxPane() : board());
     dheadSize.disconnect();
@@ -538,8 +531,8 @@ async function start(cfg) {
 
   // The header's left side is the same on every page; its right side holds
   // what the page offers. Off the workers list the logo leads back to it.
-  function renderHeader(s, protoID = "") {
-    const onBoard = !s && !protoID && !location.hash.startsWith("#pair-") && location.hash !== "#log";
+  function renderHeader(s) {
+    const onBoard = !s && !location.hash.startsWith("#pair-") && location.hash !== "#log";
     barEl.classList.toggle("sub", !onBoard);
     homeEl.setAttribute("aria-label", onBoard ? "peyk" : "Back to workers");
     const p = s && projectOf(s);
@@ -602,59 +595,6 @@ async function start(cfg) {
 
   function shownSession() {
     return location.hash.startsWith("#s-") ? decodeURIComponent(location.hash.slice(3)) : null;
-  }
-
-  function shownPrototype() {
-    return hostedPrototypeID(location.hash);
-  }
-
-  function closeProto() {
-    state.proto?.cleanup?.();
-    state.proto = null;
-  }
-
-  // Self-hosted prototypes are read from Firestore and handed to the opaque-origin
-  // /sandbox frame once it signals ready. Reusing p.el across snapshot renders
-  // keeps an interactive prototype from reloading while the user uses it.
-  function renderPrototype(id) {
-    if (state.proto?.id !== id) {
-      closeProto();
-      const p = { id, loading: true, doc: null, error: "", el: null, cleanup: null };
-      state.proto = p;
-      fs.getDoc(fs.doc(db, "prototypes", id)).then((snap) => {
-        if (state.proto !== p) return;
-        p.loading = false;
-        if (!snap.exists()) p.error = "Prototype not found.";
-        else p.doc = snap.data();
-        render();
-      }, (err) => {
-        if (state.proto !== p) return;
-        p.loading = false;
-        p.error = `Could not load prototype: ${err.message}`;
-        render();
-      });
-    }
-    const p = state.proto;
-    if (p.loading) return app.replaceChildren(loading("Loading prototype…"));
-    if (p.error) return app.replaceChildren(h("p", { class: "notice" }, p.error));
-    if (!p.el) {
-      const title = p.doc.title || "Prototype";
-      const frame = h("iframe", { class: "protoframe", src: "/sandbox", sandbox: "allow-scripts", title });
-      const onMessage = (e) => {
-        if (e.source !== frame.contentWindow || e.data?.type !== "peyk-sandbox-ready") return;
-        window.removeEventListener("message", onMessage);
-        frame.contentWindow.postMessage({ type: "peyk-prototype", html: p.doc.html }, "*");
-      };
-      window.addEventListener("message", onMessage);
-      p.cleanup = () => window.removeEventListener("message", onMessage);
-      p.el = h("section", { class: "protoview", "aria-label": title },
-        h("div", { class: "protobar" },
-          h("button", { type: "button", class: "link", onclick: () => (history.length > 1 ? history.back() : (location.hash = "")) }, icon("back"), "Back"),
-          h("span", { class: "prototitle" }, title),
-          p.doc.created_at ? h("span", { class: "when" }, ago(p.doc.created_at, Date.now())) : null),
-        frame);
-    }
-    if (app.firstElementChild !== p.el) app.replaceChildren(p.el);
   }
 
   // Scrolling down reads further into the list, so the composer gets out of
@@ -1505,7 +1445,7 @@ async function start(cfg) {
       detail: [
         h("span", {}, `done ${ago(t.done_at, now)} ago${t.commit ? ` · ${t.commit}` : ""}${r?.current ? " · current conversation" : ""}`),
         t.ideate ? h("button", { type: "button", class: "link", onclick: () => openInbox(t.project) }, icon("bulb"), `${t.ideas ?? 0} idea${t.ideas === 1 ? "" : "s"}`) : null,
-        t.prototype_url ? h("a", protoLinkAttrs(t.prototype_url, { class: "plink" }),
+        t.prototype_url ? h("a", { class: "plink", href: t.prototype_url, target: "_blank", rel: "noopener noreferrer" },
           icon(PROTOTYPE_KINDS[t.prototype]?.icon ?? "proto"), "Open prototype") : null,
       ],
     });
@@ -2688,16 +2628,10 @@ function ideateTag(ask) {
   return h("span", { class: "tag ideas", title: label, "aria-label": label }, icon("bulb"), "Ideas");
 }
 
-function protoLinkAttrs(url, extra = {}) {
-  return hostedPrototypeID(url)
-    ? { ...extra, href: url }
-    : { ...extra, href: url, target: "_blank", rel: "noopener noreferrer" };
-}
-
 function prototypes(list, now) {
   return h("ul", { class: "protos" },
     list.map((p) => h("li", {},
-      h("a", protoLinkAttrs(p.url, { class: `k-${prototypeKind(p.kind)}` }), icon(PROTOTYPE_KINDS[prototypeKind(p.kind)].icon), h("span", { class: "grow" }, p.title || p.url)),
+      h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", class: `k-${prototypeKind(p.kind)}` }, icon(PROTOTYPE_KINDS[prototypeKind(p.kind)].icon), h("span", { class: "grow" }, p.title || p.url)),
       h("span", { class: "when" }, ago(p.at, now)),
     )),
   );
@@ -2737,7 +2671,6 @@ const ICONS = {
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
-  back: '<path d="M15 18l-6-6 6-6"/>',
   chevup: '<path d="M6 15l6-6 6 6"/>',
   clip: '<path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/>',
   tray: '<path d="M4 13l2.5-7h11L20 13v6H4z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',

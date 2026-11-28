@@ -150,7 +150,7 @@ func (a *Agent) handlePublish(ctx context.Context, req PublishRequest) PublishRe
 		return PublishResponse{Error: err.Error()}
 	}
 	id := PrototypeID(req.HTML)
-	hashURL := "#p-" + id
+	pathURL := "/p/" + id
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		title = ExtractHTMLTitle(req.HTML, "")
@@ -173,7 +173,7 @@ func (a *Agent) handlePublish(ctx context.Context, req PublishRequest) PublishRe
 		}
 	}
 	if s, ok := matchSessionDir(a.sessions, req.Dir); ok && s.Transcript.ID != "" && a.RecordPrototype != nil {
-		proto := session.Prototype{URL: hashURL, Title: title, Kind: session.PrototypeHTML, At: now}
+		proto := session.Prototype{URL: pathURL, Title: title, Kind: session.PrototypeHTML, At: now}
 		if err := a.RecordPrototype(s.Transcript.ID, proto); err != nil {
 			return PublishResponse{Error: fmt.Sprintf("record prototype: %v", err)}
 		}
@@ -183,9 +183,9 @@ func (a *Agent) handlePublish(ctx context.Context, req PublishRequest) PublishRe
 			}
 		}
 	}
-	outURL := hashURL
+	outURL := pathURL
 	if a.Commands != nil && a.Commands.Origin != "" {
-		outURL = strings.TrimRight(a.Commands.Origin, "/") + "/" + hashURL
+		outURL = strings.TrimRight(a.Commands.Origin, "/") + pathURL
 	}
 	return PublishResponse{ID: id, URL: outURL}
 }

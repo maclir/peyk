@@ -19,6 +19,7 @@ const ASSETS = [
   "/static/icon.svg",
   "/static/app.css",
   "/static/app.js",
+  "/static/prototype.js",
   "/static/release.js",
   "/static/board.js",
   "/static/markdown.js",

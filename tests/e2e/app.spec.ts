@@ -1494,7 +1494,7 @@ test.describe('signed in', () => {
     await expect(link).toHaveAttribute('target', '_blank');
   });
 
-  test('a self-hosted prototype opens in an isolated sandboxed iframe inside the app', async () => {
+  test('a self-hosted prototype opens on a standalone page with strict sandbox isolation', async () => {
     const html = `<!doctype html><html><head><title>Working tag</title></head><body>
       <button id="bump" type="button">Count: 0</button>
       <p id="sec"></p>
@@ -1515,33 +1515,26 @@ test.describe('signed in', () => {
     const id = createHash('sha256').update(html).digest('hex');
     await put(page, `prototypes/${id}`, { html, title: 'Working tag', kind: 'html', created_at: new Date() });
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
-      prototypes: [{ url: `#p-${id}`, title: 'Working tag', kind: 'html', at: new Date() }] });
+      prototypes: [{ url: `/p/${id}`, title: 'Working tag', kind: 'html', at: new Date() }] });
 
     await page.goto('/#s-k');
     const link = page.getByRole('link', { name: 'Working tag' });
-    await expect(link).toHaveAttribute('href', `#p-${id}`);
-    await expect(link).not.toHaveAttribute('target', '_blank');
-    await link.click();
+    await expect(link).toHaveAttribute('href', `/p/${id}`);
+    await expect(link).toHaveAttribute('target', '_blank');
 
-    await expect(page).toHaveURL(new RegExp(`#p-${id}$`));
-    await expect(page.locator('.prototitle')).toHaveText('Working tag');
-    const frame = page.frameLocator('iframe.protoframe');
+    const [protoPage] = await Promise.all([page.waitForEvent('popup'), link.click()]);
+    await expect(protoPage).toHaveURL(new RegExp(`/p/${id}$`));
+    await expect(protoPage).toHaveTitle('Working tag');
+    await expect(protoPage.locator('header.bar')).toHaveCount(0);
+    const frame = protoPage.frameLocator('iframe');
     await expect(frame.locator('#bump')).toHaveText('Count: 0');
     await expect(frame.locator('#sec')).toHaveText('origin=null parentBlocked=true storageBlocked=true fetchBlocked=true');
     await frame.locator('#bump').click();
     await expect(frame.locator('#bump')).toHaveText('Count: 1');
 
-    // A live Firestore update does not reload the running prototype iframe.
-    await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
-      message: { text: 'Updated while viewing prototype', at: new Date() },
-      prototypes: [{ url: `#p-${id}`, title: 'Working tag', kind: 'html', at: new Date() }] });
-    await expect(frame.locator('#bump')).toHaveText('Count: 1');
-
-    await page.getByRole('button', { name: 'Back' }).click();
-    await expect(page).toHaveURL(/#s-k$/);
-
-    await page.goto(`/#p-${'0'.repeat(64)}`);
-    await expect(page.getByText('Prototype not found.')).toBeVisible();
+    await protoPage.goto(`/p/${'0'.repeat(64)}`);
+    await expect(protoPage.getByText('Prototype not found.')).toBeVisible();
+    await protoPage.close();
     await page.request.delete(`${FIRESTORE}/prototypes/${id}`, { headers: admin });
   });
 

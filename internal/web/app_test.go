@@ -83,6 +83,29 @@ func TestSandboxServesStrictOpaqueCSP(t *testing.T) {
 	}
 }
 
+func TestPrototypePageValidatesHashAndCarriesConfig(t *testing.T) {
+	h := New(Firebase{APIKey: "k", AuthDomain: "p.firebaseapp.com", ProjectID: "p", AppID: "a"}, "abc1234").Handler()
+	id := strings.Repeat("ab", 32)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/p/"+id, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /p/%s = %d, want 200", id, rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`data-id="` + id + `"`, `data-firebase="{&#34;apiKey&#34;:&#34;k&#34;`, `/static/prototype.js`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("prototype page missing %q", want)
+		}
+	}
+	for _, bad := range []string{"/p/short", "/p/" + strings.Repeat("AB", 32)} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, bad, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", bad, rec.Code)
+		}
+	}
+}
+
 func TestUnknownPathIsNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ideas", nil))

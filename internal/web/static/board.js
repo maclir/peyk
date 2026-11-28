@@ -186,13 +186,6 @@ export function prototypeKind(kind) {
   return PROTOTYPE_KINDS[kind] && kind !== "any" ? kind : "other";
 }
 
-// hostedPrototypeID returns the SHA-256 id of a self-hosted prototype link
-// ("#p-<sha256>"), or "" for external URLs such as Claude Artifacts.
-export function hostedPrototypeID(url) {
-  const m = /^#p-([0-9a-f]{64})$/.exec(String(url ?? ""));
-  return m ? m[1] : "";
-}
-
 // The order a task's prototype toggle steps through; "" is an ordinary task.
 const PROTOTYPE_STEPS = ["", "html", "design", "any"];
 

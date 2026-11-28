@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, hostedPrototypeID, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -162,15 +162,6 @@ describe('board', () => {
     for (let i = 0; i < 4; i++) seen.push(kind = nextPrototype(kind));
     expect(seen).toEqual(['html', 'design', 'any', '']);
     expect(nextPrototype(undefined)).toBe('html');
-  });
-
-  it('recognizes self-hosted prototype hashes and leaves external URLs alone', () => {
-    const id = 'a1'.repeat(32);
-    expect(hostedPrototypeID(`#p-${id}`)).toBe(id);
-    expect(hostedPrototypeID('https://claude.ai/artifact/abc')).toBe('');
-    expect(hostedPrototypeID('#p-short')).toBe('');
-    expect(hostedPrototypeID(`#p-${'A1'.repeat(32)}`)).toBe('');
-    expect(hostedPrototypeID(null)).toBe('');
   });
 
   it('formats ages', () => {
