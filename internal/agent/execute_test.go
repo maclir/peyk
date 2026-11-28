@@ -721,3 +721,87 @@ func TestClearingAnAntigravitySessionMovesItsTranscriptDir(t *testing.T) {
 		t.Fatalf("after refresh while stale: Transcript.Dir = %q, want %q", got, wantDir)
 	}
 }
+
+func TestWorkerKeepsItsModelAcrossClearSwitchAndMove(t *testing.T) {
+	ph := newPhone(t)
+	ctx := context.Background()
+	c := &fakeCollector{
+		replies: map[string]*session.Message{"old": {ID: "r1", Text: "Done.", Model: "claude-opus-5-5"}},
+	}
+	stale := session.Snapshot{
+		ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, DefaultModel: "haiku",
+		Transcript: session.Transcript{ID: "old"},
+	}
+	stale.SetExchange(c.Exchange(stale.Transcript))
+	c.set(stale)
+	mem := store.NewMemory()
+	a := newAgent(c, mem)
+	a.Commands = &Commands{Act: &fakeActions{}, Keys: func() ([]command.Key, error) { return []command.Key{ph.key}, nil }, Origin: testOrigin, RPID: testRP}
+	a.models = map[string]bool{"gemini-4-neon-high": true}
+	published := func(id string) session.Snapshot {
+		t.Helper()
+		v, _ := mem.Get(store.Sessions, id)
+		return v.(session.Snapshot)
+	}
+
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("k").Model; got != "claude-opus-5-5" {
+		t.Fatalf("initial model = %q, want claude-opus-5-5", got)
+	}
+
+	// Clearing from the phone keeps the worker's known model instead of dropping it
+	// or falling back to its initial launch flag.
+	if err := a.execute(ctx, ph.command("c1", command.Payload{Type: command.Clear, Session: "k"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if s := published("k"); !s.Cleared || s.Model != "claude-opus-5-5" {
+		t.Fatalf("after clear: cleared=%v model=%q", s.Cleared, s.Model)
+	}
+	// Once aoe reports the empty cleared conversation, refresh still preserves it.
+	empty := session.Snapshot{ID: "k", Title: "knip", Path: "/c/knip", State: session.Idle, DefaultModel: "haiku", Transcript: session.Transcript{ID: "cleared-k"}}
+	empty.SetExchange(c.Exchange(empty.Transcript))
+	c.set(empty)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("k").Model; got != "claude-opus-5-5" {
+		t.Fatalf("after refresh on cleared conversation: model = %q, want claude-opus-5-5", got)
+	}
+
+	// Switching models with /model publishes the requested model immediately
+	// and keeps it until the conversation writes a reply on a newer turn.
+	if err := a.execute(ctx, ph.command("c2", command.Payload{Type: command.Model, Session: "k", Text: "sonnet"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("k").Model; got != "sonnet" {
+		t.Fatalf("after /model: model = %q, want sonnet", got)
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("k").Model; got != "sonnet" {
+		t.Fatalf("after refresh before next reply: model = %q, want sonnet", got)
+	}
+	c.replies["cleared-k"] = &session.Message{ID: "r2", Text: "Hi.", Model: "claude-sonnet-5-5"}
+	replied := empty
+	replied.SetExchange(c.Exchange(replied.Transcript))
+	c.set(replied)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("k").Model; got != "claude-sonnet-5-5" {
+		t.Fatalf("after reply on new model: model = %q, want claude-sonnet-5-5", got)
+	}
+
+	// Moving to another tool publishes the requested model before the new
+	// conversation has any transcript.
+	c.set(session.Snapshot{ID: "swapped-k", Title: "knip", Path: "/c/knip", State: session.Working, Tool: session.Antigravity})
+	if err := a.execute(ctx, ph.command("c3", command.Payload{Type: command.Model, Session: "k", Text: "gemini-4-neon-high"}, a.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if got := published("swapped-k").Model; got != "gemini-4-neon-high" {
+		t.Fatalf("after move: model = %q, want gemini-4-neon-high", got)
+	}
+}

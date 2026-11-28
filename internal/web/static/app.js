@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -585,6 +585,11 @@ async function start(cfg) {
     const next = [...state.sessions.values()].find((x) => x.title === title);
     if (!next) return;
     state.moving.delete(id);
+    const asked = state.modelAsked.get(id);
+    if (asked) {
+      state.modelAsked.delete(id);
+      state.modelAsked.set(next.id, asked);
+    }
     history.replaceState(history.state, "", `#s-${encodeURIComponent(next.id)}`);
   }
 
@@ -1993,8 +1998,8 @@ async function start(cfg) {
     return out;
   }
 
-  // The model chip names what wrote the latest reply and opens the sheet of
-  // models to switch to. Its dot is the tool: Claude Code or Antigravity.
+  // The model chip names the worker's model and opens the sheet of models to
+  // switch to. Its dot is the tool: Claude Code or Antigravity.
   function modelChip(s) {
     const name = shownModel(s).name || (s.tool === "antigravity" ? "Antigravity" : "Model");
     return h("button", { type: "button", class: `modelchip ${s.tool === "antigravity" ? "ag" : "cc"}`, "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",
@@ -2013,18 +2018,11 @@ async function start(cfg) {
     return [...cc, ...ag];
   }
 
-  // A switch asked for shows as the model asked for until a reply comes from
-  // it; the reply's own model is the truth after that, or if the switch fails.
+  // A switch asked for shows as the model asked for until the worker reports
+  // it; the worker's own model is the truth after that, or if the switch fails.
   function shownModel(s) {
     const asked = state.modelAsked.get(s.id);
-    let actual;
-    if (s.tool === "antigravity") {
-      const name = modelBase(s.message?.model);
-      const m = modelChoices().flatMap((p) => p.models).find((c) => c.tool === "antigravity" && c.name === name);
-      actual = { key: m?.key ?? "", name };
-    } else {
-      actual = { key: modelFamily(s.message?.model), name: modelName(s.message?.model) };
-    }
+    const actual = sessionModel(s, state.models?.antigravity, modelVersions(state.sessions.values()));
     if (asked && asked.key !== actual.key) return asked;
     if (asked) state.modelAsked.delete(s.id);
     return actual;

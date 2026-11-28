@@ -124,7 +124,7 @@ func TestLatestIsTheNewerOfReplyAndPrompt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		var s Snapshot
-		s.SetExchange(tt.reply, tt.prompt)
+		s.SetExchange(tt.reply, tt.prompt, "")
 		if s.Latest != tt.want {
 			t.Errorf("SetExchange(%+v, %+v).Latest = %q, want %q", tt.reply, tt.prompt, s.Latest, tt.want)
 		}
@@ -158,13 +158,17 @@ func TestCompareOrdersByStateThenRecentActivityThenTitle(t *testing.T) {
 
 func TestSetExchangeTakesAnIdeationRunsIdeasOutOfItsReply(t *testing.T) {
 	var s Snapshot
-	s.SetExchange(&Message{ID: "r", Text: "Found one.\n\n```peyk-ideas\n[{\"lens\":\"reuse\",\"title\":\"T\",\"task\":\"x\"}]\n```"}, nil)
-	if s.Message.Text != "Found one." || len(s.Ideas) != 1 || s.Ideas[0].Title != "T" {
-		t.Fatalf("message = %q, ideas = %+v", s.Message.Text, s.Ideas)
+	s.SetExchange(&Message{ID: "r", Text: "Found one.\n\n```peyk-ideas\n[{\"lens\":\"reuse\",\"title\":\"T\",\"task\":\"x\"}]\n```"}, nil, "claude-opus-5-5")
+	if s.Message.Text != "Found one." || len(s.Ideas) != 1 || s.Ideas[0].Title != "T" || s.Model != "claude-opus-5-5" {
+		t.Fatalf("message = %q, model = %q, ideas = %+v", s.Message.Text, s.Model, s.Ideas)
 	}
-	s.SetExchange(&Message{ID: "r2", Text: "Plain"}, nil)
-	if s.Message.Text != "Plain" || s.Ideas != nil {
-		t.Fatalf("message = %q, ideas = %+v", s.Message.Text, s.Ideas)
+	s.SetExchange(&Message{ID: "r2", Text: "Plain", Model: "claude-sonnet-5-5"}, nil, "")
+	if s.Message.Text != "Plain" || s.Ideas != nil || s.Model != "claude-sonnet-5-5" {
+		t.Fatalf("message = %q, model = %q, ideas = %+v", s.Message.Text, s.Model, s.Ideas)
+	}
+	s.SetExchange(nil, &Message{ID: "p1", Text: "First"}, "Gemini 4 Neon (High)")
+	if s.Message != nil || s.Model != "Gemini 4 Neon (High)" {
+		t.Fatalf("without reply: message = %+v, model = %q", s.Message, s.Model)
 	}
 }
 

@@ -81,6 +81,21 @@ func (s AoeSession) runsAntigravity() bool {
 	return len(fields) == 0 || filepath.Base(fields[0]) == "agy"
 }
 
+// commandModel returns the model named by --model in a session's launch
+// command, or "" when the command names none.
+func commandModel(cmd string) string {
+	fields := strings.Fields(cmd)
+	for i, f := range fields {
+		if f == "--model" && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"'`)
+		}
+		if v, ok := strings.CutPrefix(f, "--model="); ok {
+			return strings.Trim(v, `"'`)
+		}
+	}
+	return ""
+}
+
 // Show returns one session including its status and agent session id.
 func (a Aoe) Show(ctx context.Context, id string) (AoeSession, error) {
 	out, err := a.cmd(ctx, "session", "show", id, "--json")

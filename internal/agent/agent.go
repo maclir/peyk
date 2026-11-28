@@ -23,8 +23,8 @@ import (
 type Collector interface {
 	All(context.Context) ([]session.Snapshot, error)
 	Repos() ([]string, error)
-	// Exchange rereads a session's latest reply and prompt.
-	Exchange(session.Transcript) (reply, prompt *session.Message)
+	// Exchange rereads a session's latest reply, prompt, and model.
+	Exchange(session.Transcript) (reply, prompt *session.Message, model string)
 	// Transcribe fills in everything a snapshot reads from its transcript.
 	Transcribe(*session.Snapshot)
 }
@@ -180,6 +180,9 @@ type Agent struct {
 	// clears follows sessions cleared from the phone until aoe reports
 	// their new conversation, keyed by session id.
 	clears map[string]clearedTo
+	// modelSwitches keeps a model requested with /model until the worker's
+	// conversation records a newer turn, keyed by session id.
+	modelSwitches map[string]modelSwitch
 
 	published map[string]map[string]string
 	// The last published state, which commands act on.
@@ -195,6 +198,7 @@ func (a *Agent) Refresh(ctx context.Context) error {
 		return err
 	}
 	a.followClears(snaps)
+	a.followModels(snaps)
 	repos, err := a.Collect.Repos()
 	if err != nil {
 		return err
@@ -419,11 +423,86 @@ func (a *Agent) cleared(ctx context.Context, id, transcript string) error {
 	a.clears[id] = clearedTo{stale: stale, id: transcript}
 	s.Transcript = s.Transcript.WithID(transcript)
 	a.Collect.Transcribe(&s)
+	a.applyModel(&s)
 	a.sessions[id] = s
 	if err := a.publishSessions(ctx); err != nil {
 		return err
 	}
 	return a.dropHeld(ctx)
+}
+
+// modelSwitch is a model requested for a session and the conversation state
+// that existed when it was sent, so the agent knows when a newer turn's
+// transcript supersedes it.
+type modelSwitch struct {
+	model       string
+	staleConv   string
+	staleReply  string
+	stalePrompt string
+}
+
+func messageID(m *session.Message) string {
+	if m == nil {
+		return ""
+	}
+	return m.ID
+}
+
+func (a *Agent) recordModelSwitch(id, model string, s session.Snapshot) {
+	if a.modelSwitches == nil {
+		a.modelSwitches = map[string]modelSwitch{}
+	}
+	a.modelSwitches[id] = modelSwitch{
+		model:       model,
+		staleConv:   s.Transcript.ID,
+		staleReply:  messageID(s.Message),
+		stalePrompt: messageID(s.Prompt),
+	}
+}
+
+// applyModel sets s.Model from a pending /model switch, the conversation's
+// transcript, the worker's previous known model (preserved across /clear), or
+// its launch/profile default, in that order.
+func (a *Agent) applyModel(s *session.Snapshot) {
+	if sw, ok := a.modelSwitches[s.ID]; ok {
+		advanced := false
+		if s.Model != "" {
+			if s.Tool == session.Antigravity {
+				advanced = s.Transcript.ID != sw.staleConv || (s.Prompt != nil && s.Prompt.ID != sw.stalePrompt)
+			} else {
+				advanced = s.Transcript.ID != sw.staleConv || (s.Message != nil && s.Message.ID != sw.staleReply)
+			}
+		}
+		if advanced {
+			delete(a.modelSwitches, s.ID)
+			return
+		}
+		s.Model = sw.model
+		return
+	}
+	if s.Model != "" {
+		return
+	}
+	if prev, ok := a.sessions[s.ID]; ok && prev.Tool == s.Tool && prev.Model != "" {
+		s.Model = prev.Model
+		return
+	}
+	if s.DefaultModel != "" {
+		s.Model = s.DefaultModel
+	}
+}
+
+func (a *Agent) followModels(snaps []session.Snapshot) {
+	live := map[string]bool{}
+	for i := range snaps {
+		live[snaps[i].ID] = true
+		a.applyModel(&snaps[i])
+	}
+	for id := range a.modelSwitches {
+		if !live[id] {
+			delete(a.modelSwitches, id)
+		}
+	}
 }
 
 // conversationsChanged says whether any session ended, or moved to another
@@ -561,6 +640,7 @@ func (a *Agent) RefreshReplies(ctx context.Context) error {
 	for id, s := range a.sessions {
 		if s.State == session.Working {
 			s.SetExchange(a.Collect.Exchange(s.Transcript))
+			a.applyModel(&s)
 			a.sessions[id] = s
 		}
 	}
@@ -581,7 +661,7 @@ func (a *Agent) antigravityMoved(s session.Snapshot) bool {
 	if s.State != session.NeedsInput && laptop.AntigravityAsking(s.Transcript) {
 		return true
 	}
-	reply, prompt := a.Collect.Exchange(s.Transcript)
+	reply, prompt, _ := a.Collect.Exchange(s.Transcript)
 	return !sameMessage(reply, s.Message) || !sameMessage(prompt, s.Prompt)
 }
 

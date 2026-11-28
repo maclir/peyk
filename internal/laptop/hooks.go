@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 var peykPing = regexp.MustCompile(`\bpeyk"?\s+ping\b`)
@@ -53,3 +54,22 @@ func pings(s hookSettings, event string) bool {
 
 // profileOf returns the Claude Code profile that holds a transcript directory.
 func profileOf(t string) string { return filepath.Dir(filepath.Dir(t)) }
+
+// SettingsModel returns the default model configured in a Claude Code
+// profile's settings.json, or "" when none is set or the file cannot be read.
+func SettingsModel(claudeDir string) string {
+	if claudeDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	if err != nil {
+		return ""
+	}
+	var s struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(data, &s) != nil {
+		return ""
+	}
+	return strings.TrimSpace(s.Model)
+}

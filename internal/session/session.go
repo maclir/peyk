@@ -158,7 +158,11 @@ type Snapshot struct {
 	AoeStatus string `firestore:"aoe_status" json:"aoe_status"`
 	// Tool is the coding tool the session runs: "" for Claude Code, or
 	// Antigravity.
-	Tool    string   `firestore:"tool,omitempty" json:"tool,omitempty"`
+	Tool string `firestore:"tool,omitempty" json:"tool,omitempty"`
+	// Model is the model the worker is running on: a Claude Code model id or
+	// alias (such as "claude-opus-5-5" or "sonnet"), or an Antigravity model
+	// name or id.
+	Model   string   `firestore:"model,omitempty" json:"model,omitempty"`
 	State   State    `firestore:"state" json:"state"`
 	Git     *Git     `firestore:"git" json:"git,omitempty"`
 	Message *Message `firestore:"message" json:"message,omitempty"`
@@ -192,6 +196,11 @@ type Snapshot struct {
 	// the rest of the reply. They reach the phone as idea documents when
 	// the run's task finishes, not on the snapshot.
 	Ideas []idea.Draft `firestore:"-" json:"-"`
+	// DefaultModel is the fallback model read from the session's launch
+	// flags or profile settings, kept separate from the transcript so the
+	// agent can prefer a worker's last known model over its launch flag
+	// after /clear. It is not published.
+	DefaultModel string `firestore:"-" json:"-"`
 }
 
 // Prototype is a page a session published with Claude Code's Artifact tool.
@@ -240,18 +249,21 @@ const MaxPrototypes = 10
 // ClearCommand is the prompt recorded for a conversation started by /clear.
 const ClearCommand = "/clear"
 
-// SetExchange records the latest reply and prompt read from the transcript.
-// A conversation is known to be empty only when its own transcript, rather
-// than a guess at the directory's newest one, has no reply and no prompt
-// other than the /clear that started it.
-func (s *Snapshot) SetExchange(reply, prompt *Message) {
+// SetExchange records the latest reply, prompt and model read from the
+// transcript. A conversation is known to be empty only when its own
+// transcript, rather than a guess at the directory's newest one, has no reply
+// and no prompt other than the /clear that started it.
+func (s *Snapshot) SetExchange(reply, prompt *Message, model string) {
 	s.Ideas = nil
 	if reply != nil {
 		r := *reply
 		r.Text, s.Ideas = idea.Split(r.Text)
 		reply = &r
 	}
-	s.Message, s.Prompt = reply, prompt
+	if model == "" && reply != nil {
+		model = reply.Model
+	}
+	s.Message, s.Prompt, s.Model = reply, prompt, model
 	s.Cleared = s.Transcript.ID != "" && reply == nil && (prompt == nil || prompt.Text == ClearCommand)
 	s.Conversation = s.Transcript.ID
 	s.Latest = ""

@@ -66,12 +66,13 @@ func newestMod(dir string) time.Time {
 // for a session whose own transcript aoe has not recorded.
 const recentTranscripts = 3
 
-// LastExchange returns the agent's latest text reply and the last prompt a
-// person sent it. A session's own transcript is authoritative: two sessions
-// can share a directory, and a transcript just started by /clear rightly has
-// neither yet. Only without a recorded transcript does it fall back to the
-// directory's newest ones, taking the one with the latest activity.
-func LastExchange(t session.Transcript) (reply, prompt *session.Message) {
+// LastExchange returns the agent's latest text reply, the last prompt a
+// person sent it, and the model the conversation last used. A session's own
+// transcript is authoritative: two sessions can share a directory, and a
+// transcript just started by /clear rightly has none yet. Only without a
+// recorded transcript does it fall back to the directory's newest ones, taking
+// the one with the latest activity.
+func LastExchange(t session.Transcript) (reply, prompt *session.Message, model string) {
 	if t.Tool == session.Antigravity {
 		return antigravityExchange(t)
 	}
@@ -84,12 +85,14 @@ func LastExchange(t session.Transcript) (reply, prompt *session.Message) {
 	}
 	var latest time.Time
 	for _, path := range candidates {
-		r, p := lastInFile(path)
+		r, p, m := lastInFile(path)
 		if at := newest(r, p); at.After(latest) {
-			latest, reply, prompt = at, r, p
+			latest, reply, prompt, model = at, r, p, m
+		} else if model == "" && m != "" && latest.IsZero() {
+			model = m
 		}
 	}
-	return reply, prompt
+	return reply, prompt, model
 }
 
 func newest(ms ...*session.Message) time.Time {
@@ -304,11 +307,12 @@ func openingClear(path string) (time.Time, bool) {
 }
 
 // lastInFile reports the /clear that started the transcript as its prompt
-// when a person has sent nothing since.
-func lastInFile(path string) (reply, prompt *session.Message) {
+// when a person has sent nothing since, and reads the model from the latest
+// non-synthetic assistant entry even before a text reply is written.
+func lastInFile(path string) (reply, prompt *session.Message, model string) {
 	lines := tail(path)
 	var cleared *session.Message
-	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil); i-- {
+	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil || model == ""); i-- {
 		if cleared == nil && bytes.Contains(lines[i], clearMarker) {
 			var e entry
 			if json.Unmarshal(lines[i], &e) == nil && e.Type == "user" && !e.IsSidechain {
@@ -316,18 +320,23 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 			}
 			continue
 		}
-		isReply := reply == nil && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
+		isAssistant := (reply == nil || model == "") && bytes.Contains(lines[i], []byte(`"type":"assistant"`))
 		isPrompt := prompt == nil && (bytes.Contains(lines[i], []byte(`"kind":"human"`)) || bytes.Contains(lines[i], bashInput))
-		if !isReply && !isPrompt {
+		if !isAssistant && !isPrompt {
 			continue
 		}
 		var e entry
 		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
 			continue
 		}
-		if isReply && e.Type == "assistant" {
-			if text := e.text(); text != "" {
-				reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp, Model: replyModel(e.Message.Model)}
+		if isAssistant && e.Type == "assistant" {
+			if model == "" {
+				model = replyModel(e.Message.Model)
+			}
+			if reply == nil {
+				if text := e.text(); text != "" {
+					reply = &session.Message{ID: e.UUID, Text: text, At: e.Timestamp, Model: replyModel(e.Message.Model)}
+				}
 			}
 		} else if isPrompt {
 			if text := e.humanPrompt(); text != "" {
@@ -339,26 +348,9 @@ func lastInFile(path string) (reply, prompt *session.Message) {
 		prompt = cleared
 	}
 	if reply != nil && reply.Model == "" {
-		reply.Model = lastModel(lines)
+		reply.Model = model
 	}
-	return reply, prompt
-}
-
-// lastModel is the model of the latest reply a model wrote, for a latest
-// reply Claude Code wrote itself, such as an API error.
-func lastModel(lines [][]byte) string {
-	for i := len(lines) - 1; i >= 0; i-- {
-		if !bytes.Contains(lines[i], []byte(`"model"`)) {
-			continue
-		}
-		var e entry
-		if json.Unmarshal(lines[i], &e) == nil && e.Type == "assistant" && !e.IsSidechain {
-			if m := replyModel(e.Message.Model); m != "" {
-				return m
-			}
-		}
-	}
-	return ""
+	return reply, prompt, model
 }
 
 // replyModel leaves out the placeholder Claude Code records for a reply no
@@ -500,8 +492,11 @@ func stopped(line []byte) []string {
 // turn finishing does not mean its work has. Only the session's own
 // transcript is read, because only its own process runs its tasks.
 func Backgrounded(t session.Transcript) bool {
-	if t.ID == "" || t.Tool == session.Antigravity {
+	if t.ID == "" {
 		return false
+	}
+	if t.Tool == session.Antigravity {
+		return antigravityBackgrounded(t)
 	}
 	running := map[string]bool{}
 	for _, line := range tail(filepath.Join(t.Dir, t.ID+".jsonl")) {

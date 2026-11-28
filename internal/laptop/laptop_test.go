@@ -219,7 +219,7 @@ func human(ts, content string) string {
 }
 
 func reply(claude, work, id string) *session.Message {
-	r, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: id})
+	r, _, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: id})
 	return r
 }
 
@@ -265,7 +265,7 @@ func TestLastExchangeFindsAPromptSentWhileWorking(t *testing.T) {
 		queued("2026-11-14T09:00:30Z", "Also add a test"),
 		assistant("2026-11-14T09:01:00Z", "Done."),
 	)
-	_, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
+	_, p, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
 	if p == nil || p.Text != "Also add a test" {
 		t.Fatalf("prompt = %+v", p)
 	}
@@ -280,7 +280,7 @@ func TestLastExchangeFindsAShellCommandAPersonSent(t *testing.T) {
 		`{"type":"user","timestamp":"2026-11-14T09:01:01Z","message":{"role":"user","content":[{"type":"text","text":"<bash-input>echo quoted</bash-input>"}]}}`,
 		assistant("2026-11-14T09:01:05Z", "3p is a pool."),
 	)
-	_, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
+	_, p, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "s"})
 	if p == nil || p.ID != "b1" || p.Text != "! git pushwhat is 3p?" {
 		t.Fatalf("prompt = %+v", p)
 	}
@@ -298,7 +298,7 @@ func TestLastExchangeFindsThePromptAPersonSent(t *testing.T) {
 		`{"type":"user","timestamp":"2026-11-14T09:01:03Z","message":{"content":"<command-name>/clear</command-name>"}}`,
 		assistant("2026-11-14T09:02:00Z", "Both added."),
 	)
-	r, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"})
+	r, p, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "s"})
 	if r == nil || r.Text != "Both added." {
 		t.Fatalf("reply = %+v", r)
 	}
@@ -333,18 +333,18 @@ func TestLastExchangeReportsTheClearThatStartedTheConversation(t *testing.T) {
 		clearEntry("2026-11-14T09:00:00Z"),
 		human("2026-11-14T09:01:00Z", `"Next task"`),
 	)
-	r, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "fresh"})
+	r, p, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "fresh"})
 	if r != nil || p == nil || p.Text != "/clear" || !p.At.Equal(time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("reply = %+v, prompt = %+v", r, p)
 	}
-	if _, p := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "after"}); p == nil || p.Text != "Next task" {
+	if _, p, _ := LastExchange(session.Transcript{Dir: TranscriptDir(claude, work), ID: "after"}); p == nil || p.Text != "Next task" {
 		t.Fatalf("a prompt sent after the clear wins: %+v", p)
 	}
 }
 
 func TestLastExchangeWithoutTranscripts(t *testing.T) {
-	if r, p := LastExchange(session.Transcript{Dir: "/nowhere", ID: "x"}); r != nil || p != nil {
-		t.Fatalf("want nil, got %+v %+v", r, p)
+	if r, p, m := LastExchange(session.Transcript{Dir: "/nowhere", ID: "x"}); r != nil || p != nil || m != "" {
+		t.Fatalf("want nil, got %+v %+v %q", r, p, m)
 	}
 }
 
@@ -705,6 +705,37 @@ func TestLastExchangeNamesTheModelThatWroteTheReply(t *testing.T) {
 	)
 	if m := reply(claude, "/w", "s"); m == nil || m.Model != "claude-sonnet-5-5" {
 		t.Fatalf("reply = %+v, want it named for claude-sonnet-5-5", m)
+	}
+	// A tool call before any text reply still names the model.
+	writeTranscript(t, claude, "/w", "tool", time.Now(),
+		human("2026-11-14T09:00:00Z", `"Check files"`),
+		`{"type":"assistant","timestamp":"2026-11-14T09:00:02Z","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","name":"Read","input":{}}]}}`,
+	)
+	if r, _, model := LastExchange(session.Transcript{Dir: TranscriptDir(claude, "/w"), ID: "tool"}); r != nil || model != "claude-opus-5-5" {
+		t.Fatalf("tool-only turn: reply = %+v, model = %q", r, model)
+	}
+}
+
+func TestSnapshotDefaultModelComesFromLaunchFlagOrSettings(t *testing.T) {
+	claude := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claude, "settings.json"), []byte(`{"model":"opus"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notGit := func(context.Context, string, string, ...string) ([]byte, error) {
+		return nil, errors.New("not a repository")
+	}
+	c := Collector{Run: notGit, ClaudeDirs: []string{claude}, Now: time.Now}
+	fromSettings := c.Snapshot(context.Background(), AoeSession{ID: "a", Path: "/w", Tool: "claude", Status: "idle"})
+	if fromSettings.DefaultModel != "opus" {
+		t.Fatalf("from settings = %q, want opus", fromSettings.DefaultModel)
+	}
+	fromFlag := c.Snapshot(context.Background(), AoeSession{ID: "b", Path: "/w", Tool: "claude", Command: "claude --model sonnet", Status: "idle"})
+	if fromFlag.DefaultModel != "sonnet" {
+		t.Fatalf("from flag = %q, want sonnet", fromFlag.DefaultModel)
+	}
+	fromEq := c.Snapshot(context.Background(), AoeSession{ID: "c", Path: "/w", Tool: session.Antigravity, Command: "agy --model=gemini-4-neon-high", Status: "idle"})
+	if fromEq.DefaultModel != "gemini-4-neon-high" {
+		t.Fatalf("from --model= = %q, want gemini-4-neon-high", fromEq.DefaultModel)
 	}
 }
 

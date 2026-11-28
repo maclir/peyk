@@ -110,6 +110,7 @@ type step struct {
 	Index     json.Number `json:"step_index"`
 	Source    string      `json:"source"`
 	Type      string      `json:"type"`
+	Model     string      `json:"model"`
 	CreatedAt time.Time   `json:"created_at"`
 	Content   string      `json:"content"`
 	ToolCalls []struct {
@@ -146,25 +147,31 @@ func antigravityTranscript(t session.Transcript) string {
 }
 
 // antigravityExchange is LastExchange for an Antigravity conversation. The
-// reply names the model last picked in the conversation, if it says.
-func antigravityExchange(t session.Transcript) (reply, prompt *session.Message) {
+// model comes from the newest planner response or prompt model-selection
+// record, even before the model writes its first reply or after the opening
+// prompt scrolls past the tail window.
+func antigravityExchange(t session.Transcript) (reply, prompt *session.Message, model string) {
 	if t.ID == "" {
-		return nil, nil
+		return nil, nil, ""
 	}
 	lines := tail(antigravityTranscript(t))
-	model := ""
 	for i := len(lines) - 1; i >= 0 && (reply == nil || prompt == nil || model == ""); i-- {
 		var s step
 		if json.Unmarshal(lines[i], &s) != nil {
 			continue
 		}
 		switch {
-		case s.reply() && reply == nil:
-			text := s.Content
-			if contains(s.Truncated, "content") {
-				text = fullContent(t, s.Index.String(), text)
+		case s.Source == "MODEL" && s.Type == "PLANNER_RESPONSE":
+			if model == "" && s.Model != "" {
+				model = s.Model
 			}
-			reply = &session.Message{ID: s.Index.String(), Text: strings.TrimSpace(text), At: s.CreatedAt}
+			if reply == nil && strings.TrimSpace(s.Content) != "" {
+				text := s.Content
+				if contains(s.Truncated, "content") {
+					text = fullContent(t, s.Index.String(), text)
+				}
+				reply = &session.Message{ID: s.Index.String(), Text: strings.TrimSpace(text), At: s.CreatedAt}
+			}
 		case s.prompt():
 			if prompt == nil {
 				prompt = &session.Message{ID: s.Index.String(), Text: promptText(s.Content), At: s.CreatedAt}
@@ -177,7 +184,77 @@ func antigravityExchange(t session.Transcript) (reply, prompt *session.Message) 
 	if reply != nil {
 		reply.Model = model
 	}
-	return reply, prompt
+	return reply, prompt, model
+}
+
+var (
+	agTaskStarted  = regexp.MustCompile(`Tool is running as a background task with task id: (\S+)`)
+	agTaskFinished = regexp.MustCompile(`Task id "([^"]+)" (?:finished|failed|cancelled|killed|exited)`)
+)
+
+// antigravityBackgrounded reports whether an Antigravity conversation has a
+// non-daemon background task that has not finished or been killed.
+func antigravityBackgrounded(t session.Transcript) bool {
+	if t.ID == "" {
+		return false
+	}
+	running := map[string]bool{}
+	var allDaemons bool
+	for _, line := range tail(antigravityTranscript(t)) {
+		var s step
+		if json.Unmarshal(line, &s) != nil {
+			continue
+		}
+		switch {
+		case s.Source == "MODEL" && s.Type == "PLANNER_RESPONSE":
+			var bgCalls, daemonCalls int
+			for _, c := range s.ToolCalls {
+				if c.Name == "run_command" || c.Name == "schedule" {
+					bgCalls++
+					if argBool(c.Args["IsDaemon"]) {
+						daemonCalls++
+					}
+				}
+				if c.Name == "manage_task" && argString(c.Args["Action"]) == "kill" {
+					if id := argString(c.Args["TaskId"]); id != "" {
+						delete(running, id)
+					}
+				}
+			}
+			allDaemons = bgCalls > 0 && bgCalls == daemonCalls
+		case s.Source == "MODEL" && s.Type == "GENERIC":
+			if !allDaemons {
+				if m := agTaskStarted.FindStringSubmatch(s.Content); m != nil {
+					running[m[1]] = true
+				}
+			}
+		case s.Source == "SYSTEM" && s.Type == "SYSTEM_MESSAGE":
+			for _, m := range agTaskFinished.FindAllStringSubmatch(s.Content, -1) {
+				delete(running, m[1])
+			}
+		}
+	}
+	return len(running) > 0
+}
+
+func argString(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	var inner string
+	if json.Unmarshal([]byte(s), &inner) == nil {
+		return inner
+	}
+	return s
+}
+
+func argBool(raw json.RawMessage) bool {
+	var b bool
+	if json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	return argString(raw) == "true"
 }
 
 // antigravityStepStatus derives an Antigravity session's status from the last

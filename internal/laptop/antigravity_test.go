@@ -57,15 +57,58 @@ func TestAntigravityExchangeReadsThePromptTheReplyAndTheModelPicked(t *testing.T
 	if tr.ID != "conv-1" || tr.Tool != session.Antigravity {
 		t.Fatalf("transcript = %+v, want the directory's latest Antigravity conversation", tr)
 	}
-	reply, prompt := LastExchange(tr)
+	reply, prompt, model := LastExchange(tr)
 	if prompt == nil || prompt.Text != "Should we move to 3.8 Flash?" || prompt.ID != "0" {
 		t.Fatalf("prompt = %+v, want only what was typed", prompt)
 	}
 	if reply == nil || reply.Text != "### Short answer\n\nYes, for four of five projects." || reply.ID != "3" {
 		t.Fatalf("reply = %+v, want the whole reply from transcript_full.jsonl", reply)
 	}
-	if reply.Model != "Gemini 3.8 Flash (High)" || !reply.At.Equal(time.Date(2026, 9, 10, 9, 57, 0, 0, time.UTC)) {
-		t.Fatalf("reply = %+v", reply)
+	if model != "Gemini 3.8 Flash (High)" || reply.Model != "Gemini 3.8 Flash (High)" || !reply.At.Equal(time.Date(2026, 9, 10, 9, 57, 0, 0, time.UTC)) {
+		t.Fatalf("reply = %+v, model = %q", reply, model)
+	}
+
+	// Before the first reply lands, the prompt already names the model.
+	working := writeConversation(t, app, "/c/knip", "conv-working", []string{agyPrompt, agyTool}, nil)
+	r, p, m := LastExchange(working)
+	if r != nil || p == nil || m != "Gemini 3.8 Flash (High)" {
+		t.Fatalf("before first reply: reply = %+v, prompt = %+v, model = %q", r, p, m)
+	}
+
+	// A planner response's own model field still names the model after the
+	// opening prompt is no longer in the tail.
+	plannerOnly := writeConversation(t, app, "/c/knip", "conv-tail", []string{
+		`{"step_index": 50, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "model": "gemini-4-neon-high", "content": "Done."}`,
+	}, nil)
+	if _, _, m := LastExchange(plannerOnly); m != "gemini-4-neon-high" {
+		t.Fatalf("planner model = %q, want gemini-4-neon-high", m)
+	}
+}
+
+func TestAntigravityBackgroundedTracksRunningTasks(t *testing.T) {
+	app := t.TempDir()
+	startCall := `{"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"make test\""}}]}`
+	started := `{"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "RUNNING", "content": "Tool is running as a background task with task id: conv-1/task-2\nLog output:"}`
+	waitingReply := `{"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "content": "Waiting for tests."}`
+	finished := `{"step_index": 4, "source": "SYSTEM", "type": "SYSTEM_MESSAGE", "status": "DONE", "content": "[Message] content=Task id \"conv-1/task-2\" finished with result: ok"}`
+	killed := `{"step_index": 4, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": [{"name": "manage_task", "args": {"Action": "\"kill\"", "TaskId": "\"conv-1/task-2\""}}]}`
+	daemonCall := `{"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "\"npm run dev\"", "IsDaemon": "true"}}]}`
+
+	tr := writeConversation(t, app, "/c/peyk", "conv-1", []string{startCall, started, waitingReply}, nil)
+	if !Backgrounded(tr) {
+		t.Fatal("running background task should report backgrounded")
+	}
+	tr = writeConversation(t, app, "/c/peyk", "conv-1", []string{startCall, started, waitingReply, finished}, nil)
+	if Backgrounded(tr) {
+		t.Fatal("finished background task should not report backgrounded")
+	}
+	tr = writeConversation(t, app, "/c/peyk", "conv-1", []string{startCall, started, waitingReply, killed}, nil)
+	if Backgrounded(tr) {
+		t.Fatal("killed background task should not report backgrounded")
+	}
+	tr = writeConversation(t, app, "/c/peyk", "conv-1", []string{daemonCall, started, waitingReply}, nil)
+	if Backgrounded(tr) {
+		t.Fatal("daemon background task should not report backgrounded")
 	}
 }
 
@@ -89,8 +132,8 @@ func TestAntigravityWithoutAConversationHasNothing(t *testing.T) {
 	if tr.ID != "" || tr.Dir != "" {
 		t.Fatalf("transcript = %+v", tr)
 	}
-	if r, p := LastExchange(tr); r != nil || p != nil {
-		t.Fatalf("exchange = %+v, %+v", r, p)
+	if r, p, m := LastExchange(tr); r != nil || p != nil || m != "" {
+		t.Fatalf("exchange = %+v, %+v, %q", r, p, m)
 	}
 	if q := PendingQuestion(tr); q != nil {
 		t.Fatalf("question = %+v", q)

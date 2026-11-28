@@ -23,15 +23,21 @@ type fakeCollector struct {
 	snaps []session.Snapshot
 	err   error
 	calls int
-	// replies and prompts hold what each transcript, by id, now says.
+	// replies, prompts and models hold what each transcript, by id, now says.
 	replies map[string]*session.Message
 	prompts map[string]*session.Message
+	models  map[string]string
 }
 
-func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message) {
+func (f *fakeCollector) Exchange(t session.Transcript) (*session.Message, *session.Message, string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.replies[t.ID], f.prompts[t.ID]
+	r := f.replies[t.ID]
+	m := f.models[t.ID]
+	if m == "" && r != nil {
+		m = r.Model
+	}
+	return r, f.prompts[t.ID], m
 }
 
 func (f *fakeCollector) Transcribe(s *session.Snapshot) {

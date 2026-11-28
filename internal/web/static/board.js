@@ -446,26 +446,37 @@ export const MODEL_POOLS = [
   },
 ];
 
-// modelVersions names each Claude Code alias by the newest model of its
-// family a worker has replied with, as Claude Code resolves the alias: opus
-// is "Opus 5.5" once a worker has run it.
+const CLAUDE_ALIASES = new Set(MODEL_POOLS.flatMap((p) => p.models.map((m) => m.alias)));
+
+// modelVersions names each Claude Code alias by the newest concrete model of
+// its family a worker has run, as Claude Code resolves the alias: opus is
+// "Opus 5.5" once a worker has run it.
 export function modelVersions(sessions) {
   const out = {};
   for (const s of sessions) {
-    const id = s.tool === "antigravity" ? "" : s.message?.model;
-    const family = modelFamily(id);
-    if (family && (!out[family] || modelName(id).localeCompare(out[family], undefined, { numeric: true }) > 0)) out[family] = modelName(id);
+    if (s.tool === "antigravity") continue;
+    for (const id of [s.model, s.message?.model]) {
+      const m = /^claude-([a-z]+)-\d+/.exec(id ?? "");
+      if (!m) continue;
+      const family = m[1];
+      const name = modelName(id);
+      if (!out[family] || name.localeCompare(out[family], undefined, { numeric: true }) > 0) out[family] = name;
+    }
   }
   return out;
 }
 
-// modelFamily is the alias a model id belongs to: "claude-opus-5-5" is opus.
+// modelFamily is the alias a model id belongs to: "claude-opus-5-5" and
+// "opus" are both opus.
 export function modelFamily(id) {
+  if (CLAUDE_ALIASES.has(id)) return id;
   return /^claude-([a-z]+)-/.exec(id ?? "")?.[1] ?? "";
 }
 
-// modelName is a model id as people say it: "claude-opus-5-5" is "Opus 5.5".
+// modelName is a model id as people say it: "claude-opus-5-5" is "Opus 5.5",
+// and an alias such as "opus" is "Opus".
 export function modelName(id) {
+  if (CLAUDE_ALIASES.has(id)) return `${id[0].toUpperCase()}${id.slice(1)}`;
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(id ?? "");
   if (!m) return id ?? "";
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
@@ -522,4 +533,21 @@ export function antigravityPools(models) {
     }
   }
   return pools.filter((p) => p.models.length);
+}
+
+// sessionModel resolves a worker's model to its choice key in the sheet and
+// the name shown on the chip, accepting a transcript model, a Claude Code
+// alias, or an Antigravity model id.
+export function sessionModel(s, agModels, versions = {}) {
+  const raw = s.model || s.message?.model || "";
+  if (!raw) return { key: "", name: "" };
+  if (s.tool === "antigravity") {
+    const listed = (agModels ?? []).find((m) => m.id === raw);
+    const name = modelBase(listed ? listed.name : raw);
+    const match = antigravityPools(agModels).flatMap((p) => p.models).find((m) => m.name === name);
+    return { key: match?.id ?? listed?.id ?? "", name };
+  }
+  const family = modelFamily(raw);
+  const name = raw === family ? (versions[family] ?? modelName(raw)) : modelName(raw);
+  return { key: family, name };
 }

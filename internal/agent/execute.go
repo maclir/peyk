@@ -371,7 +371,13 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 		case session.Working, session.NeedsInput:
 			return fmt.Errorf("%s is %s; /model would land in its turn", s.Title, s.State.Label())
 		}
-		return act.Send(ctx, s.ID, "/model "+model)
+		if err := act.Send(ctx, s.ID, "/model "+model); err != nil {
+			return err
+		}
+		a.recordModelSwitch(s.ID, model, s)
+		s.Model = model
+		a.sessions[s.ID] = s
+		return a.publishSessions(ctx)
 	}
 	if proj := a.projects[s.Title]; !proj.Free {
 		return fmt.Errorf("%s is not free: %s", s.Title, proj.Busy)
@@ -381,6 +387,7 @@ func (a *Agent) switchModel(ctx context.Context, act Actions, s session.Snapshot
 		return err
 	}
 	a.sessionsChanged = true
+	a.recordModelSwitch(id, model, session.Snapshot{})
 	return act.Send(ctx, id, catchUp(s))
 }
 

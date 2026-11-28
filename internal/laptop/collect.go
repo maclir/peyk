@@ -51,16 +51,21 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 	if s.runsAntigravity() {
 		t = AntigravityTranscript(c.AntigravityDir, s.Path, s.AgentSessionID)
 	}
+	defaultModel := commandModel(s.Command)
+	if defaultModel == "" && t.Tool == "" && t.Dir != "" {
+		defaultModel = SettingsModel(profileOf(t.Dir))
+	}
 	snap := session.Snapshot{
-		ID:         s.ID,
-		Title:      s.Title,
-		Path:       s.Path,
-		AoeStatus:  s.Status,
-		Tool:       t.Tool,
-		State:      session.Derive(c.activity(ctx, s, t), Backgrounded(t), git),
-		Git:        git,
-		Transcript: t,
-		UpdatedAt:  c.Now(),
+		ID:           s.ID,
+		Title:        s.Title,
+		Path:         s.Path,
+		AoeStatus:    s.Status,
+		Tool:         t.Tool,
+		State:        session.Derive(c.activity(ctx, s, t), Backgrounded(t), git),
+		Git:          git,
+		Transcript:   t,
+		DefaultModel: defaultModel,
+		UpdatedAt:    c.Now(),
 	}
 	// aoe's own status hook is Claude Code's; Antigravity's hooks are global.
 	if c.AoeHooks != "" && t.Dir != "" && t.Tool == "" && !PingsPeyk(profileOf(t.Dir)) {
@@ -98,8 +103,8 @@ func (c Collector) Transcribe(s *session.Snapshot) {
 	}
 }
 
-// Exchange rereads a session's latest reply and prompt from its transcript.
-func (Collector) Exchange(t session.Transcript) (reply, prompt *session.Message) {
+// Exchange rereads a session's latest reply, prompt, and model from its transcript.
+func (Collector) Exchange(t session.Transcript) (reply, prompt *session.Message, model string) {
 	return LastExchange(t)
 }
 

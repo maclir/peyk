@@ -146,8 +146,9 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .tag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--paper); color: var(--muted); font: 600 0.64rem var(--mono); white-space: nowrap; text-decoration: none; }
 /* The model chip sits with the tags; its dot is the model's family. The
-   padding is the tap target; the negative margin keeps the tag row's height. */
-.modelchip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 13px 8px; margin: -13px 0; border: 0; border-radius: 99px; background: none; color: var(--ink); font: 600 0.7rem var(--mono); }
+   padding is the tap target; content-box keeps the 18px row height while
+   extending the tap area, and the negative margins align the dot with the title. */
+.modelchip { flex: none; display: inline-flex; align-items: center; gap: 5px; box-sizing: content-box; height: 18px; padding: 13px 8px; margin: -13px 0 -13px -8px; border: 0; border-radius: 99px; background: none; color: var(--ink); font: 600 0.7rem var(--mono); }
 .modelchip .mdot, .mrow .mdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .modelchip.cc .mdot, .mrow.cc .mdot { background: var(--design); }
 .modelchip.ag .mdot { background: var(--accent); }

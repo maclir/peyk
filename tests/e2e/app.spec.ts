@@ -487,10 +487,26 @@ test.describe('signed in', () => {
 
   test('a worker names its model, switches it, and moves to another tool from the sheet, signed', async () => {
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
-      message: { text: 'Done.', at: new Date(), model: 'claude-opus-5-5' } });
+      model: 'claude-opus-5-5', cleared: true });
     await page.goto('/#s-m');
     await passkeyOn(page);
-    await page.getByRole('button', { name: 'Model: Opus 5.5. Change model' }).click();
+    const chip = page.getByRole('button', { name: 'Model: Opus 5.5. Change model' });
+    await expect(chip).toBeVisible();
+    // Even without other tags, the model chip keeps its row height, does not
+    // collide with the title, and lines its dot up with the title's left edge.
+    const layout = await page.evaluate(() => {
+      const h2 = document.querySelector('.dtitle h2')!.getBoundingClientRect();
+      const tags = document.querySelector('.dtitle .tags')!.getBoundingClientRect();
+      const btn = document.querySelector('.modelchip')!.getBoundingClientRect();
+      const dot = document.querySelector('.modelchip .mdot')!.getBoundingClientRect();
+      return { h2Left: h2.left, h2Bottom: h2.bottom, tagsHeight: tags.height, btnHeight: btn.height, dotLeft: dot.left, dotTop: dot.top };
+    });
+    expect(layout.tagsHeight).toBeGreaterThanOrEqual(18);
+    expect(layout.btnHeight).toBeGreaterThanOrEqual(40);
+    expect(layout.dotTop).toBeGreaterThanOrEqual(layout.h2Bottom);
+    expect(Math.abs(layout.dotLeft - layout.h2Left)).toBeLessThanOrEqual(1);
+
+    await chip.click();
     const sheet = page.getByRole('dialog', { name: 'Model for mdl' });
     await expect(sheet.getByRole('button', { name: /^Opus 5.5,/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(sheet.getByRole('button', { name: 'Fable, uses 5 of 5 of the quota per task' })).toHaveAttribute('aria-pressed', 'false');
@@ -506,7 +522,7 @@ test.describe('signed in', () => {
     await put(page, `commands/${sw.name.split('/').pop()}`, { ...plain(sw.fields), status: 'done' });
     await expect(page.locator('.dhead .outcome')).toHaveText('Switched to Sonnet');
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
-      message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
+      model: 'claude-sonnet-5-5', message: { text: 'Done again.', at: new Date(), model: 'claude-sonnet-5-5' } });
     await expect(page.getByRole('button', { name: 'Model: Sonnet 5.5. Change model' })).toBeVisible();
 
     await put(page, 'laptop/models', { antigravity: [
@@ -526,8 +542,9 @@ test.describe('signed in', () => {
       .find((c) => JSON.parse(c.fields.payload.stringValue).text === 'gemini-4-neon-high')!;
     await put(page, `commands/${move.name.split('/').pop()}`, { ...plain(move.fields), status: 'done' });
     await page.request.delete(`${FIRESTORE}/sessions/m`, { headers: admin });
-    await put(page, 'sessions/m2', { id: 'm2', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', tool: 'antigravity', updated_at: new Date(),
-      message: { text: 'Caught up.', at: new Date(), model: 'Gemini 4 Neon (High)' } });
+    // Before the moved Antigravity worker replies, its model id still names it.
+    await put(page, 'sessions/m2', { id: 'm2', title: 'mdl', path: '/c/mdl', aoe_status: 'running', state: 'working', tool: 'antigravity',
+      model: 'gemini-4-neon-high', updated_at: new Date() });
     await expect(page).toHaveURL(/#s-m2$/);
     await expect(page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' })).toBeVisible();
     await page.getByRole('button', { name: 'Model: Gemini 4 Neon. Change model' }).click();

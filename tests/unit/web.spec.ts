@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain browser modules without type declarations
 import { renderMarkdown } from '../../internal/web/static/markdown.js';
 // @ts-expect-error plain browser modules without type declarations
-import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
+import { STALE_AFTER_MS, ago, answerText, ciStatus, actionsLeft, laptopOnline, mergeReply, pushLabel, quickAction, replyFields, sortSessions, tags, nextPrototype, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, modelFamily, modelName, antigravityPools, modelBase, modelVersions, sessionModel, onDefaultBranch, waitingReplies, LENSES, ideateText, toggleLens, openIdeas, ideaCount, lensName } from '../../internal/web/static/board.js';
 
 describe('renderMarkdown', () => {
   it('escapes markup in replies', () => {
@@ -537,8 +537,10 @@ describe('model names', () => {
     expect(modelName('claude-opus-5-5')).toBe('Opus 5.5');
     expect(modelName('claude-fable-5-2')).toBe('Fable 5.2');
     expect(modelName('claude-sonnet-5')).toBe('Sonnet 5');
+    expect(modelName('opus')).toBe('Opus');
     expect(modelName('gemini-4-neon')).toBe('gemini-4-neon');
     expect(modelFamily('claude-haiku-5-5')).toBe('haiku');
+    expect(modelFamily('sonnet')).toBe('sonnet');
     expect(modelFamily(undefined)).toBe('');
   });
 
@@ -576,10 +578,28 @@ describe('antigravityPools', () => {
 });
 
 describe('modelVersions', () => {
-  it('names each alias by the newest model of its family a Claude Code worker replied with', () => {
+  it('names each alias by the newest concrete model of its family a Claude Code worker has run', () => {
     expect(modelVersions([
-      { message: { model: 'claude-opus-5-5' } }, { message: { model: 'claude-opus-5' } },
-      { message: { model: 'claude-sonnet-5-5' } }, { tool: 'antigravity', message: { model: 'Gemini 4 Neon (High)' } }, {},
+      { model: 'claude-opus-5-5' }, { message: { model: 'claude-opus-5' } },
+      { model: 'sonnet', message: { model: 'claude-sonnet-5-5' } }, { model: 'haiku' },
+      { tool: 'antigravity', model: 'Gemini 4 Neon (High)' }, {},
     ])).toEqual({ opus: 'Opus 5.5', sonnet: 'Sonnet 5.5' });
+  });
+});
+
+describe('sessionModel', () => {
+  const ag = [
+    { id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' },
+    { id: 'gemini-4-neon-low', name: 'Gemini 4 Neon (Low)' },
+  ];
+
+  it('resolves transcript models, aliases, and Antigravity ids on a worker', () => {
+    expect(sessionModel({ model: 'claude-opus-5-5' }, ag)).toEqual({ key: 'opus', name: 'Opus 5.5' });
+    expect(sessionModel({ model: 'sonnet' }, ag, { sonnet: 'Sonnet 5.5' })).toEqual({ key: 'sonnet', name: 'Sonnet 5.5' });
+    expect(sessionModel({ model: 'sonnet' }, ag, {})).toEqual({ key: 'sonnet', name: 'Sonnet' });
+    expect(sessionModel({ message: { model: 'claude-haiku-5-5' } }, ag)).toEqual({ key: 'haiku', name: 'Haiku 5.5' });
+    expect(sessionModel({ tool: 'antigravity', model: 'Gemini 4 Neon (High)' }, ag)).toEqual({ key: 'gemini-4-neon-high', name: 'Gemini 4 Neon' });
+    expect(sessionModel({ tool: 'antigravity', model: 'gemini-4-neon-low' }, ag)).toEqual({ key: 'gemini-4-neon-high', name: 'Gemini 4 Neon' });
+    expect(sessionModel({}, ag)).toEqual({ key: '', name: '' });
   });
 });
