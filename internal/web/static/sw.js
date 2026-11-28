@@ -189,7 +189,8 @@ self.addEventListener("notificationclick", (event) => {
 // navigated instead.
 async function open(path, tag) {
   const url = new URL(path, self.location.origin).href;
-  const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const wins = (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+    .filter((w) => w.url.startsWith(self.registration.scope));
   const win = wins.find((w) => w.focused) || wins.find((w) => w.visibilityState === "visible") || wins[0];
   const entry = { tag, url, windows: describe(wins) };
   try {

@@ -429,6 +429,85 @@ test.describe('signed in', () => {
     await expect(page.locator('.notelog li', { hasText: '"event":"opened"' })).toContainText('#s-k');
   });
 
+  test('app service worker is scoped to /app/ and migrates a legacy root push subscription', async () => {
+    await page.goto('/app/');
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    // Wait for page's own checkPush to finish before seeding the legacy root worker.
+    await expect(page.getByRole('button', { name: 'Turn on notifications' })).toBeVisible();
+    const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
+    expect(new URL(scope).pathname).toBe('/app/');
+
+    // Seed a legacy root / worker and its Firestore subscription, stubbing
+    // PushManager since headless Chromium has no push service.
+    const oldEndpoint = 'https://push.example/legacy-root';
+    const newEndpoint = 'https://push.example/scoped-app';
+    const subId = (endpoint: string) => createHash('sha256').update(endpoint).digest('base64url');
+    const oldId = subId(oldEndpoint);
+    const newId = subId(newEndpoint);
+    const vapidKey = Buffer.alloc(65, 7).toString('base64url');
+    await put(page, 'laptop/push', { vapid_public_key: vapidKey });
+    await put(page, `subscriptions/${oldId}`, { endpoint: oldEndpoint, p256dh: 'old-p256dh', auth: 'old-auth', created_at: new Date() });
+
+    await page.evaluate(async () => {
+      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      const sw = reg.installing || reg.waiting;
+      if (!reg.active && sw) {
+        await new Promise<void>((resolve) => {
+          const done = () => { if (reg.active || sw.state === 'activated') { sw.removeEventListener('statechange', done); resolve(); } };
+          sw.addEventListener('statechange', done);
+          done();
+        });
+      }
+    });
+
+    const migrated = await page.context().newPage();
+    try {
+      await migrated.addInitScript(({ oldEndpoint, newEndpoint }) => {
+        Object.defineProperty(Notification, 'permission', { configurable: true, get: () => 'granted' });
+        const subs = new Map<string, any>([
+          [new URL('/', location.href).href, {
+            endpoint: oldEndpoint,
+            options: { applicationServerKey: null },
+            toJSON: () => ({ endpoint: oldEndpoint, keys: { p256dh: 'old-p256dh', auth: 'old-auth' } }),
+            unsubscribe: async () => { (window as any).unsubscribed = true; subs.delete(new URL('/', location.href).href); return true; },
+          }],
+        ]);
+        Object.defineProperty(ServiceWorkerRegistration.prototype, 'pushManager', {
+          configurable: true,
+          get() {
+            const scope = this.scope;
+            return {
+              getSubscription: async () => subs.get(scope) ?? null,
+              subscribe: async ({ applicationServerKey }: { applicationServerKey: ArrayBuffer | Uint8Array }) => {
+                const sub = {
+                  endpoint: newEndpoint,
+                  options: { applicationServerKey },
+                  toJSON: () => ({ endpoint: newEndpoint, keys: { p256dh: 'new-p256dh', auth: 'new-auth' } }),
+                  unsubscribe: async () => { subs.delete(scope); return true; },
+                };
+                subs.set(scope, sub);
+                return sub;
+              },
+            };
+          },
+        });
+      }, { oldEndpoint, newEndpoint });
+
+      await migrated.goto('/app/');
+      await expect(migrated.locator('.card', { hasText: 'knip' })).toBeVisible();
+      await expect.poll(async () => (await list(migrated, 'subscriptions')).map((d) => d.name.split('/').pop())).toEqual([newId]);
+      expect(await migrated.evaluate(() => (window as any).unsubscribed)).toBe(true);
+      await expect.poll(async () =>
+        migrated.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).map((r) => new URL(r.scope).pathname)),
+      ).toEqual(['/app/']);
+    } finally {
+      await migrated.close();
+      await page.request.delete(`${FIRESTORE}/subscriptions/${oldId}`, { headers: admin });
+      await page.request.delete(`${FIRESTORE}/subscriptions/${newId}`, { headers: admin });
+      await page.request.delete(`${FIRESTORE}/laptop/push`, { headers: admin });
+    }
+  });
+
   // A phone that freezes the app leaves its Firestore connection dead without
   // an offline event, and the SDK's next retry can be a minute away. Held
   // requests stand in for that dead connection.

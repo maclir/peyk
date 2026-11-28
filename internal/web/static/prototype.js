@@ -1,5 +1,7 @@
+// Scoped to /p/ so opening a prototype does not recreate a root / worker that
+// would intercept Android WebAPK notification delegation for /app/.
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js", { scope: "/p/" }).catch(() => {});
 }
 
 const statusEl = document.getElementById("status");

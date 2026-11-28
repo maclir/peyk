@@ -6,9 +6,31 @@ import { sharedText, takeShare } from "./share.js";
 import { revision } from "./release.js";
 
 // Registration is unconditional: the worker is what lets an installed app open
-// with no signal at all.
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+// with no signal at all. Its scope matches the manifest's /app/ scope because
+// Chrome on Android matches a notification's service worker scope against the
+// installed WebAPK's scope; a root / worker falls back to Chrome's own channel.
+const APP_SCOPE = "/app/";
+const swRegistration = "serviceWorker" in navigator
+  ? navigator.serviceWorker.register("/sw.js", { scope: APP_SCOPE }).catch(() => null)
+  : Promise.resolve(null);
+
+async function readyWorker() {
+  const reg = await swRegistration;
+  if (!reg) return navigator.serviceWorker.ready;
+  const sw = !reg.active && (reg.installing || reg.waiting);
+  if (sw) {
+    await new Promise((resolve) => {
+      const done = () => {
+        if (reg.active || sw.state === "activated" || sw.state === "redundant") {
+          sw.removeEventListener("statechange", done);
+          resolve();
+        }
+      };
+      sw.addEventListener("statechange", done);
+      done();
+    });
+  }
+  return reg.active ? reg : navigator.serviceWorker.ready;
 }
 
 // Adds to the service worker's notification log, which #log shows.
@@ -58,7 +80,7 @@ async function loadDeployed() {
   revBusy(true);
   try {
     await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
-    await (await navigator.serviceWorker?.getRegistration())?.update();
+    await (await navigator.serviceWorker?.getRegistration(APP_SCOPE))?.update();
   } catch {
     // The reload still fetches whatever the deleted caches no longer hold.
   }
@@ -556,7 +578,7 @@ async function start(cfg) {
         .catch((err) => noteLog("seen failed", { session: id, error: String(err) }));
     }
     if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.ready
+    readyWorker()
       .then((reg) => reg.getNotifications())
       .then((notes) => {
         const mine = notes.filter((n) => n.tag === id);
@@ -1663,16 +1685,59 @@ async function start(cfg) {
   // load; the subscription itself lives in the browser and in Firestore.
   async function checkPush() {
     if (!("PushManager" in window) || !("serviceWorker" in navigator)) return (state.push = "unsupported");
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    const reg = await readyWorker();
+    let sub = await reg.pushManager.getSubscription();
+    const legacy = await legacyRootRegistration(reg);
+    const oldSub = legacy ? await legacy.pushManager?.getSubscription().catch(() => null) : null;
+    if (!sub && oldSub && Notification.permission === "granted") {
+      const oldKnown = await fs.getDoc(fs.doc(db, "subscriptions", await subscriptionID(oldSub)));
+      if (oldKnown.exists()) sub = await subscribePush(reg);
+    }
+    if (legacy) await retireLegacyWorker(legacy, oldSub, sub);
     if (!sub || Notification.permission !== "granted") return (state.push = "off");
     const id = await subscriptionID(sub);
     const known = await fs.getDoc(fs.doc(db, "subscriptions", id));
     state.push = known.exists() ? "on" : "off";
   }
 
+  async function legacyRootRegistration(reg) {
+    const root = new URL("/", location.href).href;
+    if (reg.scope === root) return null;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    return regs.find((r) => r.scope === root) ?? null;
+  }
+
+  async function retireLegacyWorker(legacy, oldSub, nextSub) {
+    if (oldSub) {
+      const oldId = await subscriptionID(oldSub);
+      const nextId = nextSub ? await subscriptionID(nextSub) : null;
+      await oldSub.unsubscribe().catch(() => {});
+      if (oldId !== nextId) await fs.deleteDoc(fs.doc(db, "subscriptions", oldId)).catch(() => {});
+    }
+    await legacy.unregister().catch(() => {});
+  }
+
   async function subscriptionID(sub) {
     return passkey.b64url(await passkey.sha256(sub.endpoint));
+  }
+
+  async function subscribePush(reg) {
+    const key = await fs.getDoc(fs.doc(db, "laptop", "push"));
+    if (!key.exists()) throw new Error("the laptop has not published its push key; start make serve");
+    const appKey = passkey.urlB64ToBytes(key.data().vapid_public_key);
+    let sub = await reg.pushManager.getSubscription();
+    // A subscription made with another key cannot receive this laptop's pushes.
+    const current = sub && sub.options.applicationServerKey && new Uint8Array(sub.options.applicationServerKey);
+    if (sub && (!current || current.length !== appKey.length || current.some((b, i) => b !== appKey[i]))) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+    const json = sub.toJSON();
+    await fs.setDoc(fs.doc(db, "subscriptions", await subscriptionID(sub)), {
+      endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, created_at: fs.serverTimestamp(),
+    });
+    return sub;
   }
 
   async function turnOnPush() {
@@ -1681,22 +1746,13 @@ async function start(cfg) {
         setOutcome("notify", "Notifications are blocked for this site in the browser settings.", false, "bad");
         return;
       }
-      const key = await fs.getDoc(fs.doc(db, "laptop", "push"));
-      if (!key.exists()) throw new Error("the laptop has not published its push key; start make serve");
-      const reg = await navigator.serviceWorker.ready;
-      const appKey = passkey.urlB64ToBytes(key.data().vapid_public_key);
-      let sub = await reg.pushManager.getSubscription();
-      // A subscription made with another key cannot receive this laptop's pushes.
-      const current = sub && sub.options.applicationServerKey && new Uint8Array(sub.options.applicationServerKey);
-      if (sub && (!current || current.length !== appKey.length || current.some((b, i) => b !== appKey[i]))) {
-        await sub.unsubscribe();
-        sub = null;
+      const reg = await readyWorker();
+      const sub = await subscribePush(reg);
+      const legacy = await legacyRootRegistration(reg);
+      if (legacy) {
+        const oldSub = await legacy.pushManager?.getSubscription().catch(() => null);
+        await retireLegacyWorker(legacy, oldSub, sub);
       }
-      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
-      const json = sub.toJSON();
-      await fs.setDoc(fs.doc(db, "subscriptions", await subscriptionID(sub)), {
-        endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, created_at: fs.serverTimestamp(),
-      });
       state.push = "on";
       setOutcome("notify", "Notifications are on for this device.", false, "ok");
     } catch (err) {

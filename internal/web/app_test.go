@@ -183,6 +183,12 @@ func TestPageIsInstallable(t *testing.T) {
 	if strings.HasPrefix("/p/", m.Scope) {
 		t.Errorf("/p/ must stay outside manifest scope %q so Android opens prototypes in a browser tab", m.Scope)
 	}
+	if appJS := get(t, srv.URL+"/static/app.js"); !strings.Contains(appJS, `const APP_SCOPE = "`+AppPath+`"`) || !strings.Contains(appJS, `register("/sw.js", { scope: APP_SCOPE })`) {
+		t.Errorf("app.js must register /sw.js under %q so Android delegates notifications to the WebAPK", AppPath)
+	}
+	if protoJS := get(t, srv.URL+"/static/prototype.js"); !strings.Contains(protoJS, `register("/sw.js", { scope: "/p/" })`) {
+		t.Errorf("prototype.js must register /sw.js under /p/ so it does not recreate a root worker")
+	}
 	for _, from := range []string{"/", "/app"} {
 		rec := httptest.NewRecorder()
 		newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, from, nil))
