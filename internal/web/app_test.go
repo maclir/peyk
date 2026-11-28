@@ -38,7 +38,7 @@ func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
 
 func TestCrawlersAreKeptOut(t *testing.T) {
 	h := newTestApp().Handler()
-	for _, path := range []string{"/", "/robots.txt", "/static/app.js", SandboxPath, "/nope"} {
+	for _, path := range []string{"/", AppPath, "/robots.txt", "/static/app.js", SandboxPath, "/nope"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if got := rec.Header().Get("X-Robots-Tag"); !strings.Contains(got, "noindex") {
@@ -177,6 +177,19 @@ func TestPageIsInstallable(t *testing.T) {
 	if m.Display != "standalone" {
 		t.Errorf("display = %q, want standalone", m.Display)
 	}
+	if m.StartURL != AppPath || m.Scope != AppPath {
+		t.Errorf("start_url=%q scope=%q, want %q", m.StartURL, m.Scope, AppPath)
+	}
+	if strings.HasPrefix("/p/", m.Scope) {
+		t.Errorf("/p/ must stay outside manifest scope %q so Android opens prototypes in a browser tab", m.Scope)
+	}
+	for _, from := range []string{"/", "/app"} {
+		rec := httptest.NewRecorder()
+		newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, from, nil))
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != AppPath {
+			t.Errorf("GET %s = %d to %q, want 302 to %s", from, rec.Code, rec.Header().Get("Location"), AppPath)
+		}
+	}
 	// A manifest can name one theme colour, an installed app's status bar is
 	// painted from it in both light and dark mode, and so a named colour is the
 	// wrong colour for half the day. Left out, the bar follows the phone. This
@@ -222,8 +235,8 @@ func TestAndroidShareSheetPostsImagesToTheWorker(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, SharePath, strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	newTestApp().Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/#new" {
-		t.Errorf("POST %s without the worker = %d to %q, want 303 to /#new", SharePath, rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != AppPath+"#new" {
+		t.Errorf("POST %s without the worker = %d to %q, want 303 to %s#new", SharePath, rec.Code, rec.Header().Get("Location"), AppPath)
 	}
 }
 

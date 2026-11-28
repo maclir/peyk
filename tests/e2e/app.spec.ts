@@ -227,7 +227,7 @@ test.describe('signed in', () => {
   });
 
   test('push asks the laptop and shows its answer', async () => {
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await expect(page.locator('.facts')).toContainText('main → origin/main');
     await expect(page.locator('.dhead .tag.branch')).toHaveCount(0);
     const push = page.getByRole('button', { name: 'Push 2 commits' });
@@ -270,7 +270,7 @@ test.describe('signed in', () => {
     await put(page, 'tasks/wide', { project: 'knip', text: 'Wide queued', status: 'queued', created_at: new Date() });
     await put(page, 'ideas/wide', { project: 'knip', task: 'run', lens: 'reuse', title: 'Wide idea', why: '', prompt: 'Do the wide idea', status: 'open', created_at: new Date() });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     const rail = page.getByRole('complementary', { name: 'Workers' });
     const side = page.getByRole('complementary', { name: 'Project' });
     await expect(rail.locator('a.card[aria-current="page"]')).toContainText('knip');
@@ -314,7 +314,7 @@ test.describe('signed in', () => {
     await inbox.getByRole('button', { name: /^All/ }).click();
     await expect(inbox.locator('.task:not(.idea) .ttext')).toContainText(['Wide queued']);
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await expect(inbox).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
@@ -345,7 +345,7 @@ test.describe('signed in', () => {
   });
 
   test('opening a worker tells the laptop, so other devices close its notifications', async () => {
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
     await expect.poll(async () => (await list(page, 'seen')).map((d) => [d.name.split('/').pop(), Boolean(d.fields.seen_at)])).toEqual([['k', true]]);
   });
@@ -378,7 +378,7 @@ test.describe('signed in', () => {
       const out: Record<string, { silent: boolean; renotify: boolean; closed: boolean }> = {};
       reg.showNotification = async (_: string, o: any) => { out[o.tag] = { silent: o.silent, renotify: o.renotify, closed: false }; };
       reg.getNotifications = async ({ tag }: { tag: string }) => [{ close: () => { out[tag].closed = true; } }];
-      for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/#s-${session}`, session });
+      for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/app/#s-${session}`, session });
       return out;
     });
     expect(shown).toEqual({
@@ -401,7 +401,7 @@ test.describe('signed in', () => {
       // @ts-ignore the worker's top-level binding
       closeLeavesNote = true;
       try {
-        for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/#s-${session}`, session });
+        for (const session of ['k', 'h']) await (self as any).notify({ title: 't', body: '', url: `/app/#s-${session}`, session });
       } finally {
         // @ts-ignore
         closeLeavesNote = false;
@@ -416,7 +416,7 @@ test.describe('signed in', () => {
     await page.waitForFunction(() => navigator.serviceWorker.controller);
     await expect(page.locator('.card', { hasText: 'knip' })).toBeVisible();
     const [worker] = page.context().serviceWorkers();
-    await worker.evaluate(() => (self as any).open('/#s-k', 'k'));
+    await worker.evaluate(() => (self as any).open('/app/#s-k', 'k'));
     await expect(page).toHaveURL(/#s-k$/);
     await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
 
@@ -430,7 +430,7 @@ test.describe('signed in', () => {
   // an offline event, and the SDK's next retry can be a minute away. Held
   // requests stand in for that dead connection.
   test('coming back to the app reconnects at once', async () => {
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await expect(page.locator('.reply.sent')).toHaveText('Detect unused exports');
     let frozen = true;
     await page.context().route(/:8181/, (route) => (frozen ? undefined : route.continue()));
@@ -455,7 +455,7 @@ test.describe('signed in', () => {
 
   test('a stopped worker can be started and a running one restarted, each signed', async () => {
     await put(page, 'sessions/z', { id: 'z', title: 'zzz', path: '/c/zzz', aoe_status: 'stopped', state: 'idle', updated_at: new Date() });
-    await page.goto('/#s-z');
+    await page.goto('/app/#s-z');
     await passkeyOn(page);
     const actions = page.getByRole('button', { name: 'Worker actions' });
     await actions.click();
@@ -488,7 +488,7 @@ test.describe('signed in', () => {
   test('a worker names its model, switches it, and moves to another tool from the sheet, signed', async () => {
     await put(page, 'sessions/m', { id: 'm', title: 'mdl', path: '/c/mdl', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       model: 'claude-opus-5-5', cleared: true });
-    await page.goto('/#s-m');
+    await page.goto('/app/#s-m');
     await passkeyOn(page);
     const chip = page.getByRole('button', { name: 'Model: Opus 5.5. Change model' });
     await expect(chip).toBeVisible();
@@ -581,7 +581,7 @@ test.describe('signed in', () => {
   test('a send that does not go out says so on its task', async () => {
     await put(page, 'laptop/status', { online: false, seen_at: new Date() });
     await put(page, 'tasks/proto', { project: 'knip', text: 'Open prototypes from a session', status: 'queued', created_at: new Date() });
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await expect(page.getByRole('button', { name: 'Laptop offline, seen just now. Check for updates' })).toBeVisible();
     const task = page.locator('.task', { hasText: 'Open prototypes from a session' });
     await task.getByRole('button', { name: /More actions/ }).click();
@@ -593,7 +593,7 @@ test.describe('signed in', () => {
 
   test('a task clears its worker first unless the worker is already cleared', async () => {
     await put(page, 'tasks/ctx', { project: 'knip', text: 'Start fresh', status: 'queued', created_at: new Date() });
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await passkeyOn(page);
     const task = page.locator('.task', { hasText: 'Start fresh' });
     await expect(task.locator('.tstatus')).toHaveText('Free');
@@ -635,7 +635,7 @@ test.describe('signed in', () => {
   });
 
   test('the inbox adds, edits and deletes tasks', async () => {
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await expect(page.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('dialog', { name: 'Inbox' }).getByRole('button', { name: 'New task' }).click();
     const compose = page.getByRole('dialog', { name: 'New task' });
@@ -686,7 +686,7 @@ test.describe('signed in', () => {
   test('the picker hides projects, finds hidden ones, and undoes a hide', async () => {
     const areh = { name: 'areh', path: '/c/areh', session_id: '', free: true, busy: '' };
     await put(page, 'projects/areh', areh);
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await passkeyOn(page);
     await page.getByRole('button', { name: /^Project:/ }).click();
     const sheet = page.getByRole('dialog', { name: 'Choose a project' });
@@ -730,7 +730,7 @@ test.describe('signed in', () => {
   });
 
   test('a long press on Add task sends the task when its worker is free', async () => {
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await passkeyOn(page);
     const compose = page.getByRole('dialog', { name: 'New task' });
     // The sheet's box outlives the sheet, which leaves the accessibility tree when it closes.
@@ -781,7 +781,7 @@ test.describe('signed in', () => {
 
   test('a worker with no conversation takes a task where a reply would go', async () => {
     await setCleared(page, true);
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     const box = page.locator('form.composer.respond');
     await expect(box.getByRole('button', { name: 'Send reply' })).toHaveCount(0);
@@ -806,7 +806,7 @@ test.describe('signed in', () => {
   });
 
   test('a task asks for a prototype, which its send signs and its done row opens', async () => {
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await passkeyOn(page);
     const compose = page.getByRole('dialog', { name: 'New task' });
     const toggle = compose.getByRole('button', { name: /^Prototype:/ });
@@ -823,9 +823,9 @@ test.describe('signed in', () => {
     const stored = async () => (await list(page, 'tasks')).find((t) => t.fields.text.stringValue === 'Try card layouts');
     await expect.poll(async () => (await stored())?.fields.prototype?.stringValue).toBe('design');
 
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await expect(page.getByRole('dialog', { name: 'New task' }).getByRole('button', { name: /^Prototype:/ })).toHaveAccessibleName('Prototype: off');
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     const card = page.locator('.task', { hasText: 'Try card layouts' });
     await expect(card.getByLabel('Prototype: Design canvas')).toHaveText('Design');
     await card.getByRole('button', { name: /^(Clear and send|Send)$/ }).click();
@@ -848,7 +848,7 @@ test.describe('signed in', () => {
   });
 
   test('a task asks for ideas through lenses, and its send signs them', async () => {
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await passkeyOn(page);
     const compose = page.getByRole('dialog', { name: 'New task' });
     const ideate = compose.getByRole('button', { name: /^Ideate:/ });
@@ -884,7 +884,7 @@ test.describe('signed in', () => {
     expect(task.fields.ideate.mapValue.fields.lenses.arrayValue.values.map((v: any) => v.stringValue)).toEqual(['reuse', 'security']);
     expect(task.fields.ideate.mapValue.fields.max.integerValue).toBe('10');
 
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     const card = page.locator('.task', { hasText: 'Look across the whole repository.' });
     await expect(card.getByLabel('Ideas: Reuse, Security')).toHaveText('Ideas');
     await card.getByRole('button', { name: /^(Clear and send|Send)$/ }).click();
@@ -906,7 +906,7 @@ test.describe('signed in', () => {
     await page.goto('/');
     await expect(page.locator('a.card', { hasText: 'knip' }).getByRole('img', { name: '3 open ideas' })).toBeVisible();
 
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     const tray = page.locator('.hpage').getByRole('button', { name: /^Inbox/ });
     await expect(tray).toHaveAccessibleName(/, 3 ideas$/);
@@ -968,7 +968,7 @@ test.describe('signed in', () => {
   test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
     await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
     await put(page, 'tasks/gone', { project: 'knip', text: 'Run the old check', status: 'dispatched', session_id: 'replaced', created_at: new Date(Date.now() - 3_600_000), dispatched_at: new Date(Date.now() - 1_800_000) });
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await expect(page.getByRole('heading', { name: 'Sent 3' })).toBeVisible();
     const starting = page.locator('.task.sent', { hasText: 'Set up the repo' });
     await expect(starting.locator('.rstat')).toHaveText('starting · 1m');
@@ -988,7 +988,7 @@ test.describe('signed in', () => {
   });
 
   test('a task carries a screenshot to its worker and drops it when deleted', async () => {
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await passkeyOn(page);
     const compose = page.getByRole('dialog', { name: 'New task' });
     await compose.getByRole('button', { name: /^Project:/ }).click();
@@ -1049,7 +1049,7 @@ test.describe('signed in', () => {
     await page.waitForFunction(() => navigator.serviceWorker.controller);
     // The share sheet posts the manifest's share_target form as a navigation.
     await page.evaluate((png) => {
-      const form = Object.assign(document.createElement('form'), { method: 'post', action: '/share', enctype: 'multipart/form-data' });
+      const form = Object.assign(document.createElement('form'), { method: 'post', action: '/app/share', enctype: 'multipart/form-data' });
       const input = Object.assign(document.createElement('input'), { type: 'file', name: 'images' });
       const files = new DataTransfer();
       files.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], 'shot.png', { type: 'image/png' }));
@@ -1061,7 +1061,7 @@ test.describe('signed in', () => {
     }, PNG.toString('base64'));
     const compose = page.getByRole('dialog', { name: 'New task' });
     await expect(compose).toBeVisible();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/app\/$/);
     await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await expect(compose.getByLabel('Task description')).toHaveValue('Shared from Photos');
 
@@ -1076,7 +1076,7 @@ test.describe('signed in', () => {
   test('a reply carries a screenshot to its worker', async () => {
     await put(page, 'laptop/status', { online: true, seen_at: new Date() });
     await setCleared(page, false);
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     const reply = page.locator('form.composer.respond');
     await reply.getByLabel('Attach images').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: PNG });
@@ -1119,7 +1119,7 @@ test.describe('signed in', () => {
     expect(bound.ok()).toBe(true);
     const viewport = page.viewportSize()!;
     await page.setViewportSize({ width: viewport.width, height: 300 });
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     const reply = page.locator('form.composer.respond');
     await reply.getByLabel('Reply', { exact: true }).fill('Also add --csv');
@@ -1144,9 +1144,9 @@ test.describe('signed in', () => {
     // The laptop came back to a conversation that moved on, so it asks first.
     await put(page, `commands/${waiting.name.split('/').pop()}`, { ...plain(waiting.fields), status: 'held' });
     await expect(page.getByText('Held: the conversation moved on since you wrote this')).toBeVisible();
-    await page.goto('/#');
+    await page.goto('/app/#');
     await expect(page.locator('.card', { hasText: 'knip' })).toContainText('reply held');
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await page.getByRole('button', { name: 'Discard' }).click();
     await expect(page.locator('.reply.queued')).toHaveCount(0);
     await expect.poll(async () => (await get(page, `commands/${waiting.name.split('/').pop()}`)).status.stringValue).toBe('cancelled');
@@ -1160,7 +1160,7 @@ test.describe('signed in', () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });
     await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     const texts = page.locator('.tasks .ttext');
     await page.getByRole('button', { name: /^Ready/ }).click();
     await expect(texts).toHaveText(['First thing', 'Second thing']);
@@ -1179,7 +1179,7 @@ test.describe('signed in', () => {
     await expect(page.getByRole('button', { name: 'Move up: First thing' })).toBeDisabled();
     await page.getByRole('button', { name: 'Move up: Waits on hamta' }).click();
     await expect(texts).toHaveText(['First thing', 'Waits on hamta', 'Second thing']);
-    expect((await get(page, 'tasks/wait')).rank).toBeDefined();
+    await expect.poll(async () => (await get(page, 'tasks/wait')).rank).toBeDefined();
 
     for (const id of ['one', 'two', 'wait']) await page.request.delete(`${FIRESTORE}/tasks/${id}`, { headers: admin });
   });
@@ -1188,7 +1188,7 @@ test.describe('signed in', () => {
     const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n');
     await put(page, 'tasks/tall', { project: 'knip', text: long, status: 'queued', created_at: new Date() });
     await put(page, 'tasks/other', { project: 'hamta', text: 'Other', status: 'queued', created_at: new Date() });
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     const strip = page.getByRole('group', { name: 'Filter by project' });
     const face = strip.getByRole('button', { name: 'knip' });
     await expect(face).toBeVisible();
@@ -1202,7 +1202,7 @@ test.describe('signed in', () => {
     await put(page, 'tasks/one', { project: 'knip', text: 'First thing', status: 'queued', created_at: new Date(Date.now() - 3000) });
     await put(page, 'tasks/two', { project: 'knip', text: 'Second thing', status: 'queued', created_at: new Date(Date.now() - 2000) });
     await put(page, 'tasks/wait', { project: 'hamta', text: 'Waits on hamta', status: 'queued', created_at: new Date(Date.now() - 1000) });
-    await page.goto('/#s-h');
+    await page.goto('/app/#s-h');
     await expect(page.locator('.detail')).toBeVisible();
     await expect(page.locator('nav.tabs')).toHaveCount(0);
     await page.getByRole('button', { name: 'Inbox, 1 queued' }).click();
@@ -1213,7 +1213,7 @@ test.describe('signed in', () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await expect(sheet).toBeHidden();
 
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Inbox, 2 queued' }).click();
     sheet = page.getByRole('dialog', { name: 'knip inbox' });
@@ -1268,7 +1268,7 @@ test.describe('signed in', () => {
     const conversation = (id: string) => page.request.patch(`${FIRESTORE}/sessions/k?updateMask.fieldPaths=conversation&updateMask.fieldPaths=cleared`,
       { headers: admin, data: { fields: { conversation: { stringValue: id }, cleared: { booleanValue: false } } } });
     await conversation('c-now');
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     await page.getByRole('button', { name: /^Inbox/ }).click();
     const sheet = page.getByRole('dialog', { name: 'knip inbox' });
@@ -1302,7 +1302,7 @@ test.describe('signed in', () => {
     for (const [i, id] of ids.entries()) {
       await put(page, `tasks/${id}`, { project: 'knip', text: `Older task ${i}`, status: 'done', created_at: new Date(Date.now() - 3600_000), done_at: new Date(Date.now() - 60_000 * (i + 1)) });
     }
-    await page.goto('/#inbox');
+    await page.goto('/app/#inbox');
     await page.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(page.locator('.task.done')).toHaveCount(10);
     await page.evaluate(() => {
@@ -1332,7 +1332,7 @@ test.describe('signed in', () => {
       await page.mouse.up();
     };
 
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     const open = () => page.getByRole('button', { name: /^Project: / }).first().click();
     const picker = page.getByRole('dialog', { name: 'Choose a project' });
     await open();
@@ -1345,7 +1345,7 @@ test.describe('signed in', () => {
     await picker.locator('.grabber').click();
     await expect(picker).toHaveCount(0);
 
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await page.getByRole('button', { name: 'Inbox, 1 queued' }).click();
     const sheet = page.getByRole('dialog', { name: 'knip inbox' });
     await expect(sheet).toBeVisible();
@@ -1360,7 +1360,7 @@ test.describe('signed in', () => {
     const long = Array.from({ length: 60 }, (_, i) => `Paragraph ${i} of a long reply.`).join('\n\n');
     const message = `${FIRESTORE}/sessions/k?updateMask.fieldPaths=message`;
     expect((await page.request.patch(message, { headers: admin, data: { fields: { message: encode({ id: 'm-long', text: long, at: new Date() }) } } })).ok()).toBe(true);
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await expect(page.getByText('Paragraph 59 of a long reply.')).toBeAttached();
     await page.locator('#reply-k').blur();
     const edges = await page.evaluate(() => {
@@ -1451,7 +1451,7 @@ test.describe('signed in', () => {
   });
 
   test("a worker's New task starts on its project, says when another is picked, and back closes each sheet", async () => {
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     const compose = page.getByRole('dialog', { name: 'New task' });
     await expect(compose.getByRole('button', { name: 'Project: knip' })).toBeVisible();
@@ -1479,7 +1479,7 @@ test.describe('signed in', () => {
     await page.goto('/');
     await expect(page.locator('.card', { hasText: 'knip' }).locator('img.face')).toHaveAttribute('src', logo);
     await expect(page.locator('.card', { hasText: 'hamta' }).locator('.face.mono')).toHaveText('H');
-    await page.goto('/#new');
+    await page.goto('/app/#new');
     await expect(page.getByRole('button', { name: /^Project:/ }).locator('.face')).toHaveCount(1);
   });
 
@@ -1517,7 +1517,7 @@ test.describe('signed in', () => {
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       prototypes: [{ url: `/p/${id}`, title: 'Working tag', kind: 'html', at: new Date() }] });
 
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     const link = page.getByRole('link', { name: 'Working tag' });
     await expect(link).toHaveAttribute('href', `/p/${id}`);
     await expect(link).toHaveAttribute('target', '_blank');
@@ -1581,7 +1581,7 @@ test.describe('signed in', () => {
   test('a worker is cleared on its own and shows a new conversation', async () => {
     const git = { branch: 'main', upstream: 'origin/main', unpushed: 0, dirty: 0 };
     await put(page, 'sessions/k', { id: 'k', title: 'knip', path: '/c/knip', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false, git });
-    await page.goto('/#s-k');
+    await page.goto('/app/#s-k');
     await passkeyOn(page);
     await expect(page.locator('.detail h2 .chip.idle')).toHaveText('idle');
     await expect(page.locator('.dhead .tag')).toHaveCount(0);
@@ -1606,7 +1606,7 @@ test.describe('signed in', () => {
 
   test('Clear and stop sends one signed stop that clears', async () => {
     await put(page, 'sessions/c', { id: 'c', title: 'cleo', path: '/c/cleo', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false });
-    await page.goto('/#s-c');
+    await page.goto('/app/#s-c');
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Worker actions' }).click();
     await page.getByRole('menuitem', { name: 'Clear and stop' }).click();
@@ -1626,7 +1626,7 @@ test.describe('signed in', () => {
 
   test('the quick action beside the inbox clears and stops a finished worker in one tap', async () => {
     await put(page, 'sessions/f', { id: 'f', title: 'fini', path: '/c/fini', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
-    await page.goto('/#s-f');
+    await page.goto('/app/#s-f');
     await passkeyOn(page);
     await page.getByRole('button', { name: 'Clear and stop' }).click();
     await expect(page.locator('.dhead .outcome')).toHaveText('Waiting for the laptop…');
@@ -1646,7 +1646,7 @@ test.describe('signed in', () => {
     await put(page, 'sessions/n', { id: 'n', title: 'nesto', path: '/c/nesto', aoe_status: 'idle', state: 'unpushed', updated_at: new Date(), cleared: false });
     await put(page, 'projects/nesto', { name: 'nesto', path: '/c/nesto', session_id: 'n', free: true, busy: '' });
     await put(page, 'tasks/next', { project: 'nesto', text: 'Flag unused types', status: 'queued', created_at: new Date() });
-    await page.goto('/#s-n');
+    await page.goto('/app/#s-n');
     await passkeyOn(page);
     const pair = page.locator('.nownext');
     await expect(pair.locator('.nnrow').first()).toContainText('Flag unused types');
@@ -1722,7 +1722,7 @@ test.describe('signed in', () => {
     await page.setViewportSize({ width: viewport.width, height: 400 });
     await put(page, 'sessions/w', { id: 'w', title: 'wide', path: '/c/wide', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       prompt: { text: 'Last ask', at: new Date() }, message: { text: 'Last answer', at: new Date() }, latest: 'r1' });
-    await page.goto('/#s-w');
+    await page.goto('/app/#s-w');
     const fromBottom = () => page.evaluate(() => document.documentElement.scrollHeight - window.scrollY);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     const before = await fromBottom();
@@ -1751,7 +1751,7 @@ test.describe('signed in', () => {
     const worker = { id: 'w', title: 'wide', path: '/c/wide', aoe_status: 'idle', state: 'idle', updated_at: new Date(),
       prompt: { text: 'Second ask', at: new Date() }, message: { text: 'Second answer', at: new Date() }, latest: 'r2' };
     await put(page, 'sessions/w', worker);
-    await page.goto('/#s-w');
+    await page.goto('/app/#s-w');
     await page.getByRole('button', { name: 'Whole conversation' }).click();
     await expect(page.getByText('Reading the conversation on the laptop…')).toBeVisible();
     await expect.poll(async () => (await list(page, 'history')).length).toBe(1);

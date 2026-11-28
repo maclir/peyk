@@ -36,9 +36,15 @@ type webManifest struct {
 	ShareTarget shareTarget    `json:"share_target"`
 }
 
+// AppPath is the PWA's own scope and start URL. Keeping the app under /app/
+// leaves /p/<id> prototypes outside the manifest scope so Android opens them
+// in a Chrome Custom Tab instead of trapping them inside the standalone PWA.
+const AppPath = "/app/"
+
 // SharePath is where Android's share sheet posts what is shared into the
-// installed app. The service worker answers it; see sw.js.
-const SharePath = "/share"
+// installed app. It lives inside AppPath because Android requires share_target
+// actions to be within the manifest scope. The service worker answers it; see sw.js.
+const SharePath = "/app/share"
 
 // Only images are accepted because an attachment is one Firestore document
 // and the laptop hands it to Claude as an image.
@@ -73,8 +79,8 @@ func manifest(w http.ResponseWriter, _ *http.Request) {
 		ID:        "/",
 		Name:      "peyk",
 		ShortName: "peyk",
-		StartURL:  "/",
-		Scope:     "/",
+		StartURL:  AppPath,
+		Scope:     AppPath,
 		Display:   "standalone",
 		// The splash, drawn before there is a stylesheet to ask, and the strip
 		// Android shows under the page while the keyboard opens, before the

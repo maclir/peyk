@@ -60,7 +60,7 @@ func Changes(prev, next map[string]session.Snapshot) []Note {
 			continue
 		}
 		if ci := ciOf(n); ci != nil && ci.State == session.CIFailure && !sameFailure(ciOf(p), ci) {
-			notes = append(notes, Note{Session: id, Title: n.Title, Body: line(ci.Workflow+" failed", ciBody(n)), URL: "/#s-" + id, Icon: IconCI})
+			notes = append(notes, Note{Session: id, Title: n.Title, Body: line(ci.Workflow+" failed", ciBody(n)), URL: "/app/#s-" + id, Icon: IconCI})
 		}
 		if p.State == n.State {
 			continue
@@ -76,7 +76,7 @@ func Changes(prev, next map[string]session.Snapshot) []Note {
 		default:
 			continue
 		}
-		notes = append(notes, Note{Session: id, Title: n.Title, Body: line(event, body(n)), URL: "/#s-" + id, Icon: icon})
+		notes = append(notes, Note{Session: id, Title: n.Title, Body: line(event, body(n)), URL: "/app/#s-" + id, Icon: icon})
 	}
 	sort.Slice(notes, func(i, j int) bool { return notes[i].Session < notes[j].Session })
 	return notes

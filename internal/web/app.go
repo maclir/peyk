@@ -89,8 +89,14 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /p/{id}", a.prototype)
 	mux.HandleFunc("POST "+SharePath, shareFallback)
 	mux.HandleFunc("GET /robots.txt", robots)
-	mux.HandleFunc("GET /{$}", a.home)
+	mux.HandleFunc("GET "+AppPath+"{$}", a.home)
+	mux.HandleFunc("GET /app", redirectApp)
+	mux.HandleFunc("GET /{$}", redirectApp)
 	return securityHeaders(a.firebase, mux)
+}
+
+func redirectApp(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, AppPath, http.StatusFound)
 }
 
 func (a *App) firebaseJSON() string {
@@ -148,7 +154,7 @@ func robots(w http.ResponseWriter, _ *http.Request) {
 // storing them needs a signed-in browser, and this request carries no
 // identity.
 func shareFallback(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/#new", http.StatusSeeOther)
+	http.Redirect(w, r, AppPath+"#new", http.StatusSeeOther)
 }
 
 // OfflinePath is what the worker shows when a launch cannot reach the service.
@@ -292,9 +298,9 @@ func securityHeaders(fb Firebase, next http.Handler) http.Handler {
 // the tab, and only the SVG switches to a light mark on a dark tab strip. The
 // ICO is for browsers without SVG favicons.
 //
-// The logo links to "/#" rather than "/": from any view of the app it changes
-// only the hash, so the page switches views without reloading and signing in
-// again.
+// The logo links to "/app/#" rather than "/app/": from any view of the app it
+// changes only the hash, so the page switches views without reloading and
+// signing in again.
 const pageHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
@@ -312,7 +318,7 @@ const pageHTML = `<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <style>` + pageCSS + `</style></head>
 <body data-firebase="{{.}}">
-<header class="bar"><div class="hglobal"><h1><a id="home" href="/#" aria-label="peyk"><svg class="homeback" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><img src="/static/icon.svg" alt="" width="24" height="24"></a></h1><div id="hstat" class="hstat"><div class="wmenu"><button id="usage" class="usage" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meter cc"><i></i></span><span class="meter cc"><i></i></span><span class="meter ag"><i></i></span><span class="meter ag"><i></i></span><span class="meter gh"><i></i></span></button><div id="usagepop" class="pop upop" role="dialog" aria-label="Usage" hidden></div></div><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></div><div id="hpage" class="hpage"></div></header>
+<header class="bar"><div class="hglobal"><h1><a id="home" href="/app/#" aria-label="peyk"><svg class="homeback" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><img src="/static/icon.svg" alt="" width="24" height="24"></a></h1><div id="hstat" class="hstat"><div class="wmenu"><button id="usage" class="usage" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meter cc"><i></i></span><span class="meter cc"><i></i></span><span class="meter ag"><i></i></span><span class="meter ag"><i></i></span><span class="meter gh"><i></i></span></button><div id="usagepop" class="pop upop" role="dialog" aria-label="Usage" hidden></div></div><button id="update" class="update" type="button" hidden>Update</button><span id="seen" class="seen"></span><button id="laptop" class="laptop" type="button" aria-label="Connecting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button></div></div><div id="hpage" class="hpage"></div></header>
 <div id="panes"><aside id="rail" aria-label="Workers" hidden></aside><main id="app"><p class="notice" id="notice">Loading…</p></main><aside id="side" aria-label="Project" hidden></aside></div>
 <footer class="foot"><button id="rev" class="rev" type="button" title="Check for a newer revision"></button></footer>
 <script type="module" src="/static/app.js"></script></body></html>`
@@ -339,7 +345,7 @@ const offlineHTML = `<!doctype html>
 <body><main><h1>Offline</h1>
 <p>This needs the network, and there is none right now. Everything you saved is
 on the server, waiting.</p>
-<p><a href="/">Try again</a></p></main></body></html>`
+<p><a href="/app/">Try again</a></p></main></body></html>`
 
 // protoPageHTML is the standalone page at /p/{id}: full-bleed viewport with
 // none of peyk's app chrome. prototype.js reads the document with the owner's

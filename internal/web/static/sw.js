@@ -71,7 +71,7 @@ self.addEventListener("fetch", (event) => {
 // The manifest's share target. Shared files never reach the server: they wait
 // here, in the database share.js reads, until a signed-in page attaches them
 // to a new task's draft. A newer share replaces one never opened.
-const SHARE = "/share";
+const SHARE = "/app/share";
 
 async function keepShare(request) {
   try {
@@ -101,13 +101,13 @@ async function keepShare(request) {
   } catch (err) {
     await log("share failed", { error: String(err) });
   }
-  return Response.redirect("/#new", 303);
+  return Response.redirect("/app/#new", 303);
 }
 
 // Notifications from the laptop. The payload is encrypted to this browser's
 // subscription key; only here is it readable.
 self.addEventListener("push", (event) => {
-  let note = { title: "peyk", body: "", url: "/", session: "" };
+  let note = { title: "peyk", body: "", url: "/app/", session: "" };
   try {
     note = { ...note, ...event.data.json() };
   } catch {
@@ -179,7 +179,7 @@ const describe = (wins) => wins.map((w) => ({ url: w.url, visibility: w.visibili
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(open(event.notification.data?.url || "/", event.notification.tag));
+  event.waitUntil(open(event.notification.data?.url || "/app/", event.notification.tag));
 });
 
 // The page routes by its hash, so an open window is told where to go rather

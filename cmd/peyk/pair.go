@@ -57,7 +57,7 @@ func pair(ctx context.Context, label string, in io.Reader, out io.Writer) error 
 		return err
 	}
 	code := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw))
-	link := o.String() + "/#pair-" + code
+	link := o.String() + "/app/#pair-" + code
 	fmt.Fprintf(out, "Open this on the device to pair as %q (valid 5 minutes):\n\n  %s\n\n", label, link)
 	qrterminal.GenerateHalfBlock(link, qrterminal.L, out)
 
