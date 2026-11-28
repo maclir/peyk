@@ -298,6 +298,24 @@ export function sentTasks(tasks) {
     .sort((a, b) => toDate(b.dispatched_at) - toDate(a.dispatched_at));
 }
 
+// A newly created worker is published right after dispatch; once the project
+// already has another worker or this window passes, a missing session is gone
+// rather than still starting.
+export const STARTING_MS = 2 * 60 * 1000;
+
+export function sentState(t, session, project, now, sessionsLoaded = true) {
+  if (session) return STATES[session.state] || { label: session.state, tone: "idle" };
+  if (!sessionsLoaded) return { label: "starting", starting: true };
+  if (project?.session_id && project.session_id !== t.session_id) {
+    return { label: "worker gone", tone: "none", gone: true };
+  }
+  const at = toDate(t.dispatched_at);
+  if (!at || now - at.getTime() >= STARTING_MS) {
+    return { label: "worker gone", tone: "none", gone: true };
+  }
+  return { label: "starting", starting: true };
+}
+
 // A Done list that cannot be read says why in words, not Firestore's: a
 // query whose index is still building fails with a console link.
 export function doneError(err) {

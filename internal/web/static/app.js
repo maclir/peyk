@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
-import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
+import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, answerText, awaitingReply, currentTask, filterQueue, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, sortProjects, sortSessions, tags, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, lensName, ideateText, toggleLens, openIdeas, ideaCount } from "./board.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -844,15 +844,15 @@ async function start(cfg) {
   }
 
   // A sent task stays in the inbox until it is done. A new worker is only
-  // published once the laptop sees it start, so until then the task has no
-  // worker to link to.
+  // published once the laptop sees it start; a worker removed or replaced
+  // since leaves the task behind for you to delete.
   function sentRow(t, now) {
     const s = state.sessions.get(t.session_id);
-    const st = s && (STATES[s.state] || { label: s.state, tone: "idle" });
+    const st = sentState(t, s, projectNamed(t.project), now, state.loaded.has("sessions"));
     return taskRow(t, "sent", now, {
-      stat: [s ? h("span", { class: `dot ${st.tone}` }) : spinner(), `${s ? st.label : "starting"} · ${ago(t.dispatched_at, now)}`],
+      stat: [st.starting ? spinner() : h("span", { class: `dot ${st.tone}` }), `${st.label} · ${ago(t.dispatched_at, now)}`],
       detail: s ? h("a", { href: `#s-${encodeURIComponent(s.id)}` }, `${s.title} · ${st.label}`)
-        : h("span", {}, "Starting the worker…"),
+        : h("span", {}, st.gone ? "Its worker is gone." : "Starting the worker…"),
     });
   }
 

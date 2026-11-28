@@ -967,10 +967,16 @@ test.describe('signed in', () => {
 
   test('a sent task stays in the inbox, linked to its worker once the worker appears', async () => {
     await put(page, 'tasks/starting', { project: 'lala', text: 'Set up the repo', status: 'dispatched', session_id: 'new', created_at: new Date(Date.now() - 120_000), dispatched_at: new Date(Date.now() - 60_000) });
+    await put(page, 'tasks/gone', { project: 'knip', text: 'Run the old check', status: 'dispatched', session_id: 'replaced', created_at: new Date(Date.now() - 3_600_000), dispatched_at: new Date(Date.now() - 1_800_000) });
     await page.goto('/#inbox');
-    await expect(page.getByRole('heading', { name: 'Sent 2' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sent 3' })).toBeVisible();
     const starting = page.locator('.task.sent', { hasText: 'Set up the repo' });
     await expect(starting.locator('.rstat')).toHaveText('starting · 1m');
+    const gone = page.locator('.task.sent', { hasText: 'Run the old check' });
+    await expect(gone.locator('.rstat')).toHaveText('worker gone · 30m');
+    await expect(gone.locator('.spin')).toHaveCount(0);
+    await gone.getByRole('button', { name: /^knip Run the old check/ }).click();
+    await expect(gone.getByText('Its worker is gone.')).toBeVisible();
     const csv = page.locator('.task.sent', { hasText: 'Add CSV export' });
     await expect(csv.getByRole('link', { name: 'hamta · needs input' })).toBeHidden();
     await csv.getByRole('button', { name: /^hamta Add CSV export/ }).click();
@@ -978,6 +984,7 @@ test.describe('signed in', () => {
     await csv.getByRole('link', { name: 'hamta · needs input' }).click();
     await expect(page).toHaveURL(/#s-h$/);
     await page.request.delete(`${FIRESTORE}/tasks/starting`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/tasks/gone`, { headers: admin });
   });
 
   test('a task carries a screenshot to its worker and drops it when deleted', async () => {

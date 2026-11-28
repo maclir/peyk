@@ -276,6 +276,21 @@ describe('task lifecycle', () => {
     expect(currentTask(tasks, 'h')).toBe(null);
     expect(sentTasks(tasks).map((t: any) => t.id)).toEqual(['b', 'a']);
   });
+
+  it('distinguishes a starting worker from one that is gone', async () => {
+    // @ts-expect-error plain browser module
+    const { sentState, STARTING_MS } = await import('../../internal/web/static/board.js');
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const recent = { session_id: 'new', dispatched_at: new Date(now - 30_000) };
+    const stale = { session_id: 'old', dispatched_at: new Date(now - STARTING_MS) };
+
+    expect(sentState(recent, { state: 'working' }, null, now)).toMatchObject({ label: 'working', tone: 'run' });
+    expect(sentState(recent, undefined, null, now)).toMatchObject({ label: 'starting', starting: true });
+    expect(sentState(stale, undefined, null, now, false)).toMatchObject({ label: 'starting', starting: true });
+    expect(sentState(recent, undefined, { session_id: 'other' }, now)).toMatchObject({ label: 'worker gone', tone: 'none', gone: true });
+    expect(sentState(stale, undefined, null, now)).toMatchObject({ label: 'worker gone', tone: 'none', gone: true });
+    expect(sentState({ session_id: 'old' }, undefined, null, now)).toMatchObject({ label: 'worker gone', tone: 'none', gone: true });
+  });
 });
 
 describe('resume', () => {
