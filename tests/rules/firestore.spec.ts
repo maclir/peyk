@@ -460,3 +460,30 @@ describe('seen', () => {
     await assertFails(see(anonymous()));
   });
 });
+
+describe('prototypes', () => {
+  const id = 'ab'.repeat(32);
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `prototypes/${id}`), {
+        html: '<!doctype html><p>hi</p>', title: 'Demo', kind: 'html', created_at: Timestamp.now(),
+      });
+    });
+  });
+
+  it('the owner reads and deletes a prototype by hash, but cannot list or write them', async () => {
+    await assertSucceeds(getDoc(doc(owner(), `prototypes/${id}`)));
+    await assertFails(getDocs(collection(owner(), 'prototypes')));
+    await assertFails(setDoc(doc(owner(), `prototypes/${'cd'.repeat(32)}`), { html: '<p>x</p>', title: 'x', kind: 'html', created_at: serverTimestamp() }));
+    await assertFails(updateDoc(doc(owner(), `prototypes/${id}`), { title: 'forged' }));
+    await assertSucceeds(deleteDoc(doc(owner(), `prototypes/${id}`)));
+  });
+
+  it('nobody else reads, writes, or deletes prototypes', async () => {
+    await assertFails(getDoc(doc(stranger(), `prototypes/${id}`)));
+    await assertFails(getDoc(doc(anonymous(), `prototypes/${id}`)));
+    await assertFails(deleteDoc(doc(stranger(), `prototypes/${id}`)));
+    await assertFails(setDoc(doc(stranger(), `prototypes/${'cd'.repeat(32)}`), { html: '<p>x</p>' }));
+  });
+});

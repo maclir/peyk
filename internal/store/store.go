@@ -17,6 +17,7 @@
 //	history/{aoe session id}   History              phone requests and deletes, agent fills
 //	seen/{aoe session id}      {seen_at}            phone writes, agent deletes
 //	ideas/{task id}-{n}        idea.Idea            agent creates, phone dismisses or adds
+//	prototypes/{sha256}        Prototype            agent creates, phone reads and deletes
 package store
 
 import (
@@ -39,7 +40,21 @@ const (
 	History       = "history"
 	Seen          = "seen"
 	Ideas         = "ideas"
+	Prototypes    = "prototypes"
 )
+
+// MaxPrototypeBytes bounds an HTML prototype stored in Firestore, leaving
+// headroom under Firestore's 1 MiB document limit for metadata and framing.
+const MaxPrototypeBytes = 900_000
+
+// Prototype is a self-contained HTML page a worker published with `peyk publish`.
+// Its id is the lowercase hex SHA-256 of HTML.
+type Prototype struct {
+	HTML      string    `firestore:"html"`
+	Title     string    `firestore:"title"`
+	Kind      string    `firestore:"kind"`
+	CreatedAt time.Time `firestore:"created_at"`
+}
 
 // Attachment is an image added to a task. Its id is the SHA-256 of Data in
 // hex, so whoever reads it can tell it is the image that was signed for.

@@ -236,6 +236,13 @@ service cloud.firestore {
         && request.resource.data.created_at == request.time;
     }
 
+    // A self-contained HTML prototype a worker published with `peyk publish`.
+    // Only the laptop agent writes them; the phone reads one by its hash to
+    // render in /sandbox and may delete it.
+    match /prototypes/{id} {
+      allow get, delete: if isOwner();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -151,6 +151,12 @@ type Agent struct {
 	History         func(session.Transcript) (entries []session.Entry, truncated bool)
 	HistoryRequests <-chan store.HistoryRequest
 
+	// PublishRequests receives self-hosted HTML prototypes from `peyk publish`
+	// over the local socket, and RecordPrototype persists each under its
+	// conversation id so refreshes keep it on the worker.
+	PublishRequests <-chan PublishCall
+	RecordPrototype func(conversationID string, p session.Prototype) error
+
 	// Usage, when set, reads the subscription's rate limits as Claude Code's
 	// status line last saved them, and the agent rereads it on UsageChanged.
 	// It is published apart from a refresh: it changes with every reply, and
@@ -1055,6 +1061,8 @@ func (a *Agent) Run(ctx context.Context, pings <-chan struct{}, cmds <-chan stor
 			}
 		case r := <-a.HistoryRequests:
 			a.serveHistory(ctx, r)
+		case call := <-a.PublishRequests:
+			call.Reply <- a.handlePublish(ctx, call.Req)
 		case id := <-a.Seen:
 			a.seen(ctx, id)
 			if err := a.Store.Delete(ctx, store.Seen, id); err != nil {

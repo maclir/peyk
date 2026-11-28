@@ -100,3 +100,34 @@ func TestPrototypesTellPagesFromDesignsAndOtherTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestPrototypesRecordsAndFindsSelfHostedPagesByConversation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prototypes.json")
+	p := &Prototypes{Path: path}
+	t1 := time.Date(2026, 11, 28, 1, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Minute)
+
+	if err := p.Record("conv-a", session.Prototype{URL: "#p-aaa", Title: "First", Kind: session.PrototypeHTML, At: t1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Record("conv-a", session.Prototype{URL: "#p-bbb", Title: "Second", Kind: session.PrototypeHTML, At: t2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Record("conv-b", session.Prototype{URL: "#p-ccc", Title: "Other", Kind: session.PrototypeHTML, At: t2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh Prototypes instance reads the persisted file across restarts.
+	reloaded := &Prototypes{Path: path}
+	got := reloaded.Find(session.Transcript{Tool: session.Antigravity, ID: "conv-a"})
+	if len(got) != 2 || got[0].URL != "#p-bbb" || got[1].URL != "#p-aaa" {
+		t.Fatalf("antigravity prototypes = %+v", got)
+	}
+	if other := reloaded.Find(session.Transcript{Tool: session.Antigravity, ID: "conv-b"}); len(other) != 1 || other[0].URL != "#p-ccc" {
+		t.Fatalf("other conversation prototypes = %+v", other)
+	}
+	if empty := reloaded.Find(session.Transcript{Tool: session.Antigravity, ID: "conv-none"}); empty != nil {
+		t.Fatalf("unrecorded conversation prototypes = %+v", empty)
+	}
+}

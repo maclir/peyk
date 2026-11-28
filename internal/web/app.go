@@ -83,6 +83,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+VersionPath, a.version)
 	mux.HandleFunc("GET "+ManifestPath, manifest)
 	mux.HandleFunc("GET "+OfflinePath, offline)
+	mux.HandleFunc("GET "+SandboxPath, sandbox)
 	mux.HandleFunc("POST "+SharePath, shareFallback)
 	mux.HandleFunc("GET /robots.txt", robots)
 	mux.HandleFunc("GET /{$}", a.home)
@@ -193,25 +194,46 @@ func (a *App) serviceWorker(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "sw.js", time.Time{}, bytes.NewReader(a.worker))
 }
 
+// SandboxPath serves the opaque-origin frame that renders self-hosted HTML
+// prototypes. Its strict CSP isolates prototype scripts from peyk's origin and
+// blocks all outbound network requests.
+const SandboxPath = "/sandbox"
+
+const sandboxCSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
+	"style-src 'unsafe-inline'; img-src data: blob:; font-src data:; frame-ancestors 'self'"
+
+var sandboxETag = func() string {
+	sum := sha256.Sum256([]byte(sandboxHTML))
+	return `"` + hex.EncodeToString(sum[:8]) + `"`
+}()
+
+func sandbox(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("ETag", sandboxETag)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, "sandbox.html", time.Time{}, bytes.NewReader([]byte(sandboxHTML)))
+}
+
 // securityHeaders allows exactly what Firebase sign-in and Firestore need:
 // Google's APIs for data and tokens, apis.google.com for the sign-in helper,
 // and the project's auth domain for the sign-in popup's frame.
 func securityHeaders(fb Firebase, next http.Handler) http.Handler {
-	connect, frame := "'self' https://*.googleapis.com", ""
+	connect, frame := "'self' https://*.googleapis.com", "'self'"
 	if fb.AuthDomain != "" {
-		frame = "https://" + fb.AuthDomain
+		frame = "https://" + fb.AuthDomain + " 'self'"
 	}
 	if e := fb.Emulators; e != nil {
 		connect += " http://" + e.Auth + " http://" + e.Firestore
-		frame = "http://" + e.Auth
+		frame = "http://" + e.Auth + " 'self'"
 	}
 	csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; " +
-		"script-src 'self' https://apis.google.com; connect-src " + connect + "; img-src 'self' data: blob:"
-	if frame != "" {
-		csp += "; frame-src " + frame
-	}
+		"script-src 'self' https://apis.google.com; connect-src " + connect + "; img-src 'self' data: blob:; frame-src " + frame
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", csp)
+		if r.URL.Path == SandboxPath {
+			w.Header().Set("Content-Security-Policy", sandboxCSP)
+		} else {
+			w.Header().Set("Content-Security-Policy", csp)
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
@@ -286,3 +308,16 @@ const offlineHTML = `<!doctype html>
 <p>This needs the network, and there is none right now. Everything you saved is
 on the server, waiting.</p>
 <p><a href="/">Try again</a></p></main></body></html>`
+
+// sandboxHTML waits for the embedding peyk window to post a prototype's HTML,
+// then replaces itself with that document while keeping /sandbox's strict CSP.
+const sandboxHTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><script>
+window.addEventListener("message", function onMsg(e) {
+  if (e.source !== window.parent || !e.data || e.data.type !== "peyk-prototype" || typeof e.data.html !== "string") return;
+  window.removeEventListener("message", onMsg);
+  document.open();
+  document.write(e.data.html);
+  document.close();
+});
+window.parent.postMessage({ type: "peyk-sandbox-ready" }, "*");
+</script></head><body></body></html>`

@@ -3,6 +3,7 @@ package laptop
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,13 +15,17 @@ import (
 	"github.com/maclir/peyk/internal/session"
 )
 
-// Prototypes finds the pages a transcript published with Claude Code's
-// Artifact tool. A page can be published early in a conversation that later
-// grows to tens of megabytes, so it remembers how far it has read each
-// transcript and reads only what was appended since.
+// Prototypes finds the pages a conversation published: Claude Code's Artifact
+// tool results from its transcript, and self-hosted pages recorded by
+// `peyk publish` in Path. A transcript can grow to tens of megabytes, so it
+// remembers how far it has read each transcript and reads only what was
+// appended since.
 type Prototypes struct {
 	mu   sync.Mutex
 	seen map[string]*scanned
+	// Path, when set, holds pages published with `peyk publish`, keyed by
+	// conversation id.
+	Path string
 }
 
 type scanned struct {
@@ -28,24 +33,88 @@ type scanned struct {
 	found  map[string]session.Prototype
 }
 
-// Find returns the pages a session's own transcript published, newest first.
+// Find returns the pages a session's own conversation published, newest first.
 func (p *Prototypes) Find(t session.Transcript) []session.Prototype {
-	if t.ID == "" || t.Tool == session.Antigravity {
+	if t.ID == "" {
 		return nil
 	}
-	path := filepath.Join(t.Dir, t.ID+".jsonl")
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.seen == nil {
-		p.seen = map[string]*scanned{}
+	found := map[string]session.Prototype{}
+	if t.Tool == "" && t.Dir != "" {
+		path := filepath.Join(t.Dir, t.ID+".jsonl")
+		if p.seen == nil {
+			p.seen = map[string]*scanned{}
+		}
+		s := p.seen[path]
+		if s == nil {
+			s = &scanned{found: map[string]session.Prototype{}}
+			p.seen[path] = s
+		}
+		s.scan(path)
+		for url, proto := range s.found {
+			found[url] = proto
+		}
 	}
-	s := p.seen[path]
-	if s == nil {
-		s = &scanned{found: map[string]session.Prototype{}}
-		p.seen[path] = s
+	if p.Path != "" {
+		if saved, err := loadPublishedPrototypes(p.Path); err == nil {
+			for _, proto := range saved[t.ID] {
+				if prev, ok := found[proto.URL]; !ok || !proto.At.Before(prev.At) {
+					found[proto.URL] = proto
+				}
+			}
+		}
 	}
-	s.scan(path)
-	return newestPrototypes(s.found)
+	return newestPrototypes(found)
+}
+
+// Record persists a self-hosted prototype under conversationID so refreshes
+// and restarts keep it on that conversation.
+func (p *Prototypes) Record(conversationID string, proto session.Prototype) error {
+	if p.Path == "" || conversationID == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	saved, err := loadPublishedPrototypes(p.Path)
+	if err != nil {
+		return err
+	}
+	byURL := map[string]session.Prototype{}
+	for _, existing := range saved[conversationID] {
+		byURL[existing.URL] = existing
+	}
+	if prev, ok := byURL[proto.URL]; !ok || !proto.At.Before(prev.At) {
+		byURL[proto.URL] = proto
+	}
+	saved[conversationID] = newestPrototypes(byURL)
+	data, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Path), 0o700); err != nil {
+		return err
+	}
+	tmp := p.Path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p.Path)
+}
+
+func loadPublishedPrototypes(path string) (map[string][]session.Prototype, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string][]session.Prototype{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	saved := map[string][]session.Prototype{}
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 // scan reads complete lines appended since the last scan. A transcript that

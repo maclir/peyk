@@ -537,3 +537,15 @@ html.wide .inboxpane .tasks { display: grid; grid-template-columns: repeat(auto-
 .logo { flex: none; display: block; width: 20px; height: 20px; }
 .logo.ag { border-radius: 5px; }
 .logo.gh svg { display: block; width: 20px; height: 20px; }
+
+/* Self-hosted prototype viewer: fills the viewport below the header. */
+html.proto, html.proto body { height: 100%; overflow: hidden; }
+html.proto body { max-width: none; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px); }
+html.proto #panes { flex: 1 1 auto; min-height: 0; display: flex; }
+html.proto #app { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; margin-bottom: 0; overflow: hidden; }
+html.proto .foot { display: none; }
+.protoview { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.protobar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.protobar .link { flex: none; padding: 4px 6px 4px 0; }
+.prototitle { flex: 1; min-width: 0; font-weight: 700; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.protoframe { flex: 1 1 auto; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }

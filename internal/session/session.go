@@ -203,7 +203,8 @@ type Snapshot struct {
 	DefaultModel string `firestore:"-" json:"-"`
 }
 
-// Prototype is a page a session published with Claude Code's Artifact tool.
+// Prototype is a page a session published with Claude Code's Artifact tool or
+// `peyk publish`.
 type Prototype struct {
 	URL   string    `firestore:"url" json:"url"`
 	Title string    `firestore:"title" json:"title"`

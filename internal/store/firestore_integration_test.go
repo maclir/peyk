@@ -57,6 +57,25 @@ func TestFirestoreRoundTrip(t *testing.T) {
 	if err := s.SetLaptop(ctx, Laptop{Online: true, SeenAt: at}); err != nil {
 		t.Fatal(err)
 	}
+	protoID := "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+	wantProto := Prototype{HTML: "<!doctype html><p>hi</p>", Title: "Demo", Kind: session.PrototypeHTML, CreatedAt: at}
+	if err := s.Put(ctx, Prototypes, protoID, wantProto); err != nil {
+		t.Fatal(err)
+	}
+	pdoc, err := s.client.Collection(Prototypes).Doc(protoID).Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotProto Prototype
+	if err := pdoc.DataTo(&gotProto); err != nil {
+		t.Fatal(err)
+	}
+	if gotProto.HTML != wantProto.HTML || gotProto.Title != wantProto.Title || gotProto.Kind != wantProto.Kind {
+		t.Fatalf("prototype round trip: %+v", gotProto)
+	}
+	if err := s.Delete(ctx, Prototypes, protoID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func contains(xs []string, x string) bool {

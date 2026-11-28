@@ -23,6 +23,7 @@ const usage = `usage: peyk <command>
   status         print every live aoe session: state, last commit, push state, last reply
   agent          publish session state for the phone until stopped
   ping           tell a running agent that something changed (for hooks)
+  publish <file> host a self-contained HTML prototype in peyk and link it to this worker
   usage          save Claude Code's or Antigravity's limits from status line JSON on stdin (for statusLine)
   owner <email>  admit this Google account to peyk after its first sign-in
   import-tasks   add tasks from a JSON array on stdin: [{"project","text","created_at"}]
@@ -63,6 +64,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "ping":
 		agent.Ping(socketPath())
 		return nil
+	case "publish":
+		wd, _ := os.Getwd()
+		return publishPrototype(ctx, args[1:], publishSocketPath(), wd, out)
 	case "usage":
 		return saveUsage(os.Stdin)
 	case "pair":
@@ -131,7 +135,7 @@ func collector() laptop.Collector {
 		AoeHooks:   fmt.Sprintf("/tmp/aoe-hooks-%d", os.Getuid()),
 		Root:       projectsRoot(),
 		Now:        time.Now,
-		Prototypes: &laptop.Prototypes{},
+		Prototypes: &laptop.Prototypes{Path: prototypesPath()},
 		Logos:      &laptop.Logos{Now: time.Now, TTL: 10 * time.Minute},
 	}
 }

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/maclir/peyk/internal/agent"
 	"github.com/maclir/peyk/internal/launchd"
 	"github.com/maclir/peyk/internal/session"
 )
@@ -95,5 +98,63 @@ func TestJobsRunTheAgentThroughMakeAndGiveTheMenuTheOrigin(t *testing.T) {
 	}
 	if menu.Env["PEYK_ORIGIN"] != "https://peyk.example" || menu.Env["PEYK_REPO"] != "/code/peyk" || len(menu.Env) != 2 {
 		t.Fatalf("menu env = %v", menu.Env)
+	}
+}
+
+func TestParsePublishArgs(t *testing.T) {
+	p, title, err := parsePublishArgs([]string{"/tmp/demo.html"})
+	if err != nil || p != "/tmp/demo.html" || title != "" {
+		t.Fatalf("got %q %q %v", p, title, err)
+	}
+	p, title, err = parsePublishArgs([]string{"/tmp/demo.html", "--title", "Working tag"})
+	if err != nil || p != "/tmp/demo.html" || title != "Working tag" {
+		t.Fatalf("got %q %q %v", p, title, err)
+	}
+	p, title, err = parsePublishArgs([]string{"--title=Demo", "/tmp/demo.html"})
+	if err != nil || p != "/tmp/demo.html" || title != "Demo" {
+		t.Fatalf("got %q %q %v", p, title, err)
+	}
+	for _, bad := range [][]string{nil, {"--title"}, {"--nope", "a.html"}, {"a.html", "b.html"}} {
+		if _, _, err := parsePublishArgs(bad); err == nil {
+			t.Errorf("parsePublishArgs(%v) succeeded, want error", bad)
+		}
+	}
+}
+
+func TestPublishPrototypeSendsFileOverSocket(t *testing.T) {
+	dir := t.TempDir()
+	htmlPath := filepath.Join(dir, "working-tag.html")
+	body := "<!doctype html><title>Motion Demo</title><p>hi</p>"
+	if err := os.WriteFile(htmlPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sockDir, err := os.MkdirTemp("/tmp", "peyk-pub-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sock := filepath.Join(sockDir, "p.sock")
+	ln, err := agent.Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := make(chan agent.PublishCall, 1)
+	go agent.ServePublish(ctx, ln, calls)
+	go func() {
+		call := <-calls
+		if call.Req.Dir != "/code/peyk" || call.Req.Title != "Motion Demo" || call.Req.HTML != body {
+			call.Reply <- agent.PublishResponse{Error: "unexpected request"}
+			return
+		}
+		call.Reply <- agent.PublishResponse{ID: "abc", URL: "https://peyk.test/#p-abc"}
+	}()
+	var out bytes.Buffer
+	if err := publishPrototype(ctx, []string{htmlPath}, sock, "/code/peyk", &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != "https://peyk.test/#p-abc" {
+		t.Fatalf("out = %q", out.String())
 	}
 }

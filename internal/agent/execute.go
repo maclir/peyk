@@ -47,6 +47,9 @@ type Commands struct {
 	RPID   string
 	// Attachments is the directory a dispatch's images are saved to.
 	Attachments string
+	// Peyk is the path to the peyk binary named in prototype prompts for
+	// non-Claude workers; defaults to "peyk".
+	Peyk string
 }
 
 // execute runs one command and records the outcome on its document. A
@@ -103,7 +106,7 @@ func (a *Agent) run(ctx context.Context, in store.Incoming) error {
 		if !proj.Free {
 			return fmt.Errorf("%s is not free: %s", proj.Name, proj.Busy)
 		}
-		text, err := prototypeText(p.Text, p.Prototype)
+		text, err := prototypeText(p.Text, p.Prototype, a.sessions[proj.SessionID].Tool, a.Commands.Peyk)
 		if err != nil {
 			return err
 		}

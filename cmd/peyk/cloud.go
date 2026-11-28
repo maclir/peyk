@@ -31,6 +31,23 @@ func socketPath() string {
 	return filepath.Join(home, ".peyk", "agent.sock")
 }
 
+func publishSocketPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "publish.sock")
+}
+
+func prototypesPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".peyk", "prototypes.json")
+}
+
+func executablePath() string {
+	if p, err := os.Executable(); err == nil && p != "" {
+		return p
+	}
+	return "peyk"
+}
+
 // usageDir is where `peyk usage` saves each tool's rate limits; it is a
 // directory of its own so the agent's watcher sees nothing else.
 func usageDir() string {
@@ -167,14 +184,23 @@ func runAgent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	pubLn, err := agent.Listen(publishSocketPath())
+	if err != nil {
+		ln.Close()
+		return err
+	}
 	watcher, err := agent.NewGitWatcher(laptop.Exec)
 	if err != nil {
+		ln.Close()
+		pubLn.Close()
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	pings := make(chan struct{}, 1)
 	go agent.Serve(ctx, ln, pings)
+	pubReqs := make(chan agent.PublishCall, 4)
+	go agent.ServePublish(ctx, pubLn, pubReqs)
 	// Any background listener failing ends the agent; it says which.
 	bgErr := make(chan error, 4)
 	background := func(f func() error) {
@@ -251,6 +277,7 @@ func runAgent(ctx context.Context) error {
 			return laptop.AntigravityModels(ctx, laptop.Exec, agyPath())
 		},
 		History: laptop.History, HistoryRequests: history,
+		PublishRequests: pubReqs, RecordPrototype: c.Prototypes.Record,
 		Seen: seen,
 		Commands: &agent.Commands{
 			Act: actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig(),
@@ -259,6 +286,7 @@ func runAgent(ctx context.Context) error {
 			Origin:      o.String(),
 			RPID:        o.Hostname(),
 			Attachments: attachmentsDir(),
+			Peyk:        executablePath(),
 		},
 	}
 	if gh, err := github(ctx); err != nil {

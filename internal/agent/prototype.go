@@ -16,13 +16,19 @@ var prototypeAsks = map[string]string{
 	session.PrototypeAny:    "build it as a plain HTML page or on a canvas made from the Design Artifact type, whichever suits the task",
 }
 
-func prototypeText(text, kind string) (string, error) {
+func prototypeText(text, kind, tool, peykBin string) (string, error) {
 	if kind == "" {
 		return text, nil
 	}
 	ask, ok := prototypeAsks[kind]
 	if !ok {
 		return "", fmt.Errorf("no prototype kind %q", kind)
+	}
+	if tool != "" {
+		if peykBin == "" {
+			peykBin = "peyk"
+		}
+		return fmt.Sprintf("%s\n\nDeliver this as a prototype, not a code change: build it as a self-contained HTML page with inline CSS and JS (no external network requests), write it outside the repository (for example in /tmp), and publish it by running %s publish <path>. Read the repository as needed, but do not edit, test or commit it.", text, peykBin), nil
 	}
 	return fmt.Sprintf("%s\n\nDeliver this as a prototype, not a code change: %s and publish it with the Artifact tool. Read the repository as needed, but do not edit, test or commit it.", text, ask), nil
 }

@@ -25,7 +25,7 @@ func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
 		t.Fatalf("config not in page: %s", body)
 	}
 	csp := resp.Header.Get("Content-Security-Policy")
-	for _, want := range []string{"frame-src https://p.firebaseapp.com", "connect-src 'self' https://*.googleapis.com", "script-src 'self' https://apis.google.com"} {
+	for _, want := range []string{"frame-src https://p.firebaseapp.com 'self'", "connect-src 'self' https://*.googleapis.com", "script-src 'self' https://apis.google.com"} {
 		if !strings.Contains(csp, want) {
 			t.Errorf("CSP %q missing %q", csp, want)
 		}
@@ -38,7 +38,7 @@ func TestShellCarriesFirebaseConfigOnlyWhenConfigured(t *testing.T) {
 
 func TestCrawlersAreKeptOut(t *testing.T) {
 	h := newTestApp().Handler()
-	for _, path := range []string{"/", "/robots.txt", "/static/app.js", "/nope"} {
+	for _, path := range []string{"/", "/robots.txt", "/static/app.js", SandboxPath, "/nope"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if got := rec.Header().Get("X-Robots-Tag"); !strings.Contains(got, "noindex") {
@@ -49,6 +49,37 @@ func TestCrawlersAreKeptOut(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/robots.txt", nil))
 	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, "Disallow: /\n") {
 		t.Fatalf("robots.txt = %d %q", rec.Code, body)
+	}
+}
+
+func TestSandboxServesStrictOpaqueCSP(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestApp().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, SandboxPath, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", SandboxPath, rec.Code)
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, want := range []string{
+		"sandbox allow-scripts",
+		"default-src 'none'",
+		"script-src 'unsafe-inline'",
+		"style-src 'unsafe-inline'",
+		"img-src data: blob:",
+		"font-src data:",
+		"frame-ancestors 'self'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("sandbox CSP %q missing %q", csp, want)
+		}
+	}
+	if strings.Contains(csp, "allow-same-origin") {
+		t.Errorf("sandbox CSP must not grant allow-same-origin: %q", csp)
+	}
+	if rec.Header().Get("ETag") == "" || rec.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf("sandbox caching headers = ETag:%q Cache-Control:%q", rec.Header().Get("ETag"), rec.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(rec.Body.String(), "peyk-sandbox-ready") {
+		t.Errorf("sandbox body missing handshake: %s", rec.Body.String())
 	}
 }
 
