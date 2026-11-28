@@ -118,6 +118,16 @@ placeRevision();
 // the conversation bar sticks below it. A render replaces the head, so each
 // render observes the new one.
 const dheadSize = new ResizeObserver(([e]) => document.documentElement.style.setProperty("--dheadh", `${e.target.offsetHeight}px`));
+// Reveal the expand button only when the 3-line clamp actually clips the task.
+function syncTaskClamp(body) {
+  const row = body.closest(".nntask");
+  const more = row?.querySelector(".nnmore");
+  if (!row || !more || !body.classList.contains("clamped")) return;
+  const clipped = body.scrollHeight > body.clientHeight + 1;
+  more.hidden = !clipped;
+  row.classList.toggle("clamped", clipped);
+}
+const taskBodySize = new ResizeObserver((entries) => entries.forEach((e) => syncTaskClamp(e.target)));
 
 // On a wide window #app is its own scroll container; on a narrow one the page scrolls.
 function scrollHost() {
@@ -224,6 +234,8 @@ async function start(cfg) {
     sheetSent: null,
     // Sent and done rows the viewer has opened, by task id.
     openRows: new Set(),
+    // Current tasks the viewer has expanded past the 3-line clamp, by task id.
+    openTasks: new Set(),
     // Picks for open questions by question id, kept across redraws.
     answers: new Map(),
     // The worker whose whole conversation is open: { id, latest, data, nodes, unsub }.
@@ -533,6 +545,12 @@ async function start(cfg) {
     dheadSize.disconnect();
     const dhead = app.querySelector(".dhead");
     if (dhead) dheadSize.observe(dhead);
+    taskBodySize.disconnect();
+    const taskBody = app.querySelector(".nntask .nnbody.clamped");
+    if (taskBody) {
+      syncTaskClamp(taskBody);
+      taskBodySize.observe(taskBody);
+    }
     railEl.hidden = !isWide || page;
     railEl.replaceChildren(...(railEl.hidden ? [] : [board(s?.id)]));
     sideEl.hidden = !isWide || !s;
@@ -1981,7 +1999,7 @@ async function start(cfg) {
               h("span", { class: "name" }, s.title),
               st.group === "Needs you" ? chip(st) : null,
               h("span", { class: "tags" }, tagList(s, false), waitingLabel(s.id))),
-            task ? h("span", { class: "curtask" }, `Task: ${oneLine(task.text)}`) : null,
+            task ? h("span", { class: "curtask" }, h("span", { class: "tprefix" }, "Task: "), oneLine(task.text)) : null,
             line,
           ),
           // Age and inbox sit on separate lines so a count never reads as part of the age.
@@ -2058,8 +2076,7 @@ async function start(cfg) {
           workerMenu(s, busy)),
         outcomeLine(`worker:${s.id}`),
       ),
-      next ? nowAndNext(task, next, now)
-        : task ? h("p", { class: "curtask" }, `Task: ${task.text}`, h("span", { class: "when" }, ` · sent ${ago(task.dispatched_at, now)} ago`)) : null,
+      next || task ? nowAndNext(task, next, now) : null,
       !isWide && g && g.unpushed > 0 ? pushCard(s, now) : null,
       s.prototypes && s.prototypes.length ? prototypes(s.prototypes, now) : null,
       convo,
@@ -2483,16 +2500,35 @@ async function start(cfg) {
   // above it with the inbox's send button, and its text opens the inbox. A
   // stopped worker is started by the send.
   function nowAndNext(task, next, now) {
-    const sent = state.sends.get(next.id);
-    const clears = hasConversation(next);
-    return h("div", { class: "nownext" },
-      h("div", { class: "nnrow" },
+    const nextRow = next ? (() => {
+      const sent = state.sends.get(next.id);
+      const clears = hasConversation(next);
+      return h("div", { class: "nnrow nnnext" },
         h("button", { type: "button", class: "nntext", "aria-label": `Next task, open the inbox: ${next.text}`, onclick: () => openInbox(next.project) },
           sent ? h("span", { class: "nnlabel", role: "status", "data-tone": sent.tone || null }, sent.text) : h("span", { class: "nnlabel" }, "Next"),
           h("span", { class: "nnone" }, oneLine(next.text))),
-        sendButton(next, clears, () => send(next, clears))),
-      task ? h("div", { class: "nnrow" },
-        h("div", { class: "nntext" }, h("span", { class: "nnlabel" }, `Task · sent ${ago(task.dispatched_at, now)} ago`), h("span", {}, task.text))) : null);
+        sendButton(next, clears, () => send(next, clears)));
+    })() : null;
+    const taskRow = task ? (() => {
+      const expanded = state.openTasks.has(task.id);
+      const toggle = () => {
+        if (expanded) state.openTasks.delete(task.id);
+        else state.openTasks.add(task.id);
+        render();
+      };
+      return h("div", {
+        class: "nnrow nntask",
+        onclick: (e) => {
+          if (!expanded && e.currentTarget.classList.contains("clamped") && !e.target.closest("button") && !window.getSelection()?.toString()) toggle();
+        },
+      },
+      h("div", { class: "nntext" },
+        h("span", { class: "nnlabel" }, `Task · sent ${ago(task.dispatched_at, now)} ago`),
+        h("span", { class: expanded ? "nnbody" : "nnbody clamped" }, task.text),
+        h("button", { type: "button", class: "nnmore", hidden: expanded ? null : "", "aria-expanded": String(expanded), onclick: toggle },
+          expanded ? "Show less" : "Show full task")));
+    })() : null;
+    return h("div", { class: "nownext" }, nextRow, taskRow);
   }
 
   // The quick action shares the menu's busy keys, so either shows the other's

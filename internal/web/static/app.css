@@ -173,7 +173,8 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .nbell { flex: none; display: inline-flex; color: var(--accent); }
 .nbell svg { width: 14px; height: 14px; display: block; }
 .facewrap.stopped .face { opacity: 0.55; }
-.curtask { margin: 0; font-size: 0.85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.curtask { margin: 0; font-size: 0.85rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.curtask .tprefix { color: var(--accent); font-weight: 500; }
 .chip { font: 600 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .chip.bad { background: var(--bad-soft); color: var(--bad); }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
@@ -196,15 +197,21 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--paper); pa
 .wmenu .pop button.danger { color: var(--bad); }
 .wmenu .pop hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
 button.tool { width: 40px; height: 40px; color: var(--muted); }
-.detail > .curtask { white-space: normal; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
-.nownext { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.nownext { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .nnrow { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 12px; }
 .nnrow + .nnrow { border-top: 1px solid var(--line); }
-.nntext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
-button.nntext { border: 0; background: none; padding: 0; border-radius: 0; font-weight: 500; }
+.nnrow.nntask { padding: 10px 12px; background: var(--paper); }
+.nnrow.nntask.clamped { cursor: pointer; }
+.nntext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 0.88rem; font-weight: 400; line-height: 1.45; text-align: left; overflow-wrap: anywhere; }
+button.nntext { border: 0; background: none; padding: 0; border-radius: 0; font-weight: 400; }
+.nnrow.nntask .nntext { font-size: 0.86rem; }
 .nnlabel { font: 600 0.66rem var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.nnrow.nnnext .nnlabel:not([data-tone]) { color: var(--accent); }
 .nnlabel[data-tone="bad"] { color: var(--bad); }
 .nnone { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nnbody { white-space: pre-wrap; }
+.nnbody.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+button.nnmore { align-self: flex-start; border: 0; background: none; padding: 4px 8px 4px 0; margin: -2px 0 -4px; border-radius: 6px; font-size: 0.76rem; font-weight: 500; color: var(--accent); }
 .pushcard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 .phead { display: flex; align-items: center; gap: 8px; }
 .phead h3 { margin: 0; font-size: 0.9rem; }

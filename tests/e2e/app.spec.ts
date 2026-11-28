@@ -1867,6 +1867,45 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/sessions/n`, { headers: admin });
   });
 
+  test('a long current task clamps to three lines and expands on tap, while a short one stays plain', async () => {
+    const longText = [
+      'Audit every verification step that fires and causes retakes or adds latency to quiz generation.',
+      '',
+      'Propose a lightweight audit loop that improves initial output quality without bloating prompts or context windows, and check actual recent runs.',
+    ].join('\n');
+    await put(page, 'sessions/tl', { id: 'tl', title: 'popq', path: '/c/popq', aoe_status: 'idle', state: 'idle', updated_at: new Date(), cleared: false });
+    await put(page, 'projects/popq', { name: 'popq', path: '/c/popq', session_id: 'tl', free: true, busy: '' });
+    await put(page, 'tasks/tl-next', { project: 'popq', text: 'Create text formatter helper', status: 'queued', created_at: new Date() });
+    await put(page, 'tasks/tl-cur', { project: 'popq', text: longText, status: 'dispatched', session_id: 'tl', created_at: new Date(Date.now() - 5 * 60_000), dispatched_at: new Date(Date.now() - 2 * 60_000) });
+    await page.goto('/app/#s-tl');
+
+    const pair = page.locator('.nownext');
+    await expect(pair.locator('.nnrow.nnnext')).toContainText('Create text formatter helper');
+    const taskRow = pair.locator('.nnrow.nntask');
+    await expect(taskRow).toContainText('Audit every verification step');
+    const showFull = taskRow.getByRole('button', { name: 'Show full task' });
+    await expect(showFull).toBeVisible();
+    const clampedHeight = await taskRow.locator('.nnbody').evaluate((el) => el.clientHeight);
+    await showFull.click();
+    const showLess = taskRow.getByRole('button', { name: 'Show less' });
+    await expect(showLess).toBeVisible();
+    const expandedHeight = await taskRow.locator('.nnbody').evaluate((el) => el.clientHeight);
+    expect(expandedHeight).toBeGreaterThan(clampedHeight);
+    await showLess.click();
+    await expect(showFull).toBeVisible();
+
+    // Without a next task, the current task still uses the same card; a short task needs no toggle.
+    await page.request.delete(`${FIRESTORE}/tasks/tl-next`, { headers: admin });
+    await put(page, 'tasks/tl-cur', { project: 'popq', text: 'Fix reconnect loop', status: 'dispatched', session_id: 'tl', created_at: new Date(Date.now() - 5 * 60_000), dispatched_at: new Date(Date.now() - 2 * 60_000) });
+    await expect(pair.locator('.nnrow.nnnext')).toHaveCount(0);
+    await expect(taskRow).toContainText('Fix reconnect loop');
+    await expect(taskRow.locator('.nnmore')).toBeHidden();
+
+    await page.request.delete(`${FIRESTORE}/tasks/tl-cur`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/projects/popq`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/sessions/tl`, { headers: admin });
+  });
+
   test("a worker's question is answered from the phone", async () => {
     const asking = {
       id: 'q', title: 'quiz', path: '/c/quiz', aoe_status: 'waiting', state: 'needs_input', updated_at: new Date(),
