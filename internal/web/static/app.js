@@ -33,12 +33,10 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
 // from that same cache.
 const revEl = document.getElementById("rev");
 revEl.textContent = revision;
-// The spinner sits outside the button's box, so the revision does not move.
 function revBusy(busy) {
   revEl.disabled = busy;
   revEl.toggleAttribute("aria-busy", busy);
-  if (busy) revEl.prepend(Object.assign(document.createElement("span"), { className: "spin", ariaHidden: "true" }));
-  else revEl.querySelector(".spin")?.remove();
+  revEl.classList.toggle("busy", busy);
 }
 async function checkRevision() {
   revBusy(true);
@@ -162,8 +160,6 @@ function sheetTop(head, close) {
   top.addEventListener("pointercancel", letGo);
   return top;
 }
-
-const spinner = () => h("span", { class: "spin", "aria-hidden": "true" });
 
 function notice(text, ...extra) {
   hpageEl.replaceChildren();
@@ -636,8 +632,7 @@ async function start(cfg) {
   function outcomeLine(key) {
     const o = state.outcomes.get(key);
     if (!o?.text) return null;
-    return h("p", { class: "outcome", role: "status", "data-tone": o.tone || null },
-      o.busy ? spinner() : null,
+    return h("p", { class: o.busy ? "outcome busy" : "outcome", role: "status", "aria-busy": o.busy ? "true" : null, "data-tone": o.tone || null },
       h("span", { class: "grow" }, o.text),
       o.busy || o.tone === "ok" ? null
         : h("button", { type: "button", class: "icon dismiss", "aria-label": "Dismiss", onclick: () => setOutcome(key, "") }, icon("x")));
@@ -682,7 +677,7 @@ async function start(cfg) {
 
   function busyButton(key, attrs, ...children) {
     if (!state.busy.has(key)) return h("button", attrs, ...children);
-    return h("button", { ...attrs, class: `${attrs.class ?? ""} busy`, disabled: "", "aria-busy": "true" }, spinner(), ...children);
+    return h("button", { ...attrs, class: `${attrs.class ?? ""} busy`, disabled: "", "aria-busy": "true" }, ...children);
   }
 
   // Tapping the laptop asks it to fetch its checkout; the version it then
@@ -775,7 +770,7 @@ async function start(cfg) {
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.classList.add("busy");
-      button.replaceChildren(spinner(), "Creating passkey…");
+      button.replaceChildren("Creating passkey…");
       try {
         const key = await passkey.createPasskey(state.user);
         await fs.setDoc(fs.doc(db, "pairings", code), { ...key, created_at: fs.serverTimestamp() });
@@ -821,7 +816,7 @@ async function start(cfg) {
 
   // A sent or done task has had its turn, so it is one faded line that opens
   // to its whole text and the rest of its controls.
-  function taskRow(t, kind, now, { inProject = false, stat, action = null, detail }) {
+  function taskRow(t, kind, now, { inProject = false, stat, statBusy = false, action = null, detail }) {
     const open = state.openRows.has(t.id);
     return h("div", { class: `task row ${kind}${open ? " open" : ""}` },
       h("div", { class: "rhead" },
@@ -831,7 +826,7 @@ async function start(cfg) {
           h("span", { class: "rtext" }, inProject ? null : [h("b", {}, t.project), " "], t.text),
           t.prototype ? prototypeTag(t.prototype) : null,
           t.ideate ? ideateTag(t.ideate) : null,
-          h("span", { class: "rstat" }, stat)),
+          h("span", { class: statBusy ? "rstat busy" : "rstat" }, stat)),
         action),
       outcomeLine(`task:${t.id}`),
       outcomeLine(`resume:${t.id}`),
@@ -850,7 +845,8 @@ async function start(cfg) {
     const s = state.sessions.get(t.session_id);
     const st = sentState(t, s, projectNamed(t.project), now, state.loaded.has("sessions"));
     return taskRow(t, "sent", now, {
-      stat: [st.starting ? spinner() : h("span", { class: `dot ${st.tone}` }), `${st.label} · ${ago(t.dispatched_at, now)}`],
+      stat: [h("span", { class: `dot ${st.starting ? "run" : st.tone}` }), `${st.label} · ${ago(t.dispatched_at, now)}`],
+      statBusy: Boolean(st.starting || st.tone === "run"),
       detail: s ? h("a", { href: `#s-${encodeURIComponent(s.id)}` }, `${s.title} · ${st.label}`)
         : h("span", {}, st.gone ? "Its worker is gone." : "Starting the worker…"),
     });
@@ -888,14 +884,14 @@ async function start(cfg) {
     const open = state.menu === t.id;
     const sent = state.sends.get(t.id);
     const status = sent
-      ? h("span", { class: "tstatus", role: "status", "data-tone": sent.tone || null }, sent.text)
+      ? h("span", { class: sent.busy && sent.text ? "tstatus busy" : "tstatus", role: "status", "data-tone": sent.tone || null }, sent.text)
       : h("span", { class: "tstatus" }, t.ready
         ? (projectNamed(t.project)?.session_id ? "Free" : "Starts a new worker")
         : `Waiting · ${t.why}`);
     return h("article", { class: `task${t.ready ? "" : " waiting"}` },
       h("div", { class: "thead" },
         inProject ? null : [face(projectNamed(t.project), t.project, "sm"), h("span", { class: "proj" }, t.project)],
-        t.saving ? h("span", { class: "when saving" }, spinner(), "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
+        t.saving ? h("span", { class: "when saving" }, "saving") : h("span", { class: "when" }, ago(t.created_at, now)),
         t.prototype ? prototypeTag(t.prototype) : null,
         t.ideate ? ideateTag(t.ideate) : null,
         h("span", { class: "grow" }),
@@ -907,7 +903,7 @@ async function start(cfg) {
       h("div", { class: "ttext" }, t.text),
       taskImages(t),
       h("div", { class: "tfoot" },
-        sent?.busy ? spinner() : h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
+        h("span", { class: `dot ${sent ? "sent" : t.ready ? "free" : "busy"}` }),
         status,
         t.ready ? sendButton(t, clears, () => sendWith(t, clears)) : null,
       ),
@@ -1425,7 +1421,7 @@ async function start(cfg) {
       d.error ? h("p", { class: "empty" }, d.error) : null,
       d.error ? h("button", { type: "button", class: "link more", onclick: () => { done.delete(key); render(); } }, "Try again") : null,
       !d.tasks.length && !d.loading && !d.error ? h("p", { class: "empty" }, "Nothing done yet.") : null,
-      d.loading ? (d.tasks.length ? h("p", { class: "more pending", role: "status", "aria-label": "Loading more done tasks" }, spinner()) : loading("Loading done tasks…"))
+      d.loading ? (d.tasks.length ? h("p", { class: "more pending", role: "status", "aria-label": "Loading more done tasks" }, "Loading…") : loading("Loading done tasks…"))
         : d.more ? h("button", { type: "button", class: "link more", onclick: () => loadDone(key) }, "Show more") : null,
     ].filter(Boolean);
   }
@@ -1751,7 +1747,7 @@ async function start(cfg) {
       const queued = inboxCount(s);
       const ideas = projectOf(s) ? ideaCount(state.ideas, projectOf(s).name) : 0;
       const line = s.question ? h("span", { class: "msg ask" }, `Asks: ${oneLine(s.question.items.map((q) => q.question).join(" · "))}`)
-        : awaitingReply(s) ? h("span", { class: "msg pending" }, pendingLabel(s))
+        : awaitingReply(s) ? h("span", { class: s.state === "working" ? "msg pending working" : "msg pending" }, pendingLabel(s))
         : s.cleared ? h("span", { class: "msg fresh" }, "New conversation")
         : s.message ? h("span", { class: "msg" }, oneLine(s.message.text)) : null;
       out.push(
@@ -1799,8 +1795,8 @@ async function start(cfg) {
     const you = () => h("span", { class: "who mine", ...(unrecorded ? { role: "status" } : {}) },
       unrecorded ? "Typed on the laptop · not in the conversation yet" : ["You", s.prompt ? ` · ${ago(s.prompt.at, now)}` : ""]);
     const pending = awaitingReply(s);
-    const msg = h("div", { class: pending ? "reply pending" : "reply" });
-    if (pending) msg.append(h("p", { role: "status" }, s.state === "working" ? spinner() : null, pendingLabel(s)));
+    const msg = h("div", { class: pending ? (s.state === "working" ? "reply pending working" : "reply pending") : "reply" });
+    if (pending) msg.append(h("p", { role: "status" }, pendingLabel(s)));
     else msg.innerHTML = s.message ? renderMarkdown(s.message.text) : "<p>No reply yet.</p>";
     const whole = state.history?.id === s.id ? state.history : null;
     const convo = whole
@@ -2002,9 +1998,10 @@ async function start(cfg) {
   // switch to. Its dot is the tool: Claude Code or Antigravity.
   function modelChip(s) {
     const name = shownModel(s).name || (s.tool === "antigravity" ? "Antigravity" : "Model");
-    return h("button", { type: "button", class: `modelchip ${s.tool === "antigravity" ? "ag" : "cc"}`, "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog",
+    const busy = state.busy.has(`model:${s.id}`);
+    return h("button", { type: "button", class: `modelchip ${s.tool === "antigravity" ? "ag" : "cc"}${busy ? " busy" : ""}`, "aria-label": `Model: ${name}. Change model`, "aria-haspopup": "dialog", "aria-busy": busy ? "true" : null,
       onclick: () => { state.modelFor = s.id; render(); } },
-    state.busy.has(`model:${s.id}`) ? spinner() : h("span", { class: "mdot", "aria-hidden": "true" }), name);
+    h("span", { class: "mdot", "aria-hidden": "true" }), h("span", { class: "mlabel" }, name));
   }
 
   // Every model a worker can run, as the sheet offers them: Claude Code's
@@ -2097,8 +2094,8 @@ async function start(cfg) {
     const stopped = s.aoe_status === "stopped";
     const pending = WORKER_COMMANDS.some((c) => state.busy.has(`${c}:${s.id}`));
     return h("div", { class: "wmenu" },
-      h("button", { type: "button", class: "icon tool", "aria-label": "Worker actions", "aria-haspopup": "menu", "aria-expanded": String(open),
-        onclick: () => { state.menu = open ? null : key; render(); } }, pending ? spinner() : icon("more")),
+      h("button", { type: "button", class: pending ? "icon tool busy" : "icon tool", "aria-label": "Worker actions", "aria-haspopup": "menu", "aria-expanded": String(open), "aria-busy": pending ? "true" : null,
+        onclick: () => { state.menu = open ? null : key; render(); } }, icon("more")),
       open ? h("div", { class: "pop", role: "menu", onkeydown: (e) => { if (e.key === "Escape") { state.menu = null; render(); } } },
         s.cleared || busy ? null : item("clear", "broom", "Clear conversation"),
         stopped ? item("start", "play", "Start worker") : item("restart", "restart", "Restart worker"),
@@ -2638,7 +2635,7 @@ function prototypes(list, now) {
 }
 
 function loading(text) {
-  return h("p", { class: "notice loading", role: "status" }, spinner(), text);
+  return h("p", { class: "notice loading", role: "status" }, text);
 }
 
 // A worker's tags, the same on its card and its page. On the card the whole
@@ -2646,7 +2643,7 @@ function loading(text) {
 function tagList(s, linked) {
   return tags(s).map((t) => {
     const attrs = { class: `tag ${t.kind} ${t.tone}`.trim(), "aria-label": t.label, title: t.label };
-    const body = [icon(t.kind), t.text || null];
+    const body = [t.tone === "run" ? null : icon(t.kind), t.text || null];
     return linked && t.url
       ? h("a", { ...attrs, class: `${attrs.class} link`, href: t.url, target: "_blank", rel: "noopener noreferrer" }, body)
       : h("span", attrs, body);
@@ -2691,8 +2688,6 @@ const ICONS = {
   push: '<path d="M12 20V8"/><path d="M6.5 13.5 12 8l5.5 5.5"/><path d="M5 4h14"/>',
   noremote: '<path d="M7 18h10a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 9 4.5 4.5 0 0 0 7 18z"/><path d="M4 4l16 16"/>',
   branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9c0 5-12 3-12 8"/>',
-  "ci-queued": '<circle cx="12" cy="12" r="8.5" stroke-dasharray="2.5 3.2"/>',
-  "ci-running": '<circle cx="12" cy="12" r="8.5" opacity="0.3"/><path class="arc" d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/>',
   "ci-success": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>',
   "ci-failure": '<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
   "ci-cancelled": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>',

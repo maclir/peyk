@@ -282,6 +282,12 @@ func TestAnAntigravitySessionStatusIsDerivedFromItsTranscriptAndPaneThoughAoeSay
 			t.Errorf("%s: state = %v, want %v", tt.name, s.State, tt.want)
 		}
 	}
+	// A finished reply is idle even while aoe's tmux output window still reports running.
+	writeConversation(t, app, "/c/knip", "conv-1", []string{agyPrompt, agyTool, agyResult, agyReply}, []string{agyFull})
+	stillRunning := AoeSession{ID: "12345678abcd", Path: "/c/knip", Tool: session.Antigravity, Status: "running"}
+	if s := c.Snapshot(context.Background(), stillRunning); s.State != session.Idle {
+		t.Errorf("finished reply while aoe reports running: state = %v, want %v", s.State, session.Idle)
+	}
 	// An empty conversation with no transcript yet is idle, not asking for input.
 	setLatest(t, app, "/c/empty", "conv-empty")
 	empty := AoeSession{ID: "12345678abcd", Path: "/c/empty", Tool: session.Antigravity, Status: "waiting"}

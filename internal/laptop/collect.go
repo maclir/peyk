@@ -75,12 +75,13 @@ func (c Collector) Snapshot(ctx context.Context, s AoeSession) session.Snapshot 
 	return snap
 }
 
-// activity is aoe's status, corrected where aoe misreads the pane. aoe
-// reports an Antigravity session in auto mode as waiting both while parked
-// at its prompt and while working; its transcript and, during a tool call,
-// its tmux pane distinguish idle, running, and an approval prompt.
+// activity is aoe's status, corrected where aoe misreads the pane or lags
+// behind the transcript. aoe reports an Antigravity session in auto mode as
+// waiting both while parked at its prompt and while working, and briefly keeps
+// reporting running after the final reply lands; its transcript and, during a
+// tool call, its tmux pane distinguish idle, running, and an approval prompt.
 func (c Collector) activity(ctx context.Context, s AoeSession, t session.Transcript) string {
-	if s.Status != "waiting" || t.Tool != session.Antigravity {
+	if t.Tool != session.Antigravity || (s.Status != "waiting" && s.Status != "running") {
 		return s.Status
 	}
 	status, toolCall := antigravityStepStatus(t)

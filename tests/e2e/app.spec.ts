@@ -279,13 +279,16 @@ test.describe('signed in', () => {
     await expect(side.locator(':scope > :last-child')).toHaveClass(/facts/);
     await expect(page.locator('#laptop + #rev')).toBeVisible();
     const revBox = await page.locator('#rev').evaluate((rev) => {
-      const spin = rev.appendChild(Object.assign(document.createElement('span'), { className: 'spin' }));
-      const [r, s] = [rev.getBoundingClientRect(), spin.getBoundingClientRect()];
-      spin.remove();
-      return { revRight: r.right, revMid: r.top + r.height / 2, spinLeft: s.left, spinMid: s.top + s.height / 2 };
+      const before = rev.getBoundingClientRect();
+      rev.classList.add('busy');
+      const after = rev.getBoundingClientRect();
+      const line = getComputedStyle(rev, '::after').animationName;
+      rev.classList.remove('busy');
+      return { dx: Math.abs(after.left - before.left), dw: Math.abs(after.width - before.width), line };
     });
-    expect(revBox.spinLeft).toBeGreaterThanOrEqual(revBox.revRight);
-    expect(Math.abs(revBox.spinMid - revBox.revMid)).toBeLessThan(1);
+    expect(revBox.dx).toBe(0);
+    expect(revBox.dw).toBe(0);
+    expect(revBox.line).toBe('hairline');
     await expect(page.locator('footer.foot')).toBeHidden();
     await expect(page.locator('#app .facts, #app .pushcard')).toHaveCount(0);
     await expect(side.locator('.task:not(.idea) .ttext')).toHaveText(['Wide queued']);
@@ -972,9 +975,10 @@ test.describe('signed in', () => {
     await expect(page.getByRole('heading', { name: 'Sent 3' })).toBeVisible();
     const starting = page.locator('.task.sent', { hasText: 'Set up the repo' });
     await expect(starting.locator('.rstat')).toHaveText('starting · 1m');
+    await expect(starting.locator('.rstat.busy')).toHaveCount(1);
     const gone = page.locator('.task.sent', { hasText: 'Run the old check' });
     await expect(gone.locator('.rstat')).toHaveText('worker gone · 30m');
-    await expect(gone.locator('.spin')).toHaveCount(0);
+    await expect(gone.locator('.rstat.busy')).toHaveCount(0);
     await gone.getByRole('button', { name: /^knip Run the old check/ }).click();
     await expect(gone.getByText('Its worker is gone.')).toBeVisible();
     const csv = page.locator('.task.sent', { hasText: 'Add CSV export' });
@@ -1297,7 +1301,7 @@ test.describe('signed in', () => {
     await page.request.delete(`${FIRESTORE}/${cmd.name.split('/documents/')[1]}`, { headers: admin });
   });
 
-  test('Show more turns into a spinner until the next page of done tasks arrives', async () => {
+  test('Show more shows a loading status until the next page of done tasks arrives', async () => {
     const ids = Array.from({ length: 10 }, (_, i) => `more${i}`);
     for (const [i, id] of ids.entries()) {
       await put(page, `tasks/${id}`, { project: 'knip', text: `Older task ${i}`, status: 'done', created_at: new Date(Date.now() - 3600_000), done_at: new Date(Date.now() - 60_000 * (i + 1)) });
@@ -1308,7 +1312,7 @@ test.describe('signed in', () => {
     await page.evaluate(() => {
       const w = window as any;
       w.sawPending = false;
-      new MutationObserver(() => { w.sawPending ||= Boolean(document.querySelector('[aria-label="Loading more done tasks"] .spin')); })
+      new MutationObserver(() => { w.sawPending ||= Boolean(document.querySelector('[aria-label="Loading more done tasks"].more.pending')); })
         .observe(document.body, { childList: true, subtree: true });
     });
     await page.getByRole('button', { name: 'Show more' }).click();
