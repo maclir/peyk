@@ -48,7 +48,8 @@ const (
 const MaxPrototypeBytes = 900_000
 
 // Prototype is a self-contained HTML page a worker published with `peyk publish`.
-// Its id is the lowercase hex SHA-256 of HTML.
+// Its id is a 64-character lowercase hex identifier that stays stable across
+// updates to the same prototype.
 type Prototype struct {
 	HTML      string    `firestore:"html"`
 	Title     string    `firestore:"title"`

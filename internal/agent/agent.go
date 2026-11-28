@@ -152,9 +152,11 @@ type Agent struct {
 	HistoryRequests <-chan store.HistoryRequest
 
 	// PublishRequests receives self-hosted HTML prototypes from `peyk publish`
-	// over the local socket, and RecordPrototype persists each under its
-	// conversation id so refreshes keep it on the worker.
+	// over the local socket. LatestPrototype finds the conversation's current
+	// prototype id to update in place, and RecordPrototype persists each under
+	// its conversation id so refreshes keep it on the worker.
 	PublishRequests <-chan PublishCall
+	LatestPrototype func(conversationID string) string
 	RecordPrototype func(conversationID string, p session.Prototype) error
 
 	// Usage, when set, reads the subscription's rate limits as Claude Code's

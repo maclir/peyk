@@ -28,7 +28,7 @@ func prototypeText(text, kind, tool, peykBin string) (string, error) {
 		if peykBin == "" {
 			peykBin = "peyk"
 		}
-		return fmt.Sprintf("%s\n\nDeliver this as a prototype, not a code change: build it as a self-contained HTML page with inline CSS and JS (no external network requests), write it outside the repository (for example in /tmp), and publish it by running %s publish <path>. Read the repository as needed, but do not edit, test or commit it.", text, peykBin), nil
+		return fmt.Sprintf("%s\n\nDeliver this as a prototype, not a code change: build it as a self-contained HTML page with inline CSS and JS (no external network requests), write it outside the repository (for example in /tmp), and publish it by running %s publish <path> (re-running updates the same prototype; pass --new only if asked for a separate one). Read the repository as needed, but do not edit, test or commit it.", text, peykBin), nil
 	}
 	return fmt.Sprintf("%s\n\nDeliver this as a prototype, not a code change: %s and publish it with the Artifact tool. Read the repository as needed, but do not edit, test or commit it.", text, ask), nil
 }

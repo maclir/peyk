@@ -40,6 +40,7 @@ func TestPublishStoresHTMLAndAttachesItToTheMatchingWorker(t *testing.T) {
 	a.Commands = &Commands{Origin: testOrigin}
 	pubReqs := make(chan PublishCall, 2)
 	a.PublishRequests = pubReqs
+	a.LatestPrototype = protos.LatestHostedID
 	a.RecordPrototype = func(conv string, p session.Prototype) error {
 		if err := protos.Record(conv, p); err != nil {
 			return err
@@ -67,11 +68,10 @@ func TestPublishStoresHTMLAndAttachesItToTheMatchingWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	wantID := PrototypeID(html)
-	if resp.ID != wantID || resp.URL != testOrigin+"/p/"+wantID {
-		t.Fatalf("resp = %+v, want id %s", resp, wantID)
+	if len(resp.ID) != 64 || resp.URL != testOrigin+"/p/"+resp.ID {
+		t.Fatalf("resp = %+v", resp)
 	}
-	stored, ok := mem.Get(store.Prototypes, wantID)
+	stored, ok := mem.Get(store.Prototypes, resp.ID)
 	if !ok {
 		t.Fatal("prototype document was not stored")
 	}
@@ -81,8 +81,47 @@ func TestPublishStoresHTMLAndAttachesItToTheMatchingWorker(t *testing.T) {
 	}
 	snapVal, _ := mem.Get(store.Sessions, "g")
 	snap := snapVal.(session.Snapshot)
-	if len(snap.Prototypes) != 1 || snap.Prototypes[0].URL != "/p/"+wantID || snap.Prototypes[0].Title != "Working tag" {
+	if len(snap.Prototypes) != 1 || snap.Prototypes[0].URL != "/p/"+resp.ID || snap.Prototypes[0].Title != "Working tag" {
 		t.Fatalf("session prototypes = %+v", snap.Prototypes)
+	}
+
+	// Re-publishing in the same conversation updates the same prototype id in place.
+	updatedHTML := "<!doctype html><html><head><title>Working tag v2</title></head><body>Updated</body></html>"
+	updatedResp, err := Publish(ctx, sock, PublishRequest{
+		Dir:  filepath.Join(dir, "gemi"),
+		HTML: updatedHTML,
+	})
+	if err != nil {
+		t.Fatalf("re-Publish: %v", err)
+	}
+	if updatedResp.ID != resp.ID || updatedResp.URL != resp.URL {
+		t.Fatalf("re-publish created a new id %q, want %q", updatedResp.ID, resp.ID)
+	}
+	stored, _ = mem.Get(store.Prototypes, resp.ID)
+	if doc := stored.(store.Prototype); doc.HTML != updatedHTML || doc.Title != "Working tag v2" {
+		t.Fatalf("updated stored = %+v", doc)
+	}
+	snapVal, _ = mem.Get(store.Sessions, "g")
+	if snap := snapVal.(session.Snapshot); len(snap.Prototypes) != 1 || snap.Prototypes[0].Title != "Working tag v2" {
+		t.Fatalf("after update session prototypes = %+v", snap.Prototypes)
+	}
+
+	// Passing New creates a separate prototype id alongside the first.
+	secondResp, err := Publish(ctx, sock, PublishRequest{
+		Dir:   filepath.Join(dir, "gemi"),
+		Title: "Second prototype",
+		HTML:  "<p>Another</p>",
+		New:   true,
+	})
+	if err != nil {
+		t.Fatalf("Publish --new: %v", err)
+	}
+	if secondResp.ID == resp.ID || len(secondResp.ID) != 64 {
+		t.Fatalf("secondResp = %+v, want distinct 64-hex id", secondResp)
+	}
+	snapVal, _ = mem.Get(store.Sessions, "g")
+	if snap := snapVal.(session.Snapshot); len(snap.Prototypes) != 2 {
+		t.Fatalf("after --new session prototypes = %+v", snap.Prototypes)
 	}
 
 	// Publishing from an unrelated directory still uploads and returns the URL.

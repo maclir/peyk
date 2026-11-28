@@ -130,4 +130,15 @@ func TestPrototypesRecordsAndFindsSelfHostedPagesByConversation(t *testing.T) {
 	if empty := reloaded.Find(session.Transcript{Tool: session.Antigravity, ID: "conv-none"}); empty != nil {
 		t.Fatalf("unrecorded conversation prototypes = %+v", empty)
 	}
+
+	hexID := "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+	if err := reloaded.Record("conv-a", session.Prototype{URL: "/p/" + hexID, Title: "Hosted", Kind: session.PrototypeHTML, At: t2.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.LatestHostedID("conv-a"); got != hexID {
+		t.Fatalf("LatestHostedID = %q, want %q", got, hexID)
+	}
+	if got := reloaded.LatestHostedID("conv-none"); got != "" {
+		t.Fatalf("LatestHostedID(missing) = %q", got)
+	}
 }

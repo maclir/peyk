@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +25,7 @@ type PublishRequest struct {
 	Dir   string `json:"dir"`
 	Title string `json:"title"`
 	HTML  string `json:"html"`
+	New   bool   `json:"new,omitempty"`
 }
 
 // PublishResponse is what the agent answers `peyk publish` with.
@@ -124,10 +125,12 @@ func ValidatePrototypeHTML(body string) error {
 	return nil
 }
 
-// PrototypeID is the content hash under which a prototype is stored.
-func PrototypeID(body string) string {
-	sum := sha256.Sum256([]byte(body))
-	return hex.EncodeToString(sum[:])
+func newPrototypeID() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 var htmlTitleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
@@ -149,7 +152,25 @@ func (a *Agent) handlePublish(ctx context.Context, req PublishRequest) PublishRe
 	if err := ValidatePrototypeHTML(req.HTML); err != nil {
 		return PublishResponse{Error: err.Error()}
 	}
-	id := PrototypeID(req.HTML)
+	// Refresh before matching so a newly started or cleared conversation has
+	// its transcript id before we look up or record its prototype.
+	if a.Collect != nil {
+		if err := a.Refresh(ctx); err != nil {
+			a.Log.Printf("publish refresh: %v", err)
+		}
+	}
+	s, matched := matchSessionDir(a.sessions, req.Dir)
+	var id string
+	if !req.New && matched && s.Transcript.ID != "" && a.LatestPrototype != nil {
+		id = a.LatestPrototype(s.Transcript.ID)
+	}
+	if id == "" {
+		var err error
+		id, err = newPrototypeID()
+		if err != nil {
+			return PublishResponse{Error: fmt.Sprintf("generate prototype id: %v", err)}
+		}
+	}
 	pathURL := "/p/" + id
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
@@ -165,14 +186,7 @@ func (a *Agent) handlePublish(ctx context.Context, req PublishRequest) PublishRe
 	if err := a.Store.Put(ctx, store.Prototypes, id, doc); err != nil {
 		return PublishResponse{Error: err.Error()}
 	}
-	// Refresh before matching so a newly started or cleared conversation has
-	// its transcript id before we record the prototype under it.
-	if a.Collect != nil {
-		if err := a.Refresh(ctx); err != nil {
-			a.Log.Printf("publish refresh: %v", err)
-		}
-	}
-	if s, ok := matchSessionDir(a.sessions, req.Dir); ok && s.Transcript.ID != "" && a.RecordPrototype != nil {
+	if matched && s.Transcript.ID != "" && a.RecordPrototype != nil {
 		proto := session.Prototype{URL: pathURL, Title: title, Kind: session.PrototypeHTML, At: now}
 		if err := a.RecordPrototype(s.Transcript.ID, proto); err != nil {
 			return PublishResponse{Error: fmt.Sprintf("record prototype: %v", err)}

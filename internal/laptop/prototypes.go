@@ -102,6 +102,39 @@ func (p *Prototypes) Record(conversationID string, proto session.Prototype) erro
 	return os.Rename(tmp, p.Path)
 }
 
+// LatestHostedID returns the 64-hex id of the newest self-hosted `/p/<id>`
+// prototype recorded for conversationID, or "" when none exists.
+func (p *Prototypes) LatestHostedID(conversationID string) string {
+	if p.Path == "" || conversationID == "" {
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	saved, err := loadPublishedPrototypes(p.Path)
+	if err != nil {
+		return ""
+	}
+	for _, proto := range saved[conversationID] {
+		if id, ok := strings.CutPrefix(proto.URL, "/p/"); ok && isHexID(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+func isHexID(id string) bool {
+	if len(id) != 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 func loadPublishedPrototypes(path string) (map[string][]session.Prototype, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

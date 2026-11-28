@@ -277,7 +277,7 @@ func runAgent(ctx context.Context) error {
 			return laptop.AntigravityModels(ctx, laptop.Exec, agyPath())
 		},
 		History: laptop.History, HistoryRequests: history,
-		PublishRequests: pubReqs, RecordPrototype: c.Prototypes.Record,
+		PublishRequests: pubReqs, LatestPrototype: c.Prototypes.LatestHostedID, RecordPrototype: c.Prototypes.Record,
 		Seen: seen,
 		Commands: &agent.Commands{
 			Act: actions{aoe: c.Aoe, group: env("PEYK_AOE_GROUP", "personal"), claudeConfig: claudeConfig(),

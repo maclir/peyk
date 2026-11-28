@@ -12,7 +12,7 @@ import (
 )
 
 func publishPrototype(ctx context.Context, args []string, sockPath, cwd string, out io.Writer) error {
-	path, title, err := parsePublishArgs(args)
+	path, title, isNew, err := parsePublishArgs(args)
 	if err != nil {
 		return err
 	}
@@ -33,6 +33,7 @@ func publishPrototype(ctx context.Context, args []string, sockPath, cwd string, 
 		Dir:   cwd,
 		Title: title,
 		HTML:  body,
+		New:   isNew,
 	})
 	if err != nil {
 		return err
@@ -41,14 +42,16 @@ func publishPrototype(ctx context.Context, args []string, sockPath, cwd string, 
 	return nil
 }
 
-func parsePublishArgs(args []string) (path, title string, err error) {
-	const msg = "usage: peyk publish [--title <title>] <file>"
+func parsePublishArgs(args []string) (path, title string, isNew bool, err error) {
+	const msg = "usage: peyk publish [--new] [--title <title>] <file>"
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--new" || a == "-new":
+			isNew = true
 		case a == "--title" || a == "-title" || a == "-t":
 			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("%s", msg)
+				return "", "", false, fmt.Errorf("%s", msg)
 			}
 			i++
 			title = args[i]
@@ -59,16 +62,16 @@ func parsePublishArgs(args []string) (path, title string, err error) {
 		case strings.HasPrefix(a, "-t="):
 			title = strings.TrimPrefix(a, "-t=")
 		case strings.HasPrefix(a, "-"):
-			return "", "", fmt.Errorf("unknown flag %q\n%s", a, msg)
+			return "", "", false, fmt.Errorf("unknown flag %q\n%s", a, msg)
 		default:
 			if path != "" {
-				return "", "", fmt.Errorf("%s", msg)
+				return "", "", false, fmt.Errorf("%s", msg)
 			}
 			path = a
 		}
 	}
 	if path == "" {
-		return "", "", fmt.Errorf("%s", msg)
+		return "", "", false, fmt.Errorf("%s", msg)
 	}
-	return path, strings.TrimSpace(title), nil
+	return path, strings.TrimSpace(title), isNew, nil
 }

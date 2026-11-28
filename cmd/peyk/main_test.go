@@ -102,20 +102,20 @@ func TestJobsRunTheAgentThroughMakeAndGiveTheMenuTheOrigin(t *testing.T) {
 }
 
 func TestParsePublishArgs(t *testing.T) {
-	p, title, err := parsePublishArgs([]string{"/tmp/demo.html"})
-	if err != nil || p != "/tmp/demo.html" || title != "" {
-		t.Fatalf("got %q %q %v", p, title, err)
+	p, title, isNew, err := parsePublishArgs([]string{"/tmp/demo.html"})
+	if err != nil || p != "/tmp/demo.html" || title != "" || isNew {
+		t.Fatalf("got %q %q %v %v", p, title, isNew, err)
 	}
-	p, title, err = parsePublishArgs([]string{"/tmp/demo.html", "--title", "Working tag"})
-	if err != nil || p != "/tmp/demo.html" || title != "Working tag" {
-		t.Fatalf("got %q %q %v", p, title, err)
+	p, title, isNew, err = parsePublishArgs([]string{"/tmp/demo.html", "--title", "Working tag", "--new"})
+	if err != nil || p != "/tmp/demo.html" || title != "Working tag" || !isNew {
+		t.Fatalf("got %q %q %v %v", p, title, isNew, err)
 	}
-	p, title, err = parsePublishArgs([]string{"--title=Demo", "/tmp/demo.html"})
-	if err != nil || p != "/tmp/demo.html" || title != "Demo" {
-		t.Fatalf("got %q %q %v", p, title, err)
+	p, title, isNew, err = parsePublishArgs([]string{"--title=Demo", "/tmp/demo.html"})
+	if err != nil || p != "/tmp/demo.html" || title != "Demo" || isNew {
+		t.Fatalf("got %q %q %v %v", p, title, isNew, err)
 	}
-	for _, bad := range [][]string{nil, {"--title"}, {"--nope", "a.html"}, {"a.html", "b.html"}} {
-		if _, _, err := parsePublishArgs(bad); err == nil {
+	for _, bad := range [][]string{nil, {"--title"}, {"--new"}, {"--nope", "a.html"}, {"a.html", "b.html"}} {
+		if _, _, _, err := parsePublishArgs(bad); err == nil {
 			t.Errorf("parsePublishArgs(%v) succeeded, want error", bad)
 		}
 	}
