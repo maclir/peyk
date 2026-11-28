@@ -1267,13 +1267,15 @@ test.describe('signed in', () => {
     await expect(compose.locator('form.add .thumb img')).toHaveCount(1);
     await expect(compose.getByLabel('Task description')).toHaveValue('Shared from Photos');
 
-    // The share is used once; a reload starts empty.
+    // The share is used once; a reload does not reopen it or re-attach the
+    // image, and keeps the shared text once as a draft.
     await page.reload();
     await expect(share).toBeHidden();
     await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
     await expect(compose).toBeVisible();
     await expect(compose.locator('form.add .thumb')).toHaveCount(0);
-    await expect(page.locator('#task-text')).toHaveValue('');
+    await expect(page.locator('#task-text')).toHaveValue('Shared from Photos');
+    await page.locator('#task-text').fill('');
   });
 
   test("Android's share sheet attaches a screenshot to an ongoing session", async () => {
@@ -1299,10 +1301,14 @@ test.describe('signed in', () => {
     await expect(reply.locator('.thumb img')).toHaveCount(1);
     await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout');
 
-    // Back returns directly to the board without reopening the share sheet.
+    // Back returns directly to the board without reopening the share sheet,
+    // and returning keeps the shared text drafted until cleared.
     await page.goBack();
     await expect(page).toHaveURL(/\/app\/$/);
     await expect(share).toBeHidden();
+    await page.locator('.card', { hasText: 'hamta' }).click();
+    await expect(reply.getByRole('textbox', { name: 'Reply' })).toHaveValue('Check this layout');
+    await reply.getByRole('textbox', { name: 'Reply' }).fill('');
   });
 
   test('a reply carries a screenshot to its worker', async () => {
@@ -2163,6 +2169,100 @@ test.describe('signed in', () => {
     await expect(page.locator('.card', { hasText: 'gemi' }).locator('.msg')).toHaveText('Done and verified.');
 
     await page.request.delete(`${FIRESTORE}/sessions/g`, { headers: admin });
+  });
+
+  test('unsent text in tasks, replies, edits, dismissals, and questions survives leaving and reload', async () => {
+    await put(page, 'tasks/draft-edit', { project: 'knip', text: 'Original task', status: 'queued', created_at: new Date() });
+    await put(page, 'ideas/draft-idea', {
+      project: 'knip', task: 'run', lens: 'reuse', title: 'Merge helpers', why: 'Duplicate logic',
+      refs: ['app.js:1'], prompt: 'Merge them', status: 'open', created_at: new Date(),
+    });
+    await put(page, 'sessions/dq', {
+      id: 'dq', title: 'dquiz', path: '/c/dquiz', aoe_status: 'waiting', state: 'needs_input', updated_at: new Date(),
+      question: { id: 'toolu_draft', at: new Date(), items: [
+        { question: 'Which format?', header: 'Format', multi_select: false, options: [{ label: 'JSON', description: '' }, { label: 'YAML', description: '' }] },
+      ] },
+    });
+
+    // Type a reply on hamta, leave for knip (cleared task box), and type there too.
+    await setCleared(page, true);
+    await page.goto('/app/#s-h');
+    await page.locator('#reply-h').fill('Include archived rows too');
+    await page.goto('/app/#s-k');
+    await page.locator('#reply-k').fill('Add draft support');
+
+    // Type a new task and close the sheet without adding it.
+    await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
+    const compose = page.getByRole('dialog', { name: 'New task' });
+    await page.locator('#task-text').fill('Ship draft persistence');
+    await compose.getByRole('button', { name: 'Close' }).click();
+    await expect(compose).toBeHidden();
+
+    // Start editing a task and writing an idea dismissal note, then close the inbox.
+    await page.goto('/app/#inbox');
+    const inbox = page.getByRole('dialog', { name: 'Inbox' });
+    const card = inbox.locator('.task:not(.idea)', { hasText: 'Original task' });
+    await card.getByRole('button', { name: /More actions/ }).click();
+    await card.getByRole('menuitem', { name: /Edit task/ }).click();
+    await inbox.locator('#edit-draft-edit').fill('Original task with details');
+    const idea = inbox.locator('.task.idea', { hasText: 'Merge helpers' });
+    await idea.getByRole('button', { name: /More actions/ }).click();
+    await idea.getByRole('menuitem', { name: 'Dismiss' }).click();
+    await inbox.locator('#dismiss-draft-idea').fill('Already merged');
+    await inbox.getByRole('button', { name: 'Close' }).click();
+
+    // Type an own answer on a worker question.
+    await page.goto('/app/#s-dq');
+    await page.getByLabel('Own answer: Which format?').fill('TOML');
+
+    // Reload the app and verify every draft is restored on its screen.
+    await page.reload();
+    await expect(page.getByLabel('Own answer: Which format?')).toHaveValue('TOML');
+    await page.getByLabel('JSON').check();
+    await expect(page.getByLabel('Own answer: Which format?')).toHaveValue('');
+
+    await page.goto('/app/#s-h');
+    await expect(page.locator('#reply-h')).toHaveValue('Include archived rows too');
+    await page.locator('#reply-h').fill('');
+
+    await page.goto('/app/#s-k');
+    await expect(page.locator('#reply-k')).toHaveValue('Add draft support');
+    await page.locator('#reply-k').fill('');
+
+    await page.locator('.hpage').getByRole('button', { name: 'New task' }).click();
+    await expect(page.locator('#task-text')).toHaveValue('Ship draft persistence');
+    await page.locator('#task-text').fill('');
+    await compose.getByRole('button', { name: 'Close' }).click();
+
+    await page.goto('/app/#inbox');
+    await card.getByRole('button', { name: /More actions/ }).click();
+    await card.getByRole('menuitem', { name: /Edit task/ }).click();
+    await expect(inbox.locator('#edit-draft-edit')).toHaveValue('Original task with details');
+    await inbox.locator('form.composer.edit').getByRole('button', { name: 'Cancel' }).click();
+    await card.getByRole('button', { name: /More actions/ }).click();
+    await card.getByRole('menuitem', { name: /Edit task/ }).click();
+    await expect(inbox.locator('#edit-draft-edit')).toHaveValue('Original task');
+    await inbox.locator('form.composer.edit').getByRole('button', { name: 'Cancel' }).click();
+
+    await idea.getByRole('button', { name: /More actions/ }).click();
+    await idea.getByRole('menuitem', { name: 'Dismiss' }).click();
+    await expect(inbox.locator('#dismiss-draft-idea')).toHaveValue('Already merged');
+    await idea.locator('form.dismiss').getByRole('button', { name: 'Cancel' }).click();
+    await idea.getByRole('button', { name: /More actions/ }).click();
+    await idea.getByRole('menuitem', { name: 'Dismiss' }).click();
+    await expect(inbox.locator('#dismiss-draft-idea')).toHaveValue('');
+    await idea.locator('form.dismiss').getByRole('button', { name: 'Cancel' }).click();
+
+    // Reloading after clearing/cancelling leaves every input empty.
+    await page.reload();
+    await page.goto('/app/#s-h');
+    await expect(page.locator('#reply-h')).toHaveValue('');
+    await page.goto('/app/#s-dq');
+    await expect(page.getByLabel('Own answer: Which format?')).toHaveValue('');
+
+    await page.request.delete(`${FIRESTORE}/tasks/draft-edit`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/ideas/draft-idea`, { headers: admin });
+    await page.request.delete(`${FIRESTORE}/sessions/dq`, { headers: admin });
   });
 });
 

@@ -1,5 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
 import { STATES, actionsLeft, activity, ago, usageLeft, antigravityLeft, tightest, quotaState, MODEL_POOLS, antigravityPools, modelVersions, sessionModel, modelSwitchState, answerText, awaitingReply, cardProgress, currentTask, filterQueue, hasProgress, laptopOnline, mergeReply, monogram, pendingLabel, pushLabel, queue, queueCounts, quickAction, rankAt, topRank, replyFields, resumeAction, doneError, searchProjects, sentState, sentTasks, shareSessions, sortProjects, sortSessions, tags, toolAction, waitingReplies, withDelivered, PROTOTYPE_KINDS, prototypeKind, nextPrototype, LENSES, IDEA_LIMITS, DEFAULT_IDEATE, isProjectLens, lensName, ideateText, toggleLens, pruneProjectLenses, openIdeas, ideaCount } from "./board.js";
+import { createDraftStore } from "./drafts.js";
 import { MAX_IMAGES, imageID, orphanedImages, prepareImage } from "./images.js";
 import * as passkey from "./passkey.js";
 import { sharedText, takeShare } from "./share.js";
@@ -226,7 +227,7 @@ async function start(cfg) {
     // The idea whose dismissal note is being written.
     dismissing: null, modelFor: null, modelFresh: null, modelAsked: new Map(), modelMore: new Set(), moving: new Map(), models: null, laptop: null, usage: null, actions: null, version: null, user: null, picked: null, busy: new Set(), share: null,
     // The last word on a command, by its busy key, shown beside the control that sent it: { text, busy, tone }.
-    outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), restoredText: new Map(), protos: new Map(), images: new Map(),
+    outcomes: new Map(), added: null, settledIdeas: new Map(), loaded: new Set(), push: "unknown", editing: null, sends: new Map(), drafts: new Map(), protos: new Map(), images: new Map(),
     filter: "ready", only: null, lastPicked: null, showDone: false, sideDone: false, factsOpen: false, menu: null, picking: false, pickFor: null, pickQuery: "",
     // The picker's edit mode, what it has ticked, and the last hide it can undo.
     hiding: false, hideSel: new Set(), showHidden: false, pickStatus: "", pickTone: "", undoHide: null,
@@ -243,6 +244,7 @@ async function start(cfg) {
     // Replies the laptop has typed into a session whose prompt it has not
     // published yet, by session id: { text, images, at, after }.
     delivered: new Map() };
+  const textDrafts = createDraftStore();
   let unsubscribe = [];
 
   const signIn = () =>
@@ -524,12 +526,14 @@ async function start(cfg) {
     } else if (ROUTES.includes(location.hash)) return location.hash === "#inbox" ? openInbox(null) : openCompose(null, null);
     ensureSheets();
     renderLaptop();
-    // Snapshots re-render the whole view; keep what is being typed. The New
-    // task sheet is never redrawn, so it needs no keeping.
-    const typed = 'textarea, input[type="search"]';
+    // Snapshots re-render the whole view; keep what is being typed and where
+    // the caret sits. The New task sheet is never redrawn, so it needs no keeping.
+    const typed = 'textarea, input[type="text"], input[type="search"]';
     const fields = () => [app, railEl, sideEl, inboxSheet.body, pickerHost].flatMap((el) => [...el.querySelectorAll(typed)]);
-    const drafts = new Map(fields().map((t) => [t.id, t.value]));
-    const focused = document.activeElement && document.activeElement.matches(typed) ? document.activeElement.id : null;
+    const live = new Map(fields().filter((t) => t.id).map((t) => [t.id, t.value]));
+    const focusedEl = document.activeElement && document.activeElement.matches(typed) ? document.activeElement : null;
+    const focused = focusedEl?.id || null;
+    const selection = focused ? [focusedEl.selectionStart, focusedEl.selectionEnd, focusedEl.selectionDirection] : null;
 
     followMove(shownSession());
     const id = shownSession();
@@ -561,9 +565,17 @@ async function start(cfg) {
     const modelFor = state.modelFor && shownWorker(state.modelFor);
     if (state.modelFor && !modelFor) { state.modelFor = null; state.modelFresh = null; }
     pickerHost.replaceChildren(...(state.picking ? [picker(visibleProjects())] : state.share ? [shareSheet(state.share)] : modelFor ? [modelSheet(modelFor)] : []));
-    for (const t of fields()) if (drafts.has(t.id)) t.value = drafts.get(t.id);
+    for (const t of fields()) if (live.has(t.id)) t.value = live.get(t.id);
     document.documentElement.classList.toggle("locked", layers.length > 0 || state.picking || Boolean(state.share) || Boolean(modelFor));
-    if (focused) document.getElementById(focused)?.focus();
+    if (focused) {
+      const el = document.getElementById(focused);
+      if (el) {
+        el.focus();
+        if (selection && selection[0] != null) {
+          try { el.setSelectionRange(selection[0], selection[1], selection[2]); } catch {}
+        }
+      }
+    }
     keepHistoryAnchor();
     if (s && !document.hidden) dismissNotes(s.id);
   }
@@ -628,6 +640,11 @@ async function start(cfg) {
     if (asked) {
       state.modelAsked.delete(id);
       state.modelAsked.set(next.id, asked);
+    }
+    const replyDraft = textDrafts.get(`reply:${id}`);
+    if (replyDraft != null) {
+      textDrafts.delete(`reply:${id}`);
+      if (textDrafts.get(`reply:${next.id}`) == null) textDrafts.set(`reply:${next.id}`, replyDraft);
     }
     history.replaceState(history.state, "", `#s-${encodeURIComponent(next.id)}`);
   }
@@ -993,13 +1010,12 @@ async function start(cfg) {
   // busy state and its draft images.
   // hold, when given, answers a long press on the submit button while
   // hold.armed() is true; otherwise the press submits as a tap would.
-  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tools = null, tail = null }) {
+  function composerForm({ key, id, label, placeholder, rows = "2", cls, submitLabel, submitIcon, send, hold = null, lead = null, tools = null, tail = null, defaultValue = "" }) {
     const imgs = draft(key);
-    const text = h("textarea", { id, rows, placeholder, "aria-label": label, onpaste: (e) => pasteImages(key, e) });
-    if (state.restoredText.has(key)) {
-      text.value = state.restoredText.get(key);
-      state.restoredText.delete(key);
-    }
+    const text = h("textarea", { id, rows, placeholder, "aria-label": label,
+      oninput: () => textDrafts.set(key, text.value, defaultValue),
+      onpaste: (e) => pasteImages(key, e) });
+    text.value = textDrafts.get(key) ?? defaultValue;
     const files = h("input", { type: "file", accept: "image/*", multiple: "", hidden: "", "aria-label": "Attach images", onchange: (e) => { attachImages(key, [...e.target.files]); e.target.value = ""; } });
     return h("form", { class: `composer ${cls}`, onsubmit: (e) => { e.preventDefault(); send(text); } },
       imgs.length ? h("div", { class: "thumbs" }, imgs.map((img, i) => draftThumb(key, img, i))) : null,
@@ -1209,6 +1225,7 @@ async function start(cfg) {
       const attaching = draft(key);
       const kind = state.protos.get(key) ?? "";
       text.value = "";
+      textDrafts.delete(key);
       state.drafts.delete(key);
       state.protos.delete(key);
       repaint();
@@ -1222,7 +1239,10 @@ async function start(cfg) {
         if (andSend) send(t, hasConversation(t), { announce: !inboxSheet?.open });
       }, (err) => {
         const box = document.getElementById(id);
-        if (box && !box.value) box.value = value;
+        if (value && textDrafts.get(key) == null && (!box || !box.value)) {
+          textDrafts.set(key, value);
+          if (box) box.value = value;
+        }
         if (!draft(key).length) state.drafts.set(key, attaching);
         if (kind && !state.protos.has(key)) state.protos.set(key, kind);
         repaint();
@@ -1280,6 +1300,7 @@ async function start(cfg) {
   // so picking another project says where the task goes instead.
   function openCompose(project, from) {
     ensureSheets();
+    if (!compose.open) compose.text.value = textDrafts.get("add") ?? "";
     state.picked = project ?? state.lastPicked ?? state.picked;
     if (!state.ideates.has("add")) state.lastIdeate = { lenses: [], max: state.lastIdeate.max };
     compose.from = from;
@@ -1698,11 +1719,15 @@ async function start(cfg) {
     if (i !== -1) layers[i] = "compose";
     else openLayer("compose");
     state.picked = state.lastPicked ?? state.picked;
+    if (!compose.open) compose.text.value = textDrafts.get("add") ?? "";
     compose.from = null;
     compose.alert.textContent = "";
     compose.open = true;
     compose.scrim.hidden = false;
-    if (share.text) compose.text.value = compose.text.value ? `${compose.text.value}\n${share.text}` : share.text;
+    if (share.text) {
+      compose.text.value = compose.text.value ? `${compose.text.value}\n${share.text}` : share.text;
+      textDrafts.set("add", compose.text.value);
+    }
     appendPreparedImages("add", share.images);
     if (share.note && !compose.alert.textContent) composeAlert(share.note.text, share.note.tone);
     render();
@@ -1726,7 +1751,10 @@ async function start(cfg) {
     if (share.note && !state.outcomes.has(`attach:${key}`)) attachNote(key, share.note.text, share.note.tone);
     render();
     const box = document.getElementById(`reply-${s.id}`);
-    if (box && share.text) box.value = box.value ? `${box.value}\n${share.text}` : share.text;
+    if (box && share.text) {
+      box.value = box.value ? `${box.value}\n${share.text}` : share.text;
+      textDrafts.set(key, box.value);
+    }
     const sc = scrollHost();
     sc.to({ top: sc.el.scrollHeight, behavior: "instant" });
     box?.focus();
@@ -1860,6 +1888,7 @@ async function start(cfg) {
     const chosen = state.editProject ?? t.project;
     const close = () => {
       dropDraft(key);
+      textDrafts.delete(key);
       state.protos.delete(key);
       state.editing = null;
       state.editProject = undefined;
@@ -1886,8 +1915,7 @@ async function start(cfg) {
     };
     const form = composerForm({ key, id: `edit-${t.id}`, label: "Task text", placeholder: "Describe a task…", rows: "3", cls: "edit",
       submitLabel: "Save", submitIcon: "check", send: save, lead: movable ? projectPill(chosen, t) : null, tools: t.ideate ? null : prototypeToggle(key, null),
-      tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel") });
-    form.querySelector("textarea").value = t.text;
+      tail: h("button", { type: "button", class: "link", onclick: close }, "Cancel"), defaultValue: t.text });
     const o = outcomeLine(`task:${t.id}`);
     if (o) form.append(o);
     return form;
@@ -2491,7 +2519,10 @@ async function start(cfg) {
     }
     const open = state.menu === key;
     const dismissing = state.dismissing === i.id;
-    const note = dismissing ? h("input", { type: "text", class: "dnote", maxlength: "500", "aria-label": "Why dismiss it (optional)", placeholder: "Why, for later runs (optional)" }) : null;
+    const dismissKey = `dismiss:${i.id}`;
+    const note = dismissing ? h("input", { type: "text", id: `dismiss-${i.id}`, class: "dnote", maxlength: "500", "aria-label": "Why dismiss it (optional)", placeholder: "Why, for later runs (optional)",
+      oninput: (e) => textDrafts.set(dismissKey, e.target.value) }) : null;
+    if (note) note.value = textDrafts.get(dismissKey) ?? "";
     const hold = longPress(() => Boolean(projectNamed(i.project)?.free), () => addIdea(i, true));
     // The long press swallows the click that ends a hold; any other click adds.
     const onclick = (e) => { hold.onclick(e); if (!e.defaultPrevented) addIdea(i, false); };
@@ -2512,7 +2543,7 @@ async function start(cfg) {
       h("details", { class: "iprompt" }, h("summary", {}, "Task"), h("div", { class: "ttext" }, i.prompt)),
       dismissing ? h("form", { class: "dismiss", onsubmit: (e) => { e.preventDefault(); dismissIdea(i, note.value.trim()); } },
         note,
-        h("button", { type: "button", class: "link", onclick: () => { state.dismissing = null; render(); } }, "Cancel"),
+        h("button", { type: "button", class: "link", onclick: () => { textDrafts.delete(dismissKey); state.dismissing = null; render(); } }, "Cancel"),
         busyButton(`dismiss:${i.id}`, { type: "submit" }, "Dismiss")) : null,
       h("div", { class: "tfoot" },
         h("span", { class: "tstatus" }, !p ? "" : p.free ? (p.session_id ? "Free" : "Starts a new worker") : `Waiting · ${p.busy}`),
@@ -2549,6 +2580,7 @@ async function start(cfg) {
   async function dismissIdea(i, note) {
     try {
       await track(`dismiss:${i.id}`, () => fs.updateDoc(fs.doc(db, "ideas", i.id), note ? { status: "dismissed", note } : { status: "dismissed" }));
+      textDrafts.delete(`dismiss:${i.id}`);
       state.dismissing = null;
       render();
     } catch (err) {
@@ -2810,7 +2842,7 @@ async function start(cfg) {
   // terminal can still answer until then.
   function questionCard(s) {
     const q = s.question;
-    if (!state.answers.has(q.id)) state.answers.set(q.id, q.items.map(() => ({ chosen: [], other: "" })));
+    if (!state.answers.has(q.id)) state.answers.set(q.id, q.items.map((_, i) => ({ chosen: [], other: textDrafts.get(`q:${q.id}:${i}`) ?? "" })));
     const picks = state.answers.get(q.id);
     const key = `answer:${s.id}`;
     const send = busyButton(key, { type: "submit", class: "primary send" }, "Send answers");
@@ -2818,7 +2850,8 @@ async function start(cfg) {
     const items = q.items.map((item, i) => {
       const p = picks[i];
       const name = `q-${q.id}-${i}`;
-      const other = h("input", { type: "text", class: "qother", placeholder: "Or type your own answer…", "aria-label": `Own answer: ${item.question}` });
+      const draftKey = `q:${q.id}:${i}`;
+      const other = h("input", { type: "text", id: `qother-${q.id}-${i}`, class: "qother", placeholder: "Or type your own answer…", "aria-label": `Own answer: ${item.question}` });
       other.value = p.other;
       const choices = item.options.map((o) => {
         const input = h("input", { type: item.multi_select ? "checkbox" : "radio", name, value: o.label });
@@ -2830,6 +2863,7 @@ async function start(cfg) {
             // The terminal dialog takes one option or typed text, not both.
             p.chosen = [o.label];
             p.other = other.value = "";
+            textDrafts.delete(draftKey);
           }
           sync();
         });
@@ -2838,6 +2872,7 @@ async function start(cfg) {
       });
       other.addEventListener("input", () => {
         p.other = other.value;
+        textDrafts.set(draftKey, other.value);
         if (!item.multi_select && other.value.trim()) {
           p.chosen = [];
           for (const c of choices) c.querySelector("input").checked = false;
@@ -2855,6 +2890,7 @@ async function start(cfg) {
       const text = answerText(q, picks);
       if (text && (await sendCommand("answer", { session: s.id, question: q.id, text }, "Answer", key, undefined, null, { done: "Sent" }))) {
         state.answers.delete(q.id);
+        for (let i = 0; i < q.items.length; i++) textDrafts.delete(`q:${q.id}:${i}`);
       }
     };
     return h("form", { class: "qcard", onsubmit: submit },
@@ -2881,15 +2917,14 @@ async function start(cfg) {
   }
 
   // restoreReply puts a failed reply's text and local images back into its
-  // worker's composer, or remembers the text until that worker is opened again.
+  // worker's composer, or keeps the text drafted until that worker is opened again.
   function restoreReply(sessionID, text, images = []) {
     const key = `reply:${sessionID}`;
     if (text) {
       const box = document.getElementById(`reply-${sessionID}`);
-      if (box) {
-        if (!box.value) box.value = text;
-      } else if (!state.restoredText.has(key)) {
-        state.restoredText.set(key, text);
+      if (textDrafts.get(key) == null && (!box || !box.value)) {
+        textDrafts.set(key, text);
+        if (box) box.value = text;
       }
     }
     if (images.length) {
@@ -2934,7 +2969,7 @@ async function start(cfg) {
       const onFail = () => restoreReply(s.id, merged.text, attaching);
       if (await sendCommand("reply", replyFields(s, merged.text, merged.images), "Reply", key, undefined, onDone, { queue: true, cancel: queued?.id, done: null, onFail })) {
         // A redraw while sending replaces this textarea, so clear the one on screen.
-        state.restoredText.delete(key);
+        textDrafts.delete(key);
         const box = document.getElementById(`reply-${s.id}`);
         if (box) box.value = "";
         state.drafts.delete(key);

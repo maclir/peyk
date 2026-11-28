@@ -706,3 +706,100 @@ describe('working progress', () => {
       .toBe('Running · Run tests');
   });
 });
+
+describe('drafts', () => {
+  // @ts-expect-error plain browser module
+  const load = () => import('../../internal/web/static/drafts.js');
+
+  function fakeStorage(limit = Infinity) {
+    const map = new Map<string, string>();
+    return {
+      map,
+      get length() { return map.size; },
+      key: (i: number) => [...map.keys()][i] ?? null,
+      getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+      setItem: (k: string, v: string) => {
+        if (!map.has(k) && map.size >= limit) throw new DOMException('full', 'QuotaExceededError');
+        map.set(k, v);
+      },
+      removeItem: (k: string) => { map.delete(k); },
+    };
+  }
+
+  it('persists, updates, and clears drafts without touching unrelated keys', async () => {
+    const { createDraftStore, DRAFT_PREFIX } = await load();
+    const storage = fakeStorage();
+    storage.setItem('other', 'keep');
+    let now = 1_000;
+    const drafts = createDraftStore(storage, () => now);
+
+    drafts.set('reply:k', 'Hello \n');
+    expect(drafts.get('reply:k')).toBe('Hello \n');
+    expect(storage.map.has(`${DRAFT_PREFIX}reply:k`)).toBe(true);
+
+    // Clearing to whitespace or back to an edit's original text removes the draft.
+    drafts.set('reply:k', '   \n');
+    expect(drafts.get('reply:k')).toBeNull();
+    expect(storage.map.has(`${DRAFT_PREFIX}reply:k`)).toBe(false);
+
+    drafts.set('edit:t1', 'Original', 'Original');
+    expect(drafts.get('edit:t1')).toBeNull();
+    drafts.set('edit:t1', 'Changed', 'Original');
+    expect(drafts.get('edit:t1')).toBe('Changed');
+    drafts.set('edit:t1', 'Original', 'Original');
+    expect(drafts.get('edit:t1')).toBeNull();
+    expect(storage.getItem('other')).toBe('keep');
+  });
+
+  it('drops expired and corrupt entries and prunes oldest drafts past the limit', async () => {
+    const { createDraftStore, DRAFT_PREFIX, MAX_DRAFTS, MAX_DRAFT_AGE_MS } = await load();
+    const storage = fakeStorage();
+    let now = 10_000;
+    const drafts = createDraftStore(storage, () => now);
+
+    storage.setItem(`${DRAFT_PREFIX}corrupt`, '{not-json');
+    expect(drafts.get('corrupt')).toBeNull();
+    expect(storage.map.has(`${DRAFT_PREFIX}corrupt`)).toBe(false);
+
+    drafts.set('old', 'stale');
+    now += MAX_DRAFT_AGE_MS + 1;
+    expect(drafts.get('old')).toBeNull();
+    expect(storage.map.has(`${DRAFT_PREFIX}old`)).toBe(false);
+
+    for (let i = 0; i < MAX_DRAFTS + 3; i++) {
+      now += 10;
+      drafts.set(`k${i}`, `v${i}`);
+    }
+    expect(drafts.get('k0')).toBeNull();
+    expect(drafts.get('k2')).toBeNull();
+    expect(drafts.get('k3')).toBe('v3');
+    expect(drafts.get(`k${MAX_DRAFTS + 2}`)).toBe(`v${MAX_DRAFTS + 2}`);
+  });
+
+  it('evicts oldest drafts on quota error and falls back to memory when storage fails', async () => {
+    const { createDraftStore } = await load();
+    const tight = fakeStorage(2);
+    let now = 1_000;
+    const drafts = createDraftStore(tight, () => now);
+    drafts.set('a', 'first');
+    now += 10;
+    drafts.set('b', 'second');
+    now += 10;
+    drafts.set('c', 'third');
+    expect(drafts.get('a')).toBeNull();
+    expect(drafts.get('b')).toBe('second');
+    expect(drafts.get('c')).toBe('third');
+
+    const blocked = createDraftStore({
+      get length() { return 0; },
+      key: () => null,
+      getItem: () => { throw new Error('denied'); },
+      setItem: () => { throw new Error('denied'); },
+      removeItem: () => { throw new Error('denied'); },
+    }, () => now);
+    blocked.set('add', 'in memory');
+    expect(blocked.get('add')).toBe('in memory');
+    blocked.delete('add');
+    expect(blocked.get('add')).toBeNull();
+  });
+});

@@ -22,6 +22,7 @@ const ASSETS = [
   "/static/prototype.js",
   "/static/release.js",
   "/static/board.js",
+  "/static/drafts.js",
   "/static/markdown.js",
   "/static/images.js",
   "/static/passkey.js",
